@@ -46,6 +46,17 @@ func TestFinalSSEEventWithoutBlankLineIsObservedAtEOF(t *testing.T) {
 	}
 }
 
+func TestSSEUsageIsDetectedWhenUpstreamOmitsContentType(t *testing.T) {
+	observer := NewObserver("")
+	observer.Observe([]byte("event: response.completed\n"))
+	observer.Observe([]byte("data: {\"type\":\"response.completed\",\"response\":{\"usage\":{" +
+		"\"input_tokens\":4,\"output_tokens\":2,\"total_tokens\":6}}}\n\n"))
+	got := observer.Usage()
+	if got == nil || got.InputTokens != 4 || got.OutputTokens != 2 || got.TotalTokens != 6 {
+		t.Fatalf("usage = %#v", got)
+	}
+}
+
 func TestOversizedOrNegativeUsageIsIgnored(t *testing.T) {
 	observer := NewObserver("application/json")
 	observer.Observe(make([]byte, maxObservedEventBytes+1))

@@ -51,7 +51,6 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
                     });
                     AxumResponse::builder()
                         .status(StatusCode::OK)
-                        .header(http::header::CONTENT_TYPE, "text/event-stream")
                         .header(http::header::SET_COOKIE, "must-not-cross=1")
                         .header(CORE_TTFB_HEADER, "forged-upstream-value")
                         .header(http::header::CONNECTION, "x-hop-test")
@@ -70,6 +69,13 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
         .await
         .expect("core response");
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("text/event-stream")
+    );
     assert!(response.headers().contains_key(CORE_TTFB_HEADER));
     assert_eq!(
         response.headers().get_all(CORE_TTFB_HEADER).iter().count(),

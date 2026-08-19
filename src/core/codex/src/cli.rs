@@ -1,3 +1,4 @@
+use crate::codex_auth_import;
 use crate::http_client::apply_loopback_proxy_policy;
 use crate::oauth;
 use crate::oauth::LoginFlow;
@@ -50,6 +51,7 @@ struct CredentialArgs {
 #[derive(Debug, Subcommand)]
 enum CredentialCommand {
     Login(LoginArgs),
+    ImportCodexAuth(ImportCodexAuthArgs),
     AddApiKey(AddApiKeyArgs),
     Inspect(AccountArgs),
     Revoke(AccountArgs),
@@ -62,6 +64,20 @@ struct LoginArgs {
     state_dir: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = LoginFlow::Device)]
     flow: LoginFlow,
+    #[arg(long, default_value = oauth::DEFAULT_ISSUER)]
+    issuer: String,
+    #[arg(long, default_value = oauth::DEFAULT_CLIENT_ID)]
+    client_id: String,
+    #[arg(long, default_value = DEFAULT_CODEX_RESPONSES_URL)]
+    upstream_url: String,
+}
+
+#[derive(Debug, Args)]
+struct ImportCodexAuthArgs {
+    #[arg(long)]
+    state_dir: Option<PathBuf>,
+    #[arg(long)]
+    auth_file: PathBuf,
     #[arg(long, default_value = oauth::DEFAULT_ISSUER)]
     issuer: String,
     #[arg(long, default_value = oauth::DEFAULT_CLIENT_ID)]
@@ -119,6 +135,22 @@ impl CredentialCommand {
                 let metadata = oauth::login(
                     &vault,
                     args.flow,
+                    OAuthConfig {
+                        issuer: args.issuer,
+                        client_id: args.client_id,
+                        upstream_url: args.upstream_url,
+                    },
+                )
+                .await?;
+                print_json(&metadata)
+            }
+            Self::ImportCodexAuth(args) => {
+                validate_url(&args.issuer)?;
+                validate_url(&args.upstream_url)?;
+                let vault = Vault::open(state_dir(args.state_dir))?;
+                let metadata = codex_auth_import::import(
+                    &vault,
+                    &args.auth_file,
                     OAuthConfig {
                         issuer: args.issuer,
                         client_id: args.client_id,

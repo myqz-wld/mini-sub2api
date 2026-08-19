@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"mini-sub2api/src/coordinator/internal/storage"
@@ -20,6 +21,8 @@ func runCredential(
 	switch arguments[0] {
 	case "login":
 		return credentialLogin(ctx, options, arguments[1:], environment)
+	case "import-codex":
+		return credentialImportCodex(ctx, options, arguments[1:], environment)
 	case "add-api-key":
 		return credentialAddAPIKey(ctx, options, arguments[1:], environment)
 	case "list":
@@ -31,11 +34,48 @@ func runCredential(
 	case "remove":
 		return credentialRemove(ctx, options, arguments[1:], environment)
 	case "help", "--help", "-h":
-		_, err := fmt.Fprintln(environment.Stdout, "credential commands: login, add-api-key, list, enable, disable, revoke, remove")
+		_, err := fmt.Fprintln(environment.Stdout, "credential commands: login, import-codex, add-api-key, list, enable, disable, revoke, remove")
 		return err
 	default:
 		return fmt.Errorf("unknown credential command %q", arguments[0])
 	}
+}
+
+func credentialImportCodex(
+	ctx context.Context,
+	options globalOptions,
+	arguments []string,
+	environment Environment,
+) error {
+	if requestedHelp(arguments) {
+		_, err := fmt.Fprintln(environment.Stdout, "usage: credential import-codex --name NAME --auth-file FILE")
+		return err
+	}
+	flags := newFlagSet("credential import-codex", environment.Stderr)
+	name := flags.String("name", "", "credential display name")
+	authFile := flags.String("auth-file", "", "existing Codex auth.json path")
+	issuer := flags.String("issuer", "https://auth.openai.com", "OAuth issuer override")
+	clientID := flags.String("client-id", "app_EMoamEEZ73f0CkXaXp7hrann", "OAuth client id override")
+	upstreamURL := flags.String("upstream-url", "https://chatgpt.com/backend-api/codex/responses", "Codex Responses URL")
+	if err := flags.Parse(arguments); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *name == "" || *authFile == "" {
+		return fmt.Errorf("usage: credential import-codex --name NAME --auth-file FILE")
+	}
+	absoluteAuthFile, err := filepath.Abs(*authFile)
+	if err != nil {
+		return fmt.Errorf("resolve Codex auth file: %w", err)
+	}
+	metadata, err := runCoreCredential(ctx, options, []string{
+		"import-codex-auth", "--state-dir", coreStateDirectory(options),
+		"--auth-file", absoluteAuthFile, "--issuer", *issuer,
+		"--client-id", *clientID, "--upstream-url", *upstreamURL,
+	}, nil, environment.Stderr)
+	if err != nil {
+		return err
+	}
+	return persistCoreCredential(ctx, options, *name, metadata, environment)
 }
 
 func credentialLogin(

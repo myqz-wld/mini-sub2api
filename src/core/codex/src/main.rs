@@ -1,5 +1,6 @@
 mod build_info;
 mod cli;
+mod codex_auth_import;
 mod error;
 mod http_body;
 mod http_client;

@@ -106,6 +106,10 @@ pub async fn refresh_if_needed(
         return Ok(());
     }
 
+    if refresh_token.is_empty() {
+        return mark_requires_login(locked).await;
+    }
+
     let endpoint = format!("{}/oauth/token", issuer.trim_end_matches('/'));
     let response = client
         .post(&endpoint)
