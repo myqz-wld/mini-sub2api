@@ -8,7 +8,7 @@
 - Created at: `2026-08-18`
 - Completed at: `2026-08-18`
 - Target repository: `/Users/wanglidong/Repository/mini-sub2api`
-- Completion baseline: unborn `main`; the user has not requested an initial commit
+- Completion baseline: `93220c57166280467ed16931aea43651c33f6cd1`
 - Isolation: the new repository is isolated from neighboring repositories
 - Planning source evidence: `/Users/wanglidong/Repository/codex` at commit
   `e597169e9a783156e50ae9765d891a3dd74df064`
@@ -764,8 +764,8 @@ confirmed public, security, or persistence contracts.
   with warnings denied, Go vet, actual Go-to-Rust process integration, native TLS with a test CA,
   device OAuth/refresh/revoke mocks, cancellation, restart, retention, build, version, and installed
   freshness checks. No OpenAI, ChatGPT, or Codex endpoint was contacted.
-- Dirty state: this is an unborn new repository; all intended project files are untracked and build
-  output is ignored.
+- Initial repository state was committed to `main` as `93220c5` after all planned gates passed;
+  build output remains ignored.
 - Review result: two independent Codex reviewers, used under the user's explicit same-adapter
   exception because other channels were unavailable, completed the implementation, post-fix, and
   residual passes. All accepted findings were fixed and both residual reviewers returned `PASS`.
@@ -775,7 +775,6 @@ confirmed public, security, or persistence contracts.
 
 ## Final status and handoff
 
-The approved minimal v1 is complete. Use `README.md` for installation, operation, and CLI examples.
-The repository remains intentionally unborn and uncommitted; creating the initial commit is left to
-the user. Future changes must preserve the confirmed minimal scope and follow `CLAUDE.md`, including
-loopback-only mock testing and review-expiry rules.
+The approved minimal v1 is complete and committed. Use `README.md` for installation, operation, and
+CLI examples. Future changes must preserve the confirmed minimal scope and follow `CLAUDE.md`,
+including loopback-only automated testing and review-expiry rules.
