@@ -6,5 +6,6 @@
 
 | changed_at | File | Summary (<= 80 chars) |
 |---|---|---|
+| 2026-08-19 | [CHANGELOG_3_codex-request-alignment.md](CHANGELOG_3_codex-request-alignment.md) | Codex subscription request envelope alignment |
 | 2026-08-19 | [CHANGELOG_2_local-codex-import.md](CHANGELOG_2_local-codex-import.md) | Safe access-only Codex import and live SSE usage |
 | 2026-08-18 | [CHANGELOG_1_initial-service.md](CHANGELOG_1_initial-service.md) | Minimal Go coordinator and Rust Codex core service |
