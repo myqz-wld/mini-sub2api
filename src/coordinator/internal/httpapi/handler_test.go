@@ -75,10 +75,16 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	request.Header.Set("Content-Encoding", "zstd")
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Originator", "codex_exec")
+	request.Header.Set("OpenAI-Organization", "org-test")
+	request.Header.Set("OpenAI-Project", "proj-test")
 	request.Header.Set("Session-Id", "session-test")
 	request.Header.Set("Thread-Id", "thread-test")
 	request.Header.Set("X-Codex-Turn-State", "turn-test")
 	request.Header.Set("X-OpenAI-Internal-Codex-Responses-Lite", "true")
+	request.Header.Set("X-Stainless-Arch", "arm64")
+	request.Header.Set("X-Stainless-Lang", "go")
+	request.Header.Set("X-Stainless-Package-Version", "3.52.0")
+	request.Header.Set("X-Stainless-Unreviewed", "must-not-cross")
 	request.Header.Set("X-Forwarded-For", "203.0.113.1")
 	response, err := server.Client().Do(request)
 	if err != nil {
@@ -106,15 +112,20 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	if core.calls != 1 || !bytes.Equal(core.body, requestBody) {
 		t.Fatalf("core calls/body = %d/%q", core.calls, core.body)
 	}
-	if core.headers.Get("Authorization") != "" || core.headers.Get("X-Forwarded-For") != "" {
+	if core.headers.Get("Authorization") != "" || core.headers.Get("X-Forwarded-For") != "" ||
+		core.headers.Get("X-Stainless-Unreviewed") != "" {
 		t.Fatalf("forwarded headers = %#v", core.headers)
 	}
 	for name, expected := range map[string]string{
 		"Accept": "text/event-stream", "Content-Encoding": "zstd",
 		"Content-Type": "application/json", "Originator": "codex_exec",
+		"OpenAI-Organization": "org-test", "OpenAI-Project": "proj-test",
 		"Session-Id": "session-test", "Thread-Id": "thread-test",
 		"X-Codex-Turn-State":                     "turn-test",
 		"X-OpenAI-Internal-Codex-Responses-Lite": "true",
+		"X-Stainless-Arch":                       "arm64",
+		"X-Stainless-Lang":                       "go",
+		"X-Stainless-Package-Version":            "3.52.0",
 	} {
 		if got := core.headers.Get(name); got != expected {
 			t.Fatalf("forwarded %s = %q, want %q", name, got, expected)

@@ -4,6 +4,8 @@ use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
 use crate::request_normalizer::prepare_subscription_request;
+use crate::upstream_request::ResolvedAuth;
+use crate::upstream_request::build as build_upstream_request;
 use crate::vault::CredentialMaterial;
 use crate::vault::CredentialStatus;
 use crate::vault::Vault;
@@ -16,7 +18,6 @@ use axum::extract::ConnectInfo;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::HeaderName;
-use axum::http::HeaderValue;
 use axum::http::Request;
 use axum::http::Response;
 use axum::http::StatusCode;
@@ -54,12 +55,6 @@ struct AppState {
     direct_client: Client,
     internal_token_hash: [u8; 32],
     account_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-}
-
-#[derive(Clone)]
-enum ResolvedAuth {
-    CodexOAuth { token: String, account_id: String },
-    OpenAiApiKey { token: String },
 }
 
 pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
@@ -252,28 +247,10 @@ async fn send_upstream(
     auth: &ResolvedAuth,
     body: bytes::Bytes,
 ) -> std::result::Result<reqwest::Response, CoreFailure> {
-    let mut headers = forwarded_headers(inbound_headers);
-    let token = match auth {
-        ResolvedAuth::CodexOAuth { token, account_id } => {
-            let value = HeaderValue::from_str(account_id).map_err(|_| CoreFailure::Internal)?;
-            headers.insert("chatgpt-account-id", value);
-            if !headers.contains_key("originator") {
-                headers.insert("originator", HeaderValue::from_static("mini_sub2api"));
-            }
-            token
-        }
-        ResolvedAuth::OpenAiApiKey { token } => token,
-    };
-    let mut authorization =
-        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| CoreFailure::Internal)?;
-    authorization.set_sensitive(true);
-    headers.insert(http::header::AUTHORIZATION, authorization);
-    state
-        .client_for_url(upstream_url)
-        .post(upstream_url)
-        .headers(headers)
-        .body(body)
-        .send()
+    let client = state.client_for_url(upstream_url);
+    let request = build_upstream_request(client, inbound_headers, upstream_url, auth, body)?;
+    client
+        .execute(request)
         .await
         .map_err(|_| CoreFailure::UpstreamConnectFailed)
 }
@@ -357,36 +334,6 @@ async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mutex<()>> {
             .entry(account_ref.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(()))),
     )
-}
-
-fn forwarded_headers(source: &HeaderMap) -> HeaderMap {
-    const ALLOWED: &[&str] = &[
-        "accept",
-        "content-encoding",
-        "content-type",
-        "originator",
-        "session-id",
-        "thread-id",
-        "user-agent",
-        "openai-beta",
-        "x-client-request-id",
-        "x-codex-beta-features",
-        "x-codex-turn-state",
-        "x-codex-turn-metadata",
-        "x-codex-parent-thread-id",
-        "x-codex-window-id",
-        "x-codex-installation-id",
-        "x-openai-internal-codex-responses-lite",
-        "session_id",
-        "conversation_id",
-    ];
-    let mut headers = HeaderMap::new();
-    for name in ALLOWED {
-        if let Some(value) = source.get(*name) {
-            headers.insert(HeaderName::from_static(name), value.clone());
-        }
-    }
-    headers
 }
 
 fn is_safe_response_header(name: &HeaderName) -> bool {

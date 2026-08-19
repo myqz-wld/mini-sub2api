@@ -72,6 +72,10 @@ build/bin/mini-sub2api --state-dir ./state \
 Paste the key and finish with EOF. The secret is not placed in command arguments, environment
 variables, or SQLite.
 
+OpenAI API-key requests keep the client body byte-for-byte. mini-sub2api replaces only the
+authoritative upstream bearer and preserves documented organization/project routing plus reviewed
+official SDK transport metadata. Those OpenAI-specific headers are not sent on OAuth routes.
+
 ### 2. Create a downstream API key
 
 ```bash
@@ -134,6 +138,11 @@ MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 Keep `supports_websockets = false`; mini-sub2api supports HTTP/SSE only. Subscription-backed plain
 Responses requests are normalized for current Codex model behavior while preserving explicit
 models, tools, instructions, reasoning controls, and streaming choices.
+
+The subscription request compatibility baseline is Codex CLI `0.147.0`. On subscription routes,
+the core pins the leading Codex version token in the upstream `User-Agent` to that baseline while
+preserving a recognized Codex product name and environment suffix. This does not require clients
+to install that Codex version; regular OpenAI API-key routes keep the caller's SDK `User-Agent`.
 
 ## Administration
 

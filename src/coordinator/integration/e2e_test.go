@@ -50,13 +50,6 @@ type mockUpstream struct {
 	cancelledOnce sync.Once
 }
 
-type capturedRequest struct {
-	Authorization string
-	AccountID     string
-	Originator    string
-	Body          string
-}
-
 func TestCrossLanguageSubscriptionAndAPIKeyService(t *testing.T) {
 	t.Setenv("NO_PROXY", "127.0.0.1,::1")
 	t.Setenv("no_proxy", "127.0.0.1,::1")
@@ -100,7 +93,18 @@ func TestCrossLanguageSubscriptionAndAPIKeyService(t *testing.T) {
 	public := httptest.NewServer(httpapi.NewHandler(store, supervisor, nil))
 	defer public.Close()
 
-	apiStatus, apiBody, _ := publicRequest(t, public, apiKey.Secret, `{"model":"e2e","stream":false}`)
+	apiStatus, apiBody, _ := publicRequestWithHeaders(
+		t, public, apiKey.Secret, `{"model":"e2e","stream":false}`,
+		http.Header{
+			"Accept":                      []string{"application/json"},
+			"User-Agent":                  []string{"OpenAI/Go 3.52.0"},
+			"OpenAI-Organization":         []string{"org-e2e"},
+			"OpenAI-Project":              []string{"proj-e2e"},
+			"X-Stainless-Lang":            []string{"go"},
+			"X-Stainless-Package-Version": []string{"3.52.0"},
+			"X-Stainless-Unreviewed":      []string{"must-not-cross"},
+		},
+	)
 	if apiStatus != http.StatusOK || !strings.Contains(apiBody, `"total_tokens":5`) {
 		t.Fatalf("API-key response = %d %q", apiStatus, apiBody)
 	}
@@ -212,6 +216,11 @@ func (m *mockUpstream) responsesHandler(writer http.ResponseWriter, request *htt
 		Authorization: request.Header.Get("Authorization"),
 		AccountID:     request.Header.Get("ChatGPT-Account-ID"),
 		Originator:    request.Header.Get("originator"),
+		Organization:  request.Header.Get("OpenAI-Organization"),
+		Project:       request.Header.Get("OpenAI-Project"),
+		SDKLanguage:   request.Header.Get("X-Stainless-Lang"),
+		SDKVersion:    request.Header.Get("X-Stainless-Package-Version"),
+		SDKUnreviewed: request.Header.Get("X-Stainless-Unreviewed"),
 		Body:          string(body),
 	}
 	m.mu.Lock()
@@ -266,8 +275,12 @@ func (m *mockUpstream) assertAuthBoundaries(t *testing.T, downstreamSecrets []st
 			if capture.AccountID != "chatgpt-e2e-account" || capture.Originator != "mini_sub2api" {
 				t.Fatalf("OAuth headers = %#v", capture)
 			}
-		} else if capture.Authorization == "Bearer "+upstreamAPIKey && capture.AccountID != "" {
-			t.Fatalf("API-key route received account header: %#v", capture)
+		} else if capture.Authorization == "Bearer "+upstreamAPIKey {
+			if capture.AccountID != "" || capture.Organization != "org-e2e" ||
+				capture.Project != "proj-e2e" || capture.SDKLanguage != "go" ||
+				capture.SDKVersion != "3.52.0" || capture.SDKUnreviewed != "" {
+				t.Fatalf("API-key headers = %#v", capture)
+			}
 		}
 	}
 }
@@ -313,26 +326,6 @@ func createDownstreamKey(t *testing.T, store *storage.Store, credentialID, name 
 		t.Fatal(err)
 	}
 	return key
-}
-
-func publicRequest(t *testing.T, server *httptest.Server, secret, body string) (int, string, http.Header) {
-	t.Helper()
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/v1/responses", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("Authorization", "Bearer "+secret)
-	request.Header.Set("Content-Type", "application/json")
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	responseBody, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return response.StatusCode, string(responseBody), response.Header.Clone()
 }
 
 func assertExactStats(t *testing.T, store *storage.Store, keyID string, totalTokens int64) {

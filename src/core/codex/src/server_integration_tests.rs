@@ -7,6 +7,8 @@ use axum::response::Response as AxumResponse;
 use axum::routing::post as axum_post;
 use bytes::Bytes;
 use futures_util::stream;
+use http::HeaderName;
+use http::HeaderValue;
 use std::convert::Infallible;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -64,10 +66,30 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
     let mock = spawn_loopback(app).await;
     let (state, account_ref, _temp) = api_key_state(&mock.base_url).await;
     let inbound_body = Bytes::from_static(br#"{"model":"test","stream":true}"#);
+    let mut extra_headers = HeaderMap::new();
+    for (name, value) in [
+        ("accept", "text/event-stream"),
+        ("user-agent", "OpenAI/Go 3.52.0"),
+        ("openai-organization", "org-test"),
+        ("openai-project", "proj-test"),
+        ("x-stainless-arch", "arm64"),
+        ("x-stainless-lang", "go"),
+        ("x-stainless-package-version", "3.52.0"),
+        ("x-stainless-retry-count", "0"),
+        ("x-stainless-runtime", "go"),
+        ("x-stainless-runtime-version", "go1.26.0"),
+        ("x-stainless-unreviewed", "must-not-cross"),
+    ] {
+        extra_headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
 
-    let response = call_core(&state, &account_ref, inbound_body.clone())
-        .await
-        .expect("core response");
+    let response =
+        call_core_with_headers(&state, &account_ref, inbound_body.clone(), extra_headers)
+            .await
+            .expect("core response");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response
@@ -104,8 +126,23 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
         header_text(&headers, "x-codex-turn-state").as_deref(),
         Some("turn-test")
     );
+    for (name, expected) in [
+        ("accept", "text/event-stream"),
+        ("user-agent", "OpenAI/Go 3.52.0"),
+        ("openai-organization", "org-test"),
+        ("openai-project", "proj-test"),
+        ("x-stainless-arch", "arm64"),
+        ("x-stainless-lang", "go"),
+        ("x-stainless-package-version", "3.52.0"),
+        ("x-stainless-retry-count", "0"),
+        ("x-stainless-runtime", "go"),
+        ("x-stainless-runtime-version", "go1.26.0"),
+    ] {
+        assert_eq!(header_text(&headers, name).as_deref(), Some(expected));
+    }
     assert!(!headers.contains_key(ACCOUNT_REF_HEADER));
     assert!(!headers.contains_key("x-forwarded-for"));
+    assert!(!headers.contains_key("x-stainless-unreviewed"));
 }
 
 #[tokio::test]
@@ -166,6 +203,9 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         ("session-id", "session-test"),
         ("thread-id", "thread-test"),
         ("x-openai-internal-codex-responses-lite", "true"),
+        ("openai-organization", "must-not-cross"),
+        ("openai-project", "must-not-cross"),
+        ("x-stainless-lang", "must-not-cross"),
     ] {
         extra_headers.insert(
             HeaderName::from_static(name),
@@ -200,6 +240,10 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         header_text(&captured_headers, "chatgpt-account-id").as_deref(),
         Some(account_id)
     );
+    assert_eq!(
+        header_text(&captured_headers, http::header::USER_AGENT.as_str()).as_deref(),
+        Some("codex_cli_rs/0.147.0")
+    );
     for (name, expected) in [
         ("originator", "codex_exec"),
         ("session-id", "session-test"),
@@ -210,6 +254,9 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
             header_text(&captured_headers, name).as_deref(),
             Some(expected)
         );
+    }
+    for name in ["openai-organization", "openai-project", "x-stainless-lang"] {
+        assert!(!captured_headers.contains_key(name), "header {name}");
     }
 }
 

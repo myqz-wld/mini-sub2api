@@ -50,9 +50,15 @@ Content-Type: application/json
 The coordinator may forward only these public-client headers to the core:
 
 - `accept`
+- `content-encoding`
 - `content-type`
+- `originator`
+- `session-id`
+- `thread-id`
 - `user-agent`
 - `openai-beta`
+- `openai-organization`
+- `openai-project`
 - `x-client-request-id`
 - `x-codex-beta-features`
 - `x-codex-turn-state`
@@ -60,10 +66,29 @@ The coordinator may forward only these public-client headers to the core:
 - `x-codex-parent-thread-id`
 - `x-codex-window-id`
 - `x-codex-installation-id`
+- `x-openai-internal-codex-responses-lite`
+- `x-stainless-arch`
+- `x-stainless-lang`
+- `x-stainless-os`
+- `x-stainless-package-version`
+- `x-stainless-retry-count`
+- `x-stainless-runtime`
+- `x-stainless-runtime-version`
+- `x-stainless-timeout`
 - `session_id`
 - `conversation_id`
 
-The core constructs authoritative `Authorization`, `ChatGPT-Account-ID`, `Host`, and `originator` headers. Both layers remove cookies, proxy authentication, forwarding headers, content length, transfer encoding, connection-specific headers, and any unreviewed `x-mini-sub2api-*` header.
+The core constructs authoritative `Authorization` and `Host` headers. For subscription routes it
+also constructs `ChatGPT-Account-ID` and supplies `originator` when missing. `OpenAI-Organization`,
+`OpenAI-Project`, and the explicitly reviewed `X-Stainless-*` headers reach only regular OpenAI
+API-key upstreams. Both layers remove cookies, proxy authentication, forwarding headers, content
+length, transfer encoding, connection-specific headers, unknown `X-Stainless-*` headers, and any
+unreviewed `X-Mini-Sub2Api-*` header.
+
+For subscription upstreams, the core anchors the leading Codex `User-Agent` product/version token
+to the Codex CLI `0.147.0` compatibility baseline. A recognized Codex product name and its suffix
+are preserved; a missing or non-Codex value becomes `codex_cli_rs/0.147.0`. Regular OpenAI API-key
+routes retain the public client's reviewed `User-Agent` unchanged.
 
 ## Inference response
 
@@ -97,4 +122,3 @@ The core does not retry transport, `429`, or `5xx` inference failures. It may pe
 ## Compatibility changes
 
 Any incompatible change creates a new `src/protocol/vN/` directory. v1 fixtures are immutable after release except for additive examples that do not change decoding requirements.
-
