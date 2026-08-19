@@ -3,6 +3,7 @@ use crate::http_client::has_literal_loopback_host;
 use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
+use crate::request_normalizer::prepare_subscription_request;
 use crate::vault::CredentialMaterial;
 use crate::vault::CredentialStatus;
 use crate::vault::Vault;
@@ -141,19 +142,31 @@ async fn responses_inner(
     let request_id = header_text(&headers, REQUEST_ID_HEADER)
         .filter(|value| value.starts_with("req_") && value.len() <= 132)
         .ok_or(CoreFailure::InvalidRequest)?;
-    drop(request_id);
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
         .map_err(|_| CoreFailure::InvalidRequest)?;
-    let expects_sse = request_expects_sse(&body);
     let account_lock = account_lock(state, &account_ref).await;
 
     let _guard = account_lock.lock().await;
     let (upstream_url, auth) = resolve_auth(state, &account_ref, None).await?;
     drop(_guard);
+    let (forward_headers, body) = if matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+        let prepared = prepare_subscription_request(
+            &headers,
+            body,
+            MAX_REQUEST_BYTES,
+            &account_ref,
+            &request_id,
+        );
+        (prepared.headers, prepared.body)
+    } else {
+        (headers, body)
+    };
+    let expects_sse = request_expects_sse(&body);
 
     let started = Instant::now();
-    let mut upstream = send_upstream(state, &headers, &upstream_url, &auth, body.clone()).await?;
+    let mut upstream =
+        send_upstream(state, &forward_headers, &upstream_url, &auth, body.clone()).await?;
     if upstream.status() == StatusCode::UNAUTHORIZED
         && matches!(auth, ResolvedAuth::CodexOAuth { .. })
     {
@@ -165,7 +178,7 @@ async fn responses_inner(
         let (retry_url, retry_auth) =
             resolve_auth(state, &account_ref, Some(&failed_access_token)).await?;
         drop(_guard);
-        upstream = send_upstream(state, &headers, &retry_url, &retry_auth, body).await?;
+        upstream = send_upstream(state, &forward_headers, &retry_url, &retry_auth, body).await?;
         if upstream.status() == StatusCode::UNAUTHORIZED {
             return Err(CoreFailure::UpstreamAuthFailed);
         }
@@ -244,7 +257,9 @@ async fn send_upstream(
         ResolvedAuth::CodexOAuth { token, account_id } => {
             let value = HeaderValue::from_str(account_id).map_err(|_| CoreFailure::Internal)?;
             headers.insert("chatgpt-account-id", value);
-            headers.insert("originator", HeaderValue::from_static("mini_sub2api"));
+            if !headers.contains_key("originator") {
+                headers.insert("originator", HeaderValue::from_static("mini_sub2api"));
+            }
             token
         }
         ResolvedAuth::OpenAiApiKey { token } => token,
@@ -347,7 +362,11 @@ async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mutex<()>> {
 fn forwarded_headers(source: &HeaderMap) -> HeaderMap {
     const ALLOWED: &[&str] = &[
         "accept",
+        "content-encoding",
         "content-type",
+        "originator",
+        "session-id",
+        "thread-id",
         "user-agent",
         "openai-beta",
         "x-client-request-id",
@@ -357,6 +376,7 @@ fn forwarded_headers(source: &HeaderMap) -> HeaderMap {
         "x-codex-parent-thread-id",
         "x-codex-window-id",
         "x-codex-installation-id",
+        "x-openai-internal-codex-responses-lite",
         "session_id",
         "conversation_id",
     ];

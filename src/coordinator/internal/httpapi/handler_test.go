@@ -71,8 +71,14 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Authorization", "Bearer "+key.Secret)
+	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Content-Encoding", "zstd")
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Originator", "codex_exec")
+	request.Header.Set("Session-Id", "session-test")
+	request.Header.Set("Thread-Id", "thread-test")
 	request.Header.Set("X-Codex-Turn-State", "turn-test")
+	request.Header.Set("X-OpenAI-Internal-Codex-Responses-Lite", "true")
 	request.Header.Set("X-Forwarded-For", "203.0.113.1")
 	response, err := server.Client().Do(request)
 	if err != nil {
@@ -100,9 +106,19 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	if core.calls != 1 || !bytes.Equal(core.body, requestBody) {
 		t.Fatalf("core calls/body = %d/%q", core.calls, core.body)
 	}
-	if core.headers.Get("Authorization") != "" || core.headers.Get("X-Forwarded-For") != "" ||
-		core.headers.Get("X-Codex-Turn-State") != "turn-test" {
+	if core.headers.Get("Authorization") != "" || core.headers.Get("X-Forwarded-For") != "" {
 		t.Fatalf("forwarded headers = %#v", core.headers)
+	}
+	for name, expected := range map[string]string{
+		"Accept": "text/event-stream", "Content-Encoding": "zstd",
+		"Content-Type": "application/json", "Originator": "codex_exec",
+		"Session-Id": "session-test", "Thread-Id": "thread-test",
+		"X-Codex-Turn-State":                     "turn-test",
+		"X-OpenAI-Internal-Codex-Responses-Lite": "true",
+	} {
+		if got := core.headers.Get(name); got != expected {
+			t.Fatalf("forwarded %s = %q, want %q", name, got, expected)
+		}
 	}
 	core.mu.Unlock()
 

@@ -12,19 +12,24 @@ import (
 )
 
 var forwardedRequestHeaders = map[string]bool{
-	"Accept":                   true,
-	"Content-Type":             true,
-	"User-Agent":               true,
-	"Openai-Beta":              true,
-	"X-Client-Request-Id":      true,
-	"X-Codex-Beta-Features":    true,
-	"X-Codex-Turn-State":       true,
-	"X-Codex-Turn-Metadata":    true,
-	"X-Codex-Parent-Thread-Id": true,
-	"X-Codex-Window-Id":        true,
-	"X-Codex-Installation-Id":  true,
-	"Session_id":               true,
-	"Conversation_id":          true,
+	"Accept":                                 true,
+	"Content-Encoding":                       true,
+	"Content-Type":                           true,
+	"Originator":                             true,
+	"Session-Id":                             true,
+	"Thread-Id":                              true,
+	"User-Agent":                             true,
+	"Openai-Beta":                            true,
+	"X-Client-Request-Id":                    true,
+	"X-Codex-Beta-Features":                  true,
+	"X-Codex-Turn-State":                     true,
+	"X-Codex-Turn-Metadata":                  true,
+	"X-Codex-Parent-Thread-Id":               true,
+	"X-Codex-Window-Id":                      true,
+	"X-Codex-Installation-Id":                true,
+	"X-Openai-Internal-Codex-Responses-Lite": true,
+	"Session_id":                             true,
+	"Conversation_id":                        true,
 }
 
 var internalHTTPClient = &http.Client{
@@ -58,15 +63,7 @@ func (s *Supervisor) Forward(
 	if err != nil {
 		return nil, fmt.Errorf("create internal core request: %w", err)
 	}
-	for name, values := range headers {
-		canonical := http.CanonicalHeaderKey(name)
-		if !forwardedRequestHeaders[canonical] {
-			continue
-		}
-		for _, value := range values {
-			request.Header.Add(canonical, value)
-		}
-	}
+	copyForwardedHeaders(request.Header, headers)
 	request.Header.Set("Authorization", "Bearer "+core.token)
 	request.Header.Set(protocolv1.VersionHeader, protocolv1.Version)
 	request.Header.Set(protocolv1.AccountRefHeader, accountRef)
@@ -76,4 +73,16 @@ func (s *Supervisor) Forward(
 		return nil, fmt.Errorf("call Codex core: %w", err)
 	}
 	return response, nil
+}
+
+func copyForwardedHeaders(destination, source http.Header) {
+	for name, values := range source {
+		canonical := http.CanonicalHeaderKey(name)
+		if !forwardedRequestHeaders[canonical] {
+			continue
+		}
+		for _, value := range values {
+			destination.Add(canonical, value)
+		}
+	}
 }
