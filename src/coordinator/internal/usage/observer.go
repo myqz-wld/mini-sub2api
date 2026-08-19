@@ -12,10 +12,11 @@ import (
 const maxObservedEventBytes = 8 * 1024 * 1024
 
 type Observer struct {
-	streaming bool
-	disabled  bool
-	buffer    []byte
-	usage     *storage.TokenUsage
+	streaming       bool
+	detectStreaming bool
+	disabled        bool
+	buffer          []byte
+	usage           *storage.TokenUsage
 }
 
 func NewObserver(contentType string) *Observer {
@@ -23,7 +24,10 @@ func NewObserver(contentType string) *Observer {
 	if err != nil {
 		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
 	}
-	return &Observer{streaming: strings.EqualFold(mediaType, "text/event-stream")}
+	return &Observer{
+		streaming:       strings.EqualFold(mediaType, "text/event-stream"),
+		detectStreaming: mediaType == "",
+	}
 }
 
 func (o *Observer) Observe(chunk []byte) {
@@ -36,9 +40,17 @@ func (o *Observer) Observe(chunk []byte) {
 		return
 	}
 	o.buffer = append(o.buffer, chunk...)
+	if !o.streaming && o.detectStreaming && looksLikeSSE(o.buffer) {
+		o.streaming = true
+	}
 	if o.streaming {
 		o.consumeSSEEvents()
 	}
+}
+
+func looksLikeSSE(buffer []byte) bool {
+	trimmed := bytes.TrimLeft(buffer, " \t\r\n")
+	return bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:"))
 }
 
 func (o *Observer) Usage() *storage.TokenUsage {

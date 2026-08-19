@@ -145,6 +145,7 @@ async fn responses_inner(
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
         .map_err(|_| CoreFailure::InvalidRequest)?;
+    let expects_sse = request_expects_sse(&body);
     let account_lock = account_lock(state, &account_ref).await;
 
     let _guard = account_lock.lock().await;
@@ -170,7 +171,7 @@ async fn responses_inner(
         }
     }
     let ttfb_ms = started.elapsed().as_millis();
-    build_streaming_response(upstream, ttfb_ms)
+    build_streaming_response(upstream, ttfb_ms, expects_sse)
 }
 
 async fn resolve_auth(
@@ -275,14 +276,19 @@ impl AppState {
 fn build_streaming_response(
     upstream: reqwest::Response,
     ttfb_ms: u128,
+    expects_sse: bool,
 ) -> std::result::Result<Response<Body>, CoreFailure> {
     let status = upstream.status();
     let mut builder = Response::builder().status(status);
     let connection_headers = nominated_connection_headers(upstream.headers());
+    let has_content_type = upstream.headers().contains_key(http::header::CONTENT_TYPE);
     for (name, value) in upstream.headers() {
         if is_safe_response_header(name) && !connection_headers.contains(name.as_str()) {
             builder = builder.header(name, value);
         }
+    }
+    if expects_sse && status.is_success() && !has_content_type {
+        builder = builder.header(http::header::CONTENT_TYPE, "text/event-stream");
     }
     builder = builder.header(CORE_TTFB_HEADER, ttfb_ms.to_string());
     let stream = upstream
@@ -291,6 +297,13 @@ fn build_streaming_response(
     builder
         .body(Body::from_stream(stream))
         .map_err(|_| CoreFailure::Internal)
+}
+
+fn request_expects_sse(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("stream").and_then(serde_json::Value::as_bool))
+        .unwrap_or(false)
 }
 
 fn nominated_connection_headers(headers: &HeaderMap) -> HashSet<String> {

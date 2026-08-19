@@ -125,6 +125,32 @@ async fn permanent_refresh_failure_marks_requires_login() {
 }
 
 #[tokio::test]
+async fn access_only_import_requires_login_without_attempting_refresh() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let mut material = oauth_material("chatgpt-access-only-test", "http://127.0.0.1:1", -3600);
+    let CredentialMaterial::CodexOAuth { refresh_token, .. } = &mut material else {
+        panic!("wrong credential kind")
+    };
+    refresh_token.clear();
+    let metadata = vault
+        .create_oauth(material, "http://127.0.0.1:1/responses".to_string())
+        .await
+        .expect("create OAuth record");
+    let mut locked = vault
+        .lock_record(&metadata.account_ref)
+        .await
+        .expect("lock record");
+
+    let error = refresh_if_needed(&mut locked, &Client::new(), false)
+        .await
+        .expect_err("access-only credential requires login");
+
+    assert!(matches!(error, OAuthFailure::RequiresLogin));
+    assert_eq!(locked.record.status, CredentialStatus::RequiresLogin);
+}
+
+#[tokio::test]
 async fn unparseable_rotated_access_token_marks_requires_login() {
     let account_id = "chatgpt-invalid-rotation-test";
     let id_token = test_jwt(Some(account_id), 3600);

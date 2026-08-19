@@ -50,6 +50,23 @@ build/bin/mini-sub2api --state-dir ./state \
   credential login codex --name personal-subscription
 ```
 
+To explicitly reuse an existing local Codex ChatGPT login without signing in again, import its
+`auth.json` file:
+
+```bash
+build/bin/mini-sub2api --state-dir ./state \
+  credential import-codex --name personal-subscription \
+  --auth-file ~/.codex/auth.json
+```
+
+The Rust core reads and validates the file directly, then copies only the current ID/access token
+and account identity into its private `0600` vault. It deliberately does **not** copy or rotate the
+Codex refresh token, so importing cannot invalidate the original Codex login. The Go coordinator
+receives only non-secret account metadata. This access-only snapshot works until five minutes
+before the copied access token expires, then changes to `requires_login`; use the normal
+`credential login codex` flow for a long-running deployment. Import is always explicit, and the
+service never searches for or silently reads another application's credentials.
+
 Browser PKCE is available explicitly:
 
 ```bash

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -74,6 +75,30 @@ func TestCredentialAndKeyCLIPrintsDownstreamSecretOnce(t *testing.T) {
 	)
 }
 
+func TestImportCodexAuthPersistsOnlyCoreMetadata(t *testing.T) {
+	t.Setenv("MINI_SUB2API_FAKE_CLI_CORE", "1")
+	stateDir := t.TempDir()
+	authFile := filepath.Join(stateDir, "auth.json")
+	upstreamSecret := "refresh-import-must-not-cross-coordinator"
+	if err := os.WriteFile(authFile, []byte(upstreamSecret), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := runCLI(t, nil,
+		"--state-dir", stateDir, "--core-binary", os.Args[0], "--json",
+		"credential", "import-codex", "--name", "Subscription", "--auth-file", authFile,
+	)
+	if strings.Contains(output, upstreamSecret) {
+		t.Fatal("imported secret appeared in coordinator output")
+	}
+	var credential storage.Credential
+	if err := json.Unmarshal([]byte(output), &credential); err != nil {
+		t.Fatal(err)
+	}
+	if credential.AuthKind != "codex_oauth" || credential.UpstreamAccountID == nil {
+		t.Fatalf("credential = %#v", credential)
+	}
+}
+
 func TestJSONUsageCommandsAndHelpAreStable(t *testing.T) {
 	stateDir := t.TempDir()
 	if got := runCLI(t, nil, "--state-dir", stateDir, "--json", "usage", "stats"); strings.TrimSpace(got) != "[]" {
@@ -122,6 +147,8 @@ func runFakeCredentialCore() int {
 			return 33
 		}
 		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_cli","authKind":"openai_api_key","status":"ready"}`)
+	case "import-codex-auth":
+		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_import","authKind":"codex_oauth","upstreamAccountId":"chatgpt-fake-account","status":"ready"}`)
 	case "remove":
 		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_cli","removed":true}`)
 	case "revoke":
