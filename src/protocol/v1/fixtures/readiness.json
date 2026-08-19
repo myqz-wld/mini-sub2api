@@ -1,0 +1,11 @@
+{
+  "protocolVersion": "1",
+  "port": 42123,
+  "pid": 12345,
+  "build": {
+    "name": "mini-sub2api-core-codex",
+    "version": "0.1.0",
+    "commit": "0123456789abcdef0123456789abcdef01234567"
+  }
+}
+

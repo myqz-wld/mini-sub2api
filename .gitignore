@@ -1,0 +1,11 @@
+.DS_Store
+.agent-deck/
+.ref/
+build/
+dist/
+target/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
