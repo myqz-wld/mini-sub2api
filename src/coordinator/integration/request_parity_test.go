@@ -120,6 +120,9 @@ func TestPlainResponsesRequestIsNormalizedForSubscriptionWithoutAddingTools(t *t
 		capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "true" {
 		t.Fatalf("subscription markers = %#v", capture.Headers)
 	}
+	if capture.Headers.Get("User-Agent") != "codex_cli_rs/0.147.0" {
+		t.Fatalf("subscription User-Agent = %q", capture.Headers.Get("User-Agent"))
+	}
 	for _, name := range []string{
 		"Session-Id", "Thread-Id", "X-Client-Request-Id", "X-Codex-Installation-Id",
 		"X-Codex-Turn-Metadata", "X-Codex-Window-Id",

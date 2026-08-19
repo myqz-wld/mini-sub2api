@@ -10,6 +10,7 @@ mod request_normalizer;
 mod server;
 #[cfg(test)]
 mod test_support;
+mod upstream_request;
 mod vault;
 
 use clap::Parser;
