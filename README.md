@@ -159,6 +159,28 @@ Upstream JSON/SSE bytes are otherwise preserved. Token usage remains in the upst
 `response.completed.response.usage` object; final normalized duration and usage are available in
 CLI history.
 
+For subscription-backed credentials, a plain uncompressed Responses request is normalized with the
+same request-construction rules used by the current sibling Codex source before forwarding:
+
+- string `input` becomes a structured user message;
+- for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, client `instructions` becomes a developer
+  message and the exact client `tools` array moves into one Responses-Lite `additional_tools`
+  input item;
+- for current non-Lite models, `instructions` and the exact `tools` array remain at the top level;
+- mini-sub2api never adds a tool or changes a tool name, description, type, or schema;
+- missing `tool_choice`, encrypted-reasoning include, reasoning effort/context, text verbosity,
+  prompt-cache key, and client metadata receive the defaults from the matching Codex model profile;
+- `parallel_tool_calls` follows Codex's Lite/non-Lite behavior and `store` is forced to `false`;
+  explicit `stream`, model, reasoning effort, text controls, and tool choice are otherwise
+  preserved;
+- missing session, thread, turn, installation, and window identities are synthesized as UUIDs and
+  kept consistent between headers and `client_metadata`.
+
+Already Codex-shaped requests and requests with a non-identity `Content-Encoding` remain byte-for-
+
+Current Codex metadata headers, `Content-Encoding`, and a supplied `originator` are preserved end to
+end. Subscription requests without an originator use `mini_sub2api`.
+
 To configure Codex as a client, add a custom Responses provider to `~/.codex/config.toml`:
 
 ```toml
@@ -167,6 +189,7 @@ name = "mini-sub2api"
 base_url = "http://127.0.0.1:8787/v1"
 env_key = "MINI_SUB2API_API_KEY"
 wire_api = "responses"
+supports_websockets = false
 request_max_retries = 0
 stream_max_retries = 0
 
@@ -179,6 +202,10 @@ Then set the downstream key only for the Codex process and select the profile:
 ```bash
 MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
+
+WebSocket transport is intentionally unsupported in v1. Keep `supports_websockets = false` so
+Codex uses HTTP/SSE directly; mini-sub2api does not advertise Upgrade support or emulate a
+WebSocket handshake.
 
 ## Credentials, usage, and deletion
 

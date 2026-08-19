@@ -11,19 +11,24 @@ import (
 )
 
 var allowedHeaders = map[string]bool{
-	"Accept":                   true,
-	"Content-Type":             true,
-	"User-Agent":               true,
-	"Openai-Beta":              true,
-	"X-Client-Request-Id":      true,
-	"X-Codex-Beta-Features":    true,
-	"X-Codex-Turn-State":       true,
-	"X-Codex-Turn-Metadata":    true,
-	"X-Codex-Parent-Thread-Id": true,
-	"X-Codex-Window-Id":        true,
-	"X-Codex-Installation-Id":  true,
-	"Session_id":               true,
-	"Conversation_id":          true,
+	"Accept":                                 true,
+	"Content-Encoding":                       true,
+	"Content-Type":                           true,
+	"Originator":                             true,
+	"Session-Id":                             true,
+	"Thread-Id":                              true,
+	"User-Agent":                             true,
+	"Openai-Beta":                            true,
+	"X-Client-Request-Id":                    true,
+	"X-Codex-Beta-Features":                  true,
+	"X-Codex-Turn-State":                     true,
+	"X-Codex-Turn-Metadata":                  true,
+	"X-Codex-Parent-Thread-Id":               true,
+	"X-Codex-Window-Id":                      true,
+	"X-Codex-Installation-Id":                true,
+	"X-Openai-Internal-Codex-Responses-Lite": true,
+	"Session_id":                             true,
+	"Conversation_id":                        true,
 }
 
 func allowedRequestHeaders(source http.Header) http.Header {

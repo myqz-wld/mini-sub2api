@@ -108,6 +108,111 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
     assert!(!headers.contains_key("x-forwarded-for"));
 }
 
+#[tokio::test]
+async fn subscription_route_normalizes_plain_request_and_preserves_client_tools() {
+    let capture = ApiCapture::default();
+    let app = Router::new()
+        .route(
+            "/responses",
+            axum_post(
+                |AxumState(capture): AxumState<ApiCapture>,
+                 headers: HeaderMap,
+                 body: Bytes| async move {
+                    capture.calls.fetch_add(1, Ordering::SeqCst);
+                    *capture.headers.lock().await = Some(headers);
+                    *capture.body.lock().await = Some(body);
+                    (StatusCode::OK, "normalized")
+                },
+            ),
+        )
+        .with_state(capture.clone());
+    let mock = spawn_loopback(app).await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let account_id = "chatgpt-normalizer-test";
+    let access_token = test_jwt(None, 3600);
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: test_jwt(Some(account_id), 3600),
+                access_token: access_token.clone(),
+                refresh_token: "refresh-normalizer-test".to_string(),
+                account_id: account_id.to_string(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                issuer: mock.base_url.clone(),
+                client_id: "client-normalizer-test".to_string(),
+            },
+            format!("{}/responses", mock.base_url),
+        )
+        .await
+        .expect("OAuth record");
+    let tools = serde_json::json!([
+        {"type":"function","name":"lookup","description":"Lookup","parameters":{"type":"object"}},
+        {"type":"web_search_preview"}
+    ]);
+    let body = Bytes::from(
+        serde_json::to_vec(&serde_json::json!({
+            "model": "gpt-5.6-sol",
+            "instructions": "Be concise",
+            "input": "hello",
+            "tools": tools,
+            "stream": true
+        }))
+        .expect("request body"),
+    );
+    let mut extra_headers = HeaderMap::new();
+    for (name, value) in [
+        ("originator", "codex_exec"),
+        ("session-id", "session-test"),
+        ("thread-id", "thread-test"),
+        ("x-openai-internal-codex-responses-lite", "true"),
+    ] {
+        extra_headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_str(value).expect("header value"),
+        );
+    }
+
+    let response = call_core_with_headers(
+        &app_state(vault),
+        &metadata.account_ref,
+        body,
+        extra_headers,
+    )
+    .await
+    .expect("core response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let captured_body = capture.body.lock().await.clone().expect("captured body");
+    let normalized: serde_json::Value =
+        serde_json::from_slice(&captured_body).expect("normalized request");
+    assert_eq!(normalized["input"][0]["type"], "additional_tools");
+    assert_eq!(normalized["input"][0]["tools"], tools);
+    assert_eq!(normalized["input"][1]["role"], "developer");
+    assert_eq!(normalized["input"][2]["role"], "user");
+    assert_eq!(normalized["store"], false);
+    let captured_headers = capture.headers.lock().await.clone().expect("headers");
+    assert_eq!(
+        header_text(&captured_headers, http::header::AUTHORIZATION.as_str()).as_deref(),
+        Some(format!("Bearer {access_token}").as_str())
+    );
+    assert_eq!(
+        header_text(&captured_headers, "chatgpt-account-id").as_deref(),
+        Some(account_id)
+    );
+    for (name, expected) in [
+        ("originator", "codex_exec"),
+        ("session-id", "session-test"),
+        ("thread-id", "thread-test"),
+        ("x-openai-internal-codex-responses-lite", "true"),
+    ] {
+        assert_eq!(
+            header_text(&captured_headers, name).as_deref(),
+            Some(expected)
+        );
+    }
+}
+
 #[derive(Clone)]
 struct OAuthMockState {
     old_access: String,
@@ -307,6 +412,15 @@ async fn call_core(
     account_ref: &str,
     body: Bytes,
 ) -> std::result::Result<Response<Body>, CoreFailure> {
+    call_core_with_headers(state, account_ref, body, HeaderMap::new()).await
+}
+
+async fn call_core_with_headers(
+    state: &AppState,
+    account_ref: &str,
+    body: Bytes,
+    extra_headers: HeaderMap,
+) -> std::result::Result<Response<Body>, CoreFailure> {
     let mut headers = HeaderMap::new();
     headers.insert(
         http::header::AUTHORIZATION,
@@ -324,6 +438,7 @@ async fn call_core(
     );
     headers.insert("x-codex-turn-state", HeaderValue::from_static("turn-test"));
     headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.10"));
+    headers.extend(extra_headers);
     let request = Request::builder().body(Body::from(body)).expect("request");
     responses_inner(
         "127.0.0.1:43210".parse().expect("peer"),
