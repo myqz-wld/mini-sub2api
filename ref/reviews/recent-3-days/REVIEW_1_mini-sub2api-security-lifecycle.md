@@ -1,8 +1,8 @@
 ---
 review_id: 1
 reviewed_at: 2026-08-18
-baseline_commit: unborn  # The new repository has no commit yet.
-expired: true            # Refresh to a real commit baseline after the initial commit.
+baseline_commit: 93220c57166280467ed16931aea43651c33f6cd1
+expired: false
 skipped_expired: []
 ---
 
@@ -200,12 +200,9 @@ direct code or test evidence. Reviewer repositories remained read-only.
 - Non-loopback serving relies on operator-provided static TLS certificates; issuance, trust, and
   renewal are outside v1.
 - v1 supports one coordinator and one Codex core per state directory, not HA or a cross-host core.
-- Because the repository is unborn, this review cannot name a real final commit. `expired: true`
-  deliberately forces the first post-commit review to establish a usable commit baseline.
 - The two-reviewer process used the user's approved same-adapter exception and therefore provides
   independent repetition, not heterogeneous model corroboration.
 
 ## Follow-ups
 
-No implementation follow-up remains in the approved v1 scope. After the user creates the initial
-commit, the next review should refresh this record's covered scope against a real commit baseline.
+None.
