@@ -1,11 +1,14 @@
 .DS_Store
 .agent-deck/
 .ref/
+AGENTS.md
+CLAUDE.md
+UI_COPY_LANGUAGE.md
 build/
 dist/
+ref/
 target/
 *.db
 *.db-shm
 *.db-wal
 *.log
-
