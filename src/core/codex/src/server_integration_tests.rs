@@ -193,7 +193,8 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
             "instructions": "Be concise",
             "input": "hello",
             "tools": tools,
-            "stream": true
+            "stream": true,
+            "max_output_tokens": 32768
         }))
         .expect("request body"),
     );
@@ -231,6 +232,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     assert_eq!(normalized["input"][1]["role"], "developer");
     assert_eq!(normalized["input"][2]["role"], "user");
     assert_eq!(normalized["store"], false);
+    assert!(normalized.get("max_output_tokens").is_none());
     let captured_headers = capture.headers.lock().await.clone().expect("headers");
     assert_eq!(
         header_text(&captured_headers, http::header::AUTHORIZATION.as_str()).as_deref(),

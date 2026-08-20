@@ -8,6 +8,16 @@ use sha2::Digest;
 use sha2::Sha256;
 use uuid::Uuid;
 
+const UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS: &[&str] = &[
+    "max_output_tokens",
+    "max_completion_tokens",
+    "max_tokens",
+    "temperature",
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
+];
+
 pub struct PreparedSubscriptionRequest {
     pub headers: HeaderMap,
     pub body: Bytes,
@@ -46,6 +56,15 @@ pub fn prepare_subscription_request(
     let Some(object) = value.as_object_mut() else {
         return prepared(prepared_headers, body);
     };
+    let removed_unsupported_fields = strip_unsupported_subscription_fields(object);
+    let filtered_body = removed_unsupported_fields
+        .then(|| serde_json::to_vec(&value).ok())
+        .flatten()
+        .filter(|encoded| encoded.len() <= max_bytes)
+        .map(Bytes::from);
+    let object = value
+        .as_object_mut()
+        .expect("the request object was validated above");
     let profile = object
         .get("model")
         .and_then(Value::as_str)
@@ -54,21 +73,21 @@ pub fn prepare_subscription_request(
     if already_subscription_shaped(object, profile) {
         let identity = resolve_identity(object, headers, account_ref, request_id);
         apply_identity_headers(&mut prepared_headers, profile, &identity);
-        return prepared(prepared_headers, body);
+        return prepared(prepared_headers, filtered_body.unwrap_or(body));
     }
 
     let Some(input_value) = object.remove("input") else {
-        return prepared(prepared_headers, body);
+        return prepared(prepared_headers, filtered_body.unwrap_or(body));
     };
     let mut input = match normalize_input(input_value) {
         Some(input) => input,
-        None => return prepared(prepared_headers, body),
+        None => return prepared(prepared_headers, filtered_body.unwrap_or(body)),
     };
     let tools = match object.remove("tools") {
         Some(Value::Array(tools)) => tools,
         Some(other) => {
             object.insert("tools".to_string(), other);
-            return prepared(prepared_headers, body);
+            return prepared(prepared_headers, filtered_body.unwrap_or(body));
         }
         None => Vec::new(),
     };
@@ -76,7 +95,7 @@ pub fn prepare_subscription_request(
         Some(Value::String(instructions)) => instructions,
         Some(other) => {
             object.insert("instructions".to_string(), other);
-            return prepared(prepared_headers, body);
+            return prepared(prepared_headers, filtered_body.unwrap_or(body));
         }
         None => String::new(),
     };
@@ -122,12 +141,20 @@ pub fn prepare_subscription_request(
     );
 
     let Ok(encoded) = serde_json::to_vec(&value) else {
-        return prepared(headers.clone(), body);
+        return prepared(headers.clone(), filtered_body.unwrap_or(body));
     };
     if encoded.len() > max_bytes {
-        return prepared(headers.clone(), body);
+        return prepared(headers.clone(), filtered_body.unwrap_or(body));
     }
     prepared(prepared_headers, Bytes::from(encoded))
+}
+
+fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) -> bool {
+    let mut removed = false;
+    for field in UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS {
+        removed |= object.remove(*field).is_some();
+    }
+    removed
 }
 
 fn prepared(headers: HeaderMap, body: Bytes) -> PreparedSubscriptionRequest {

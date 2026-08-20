@@ -85,6 +85,7 @@ func TestPlainResponsesRequestIsNormalizedForSubscriptionWithoutAddingTools(t *t
 	requestJSON, err := json.Marshal(map[string]any{
 		"model": "gpt-5.6-sol", "instructions": "Be concise", "input": "hello",
 		"tools": tools, "reasoning": map[string]string{"effort": "low"}, "stream": true,
+		"max_output_tokens": 32768, "temperature": 0.2, "top_p": 0.9,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +141,11 @@ func TestPlainResponsesRequestIsNormalizedForSubscriptionWithoutAddingTools(t *t
 	}
 	if normalized["tools"] != nil || normalized["instructions"] != nil || normalized["store"] != false {
 		t.Fatalf("normalization fields = %#v", normalized)
+	}
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p"} {
+		if _, ok := normalized[field]; ok {
+			t.Fatalf("unsupported subscription field %s crossed upstream", field)
+		}
 	}
 	if normalized["parallel_tool_calls"] != false || normalized["tool_choice"] != "auto" ||
 		normalized["stream"] != true {

@@ -102,6 +102,59 @@ fn normalizes_non_lite_with_current_model_defaults() {
 }
 
 #[test]
+fn strips_unsupported_output_and_sampling_fields_from_subscription_requests() {
+    let body = Bytes::from(
+        serde_json::to_vec(&serde_json::json!({
+            "model": "gpt-5.6-luna",
+            "input": "hello",
+            "tools": [],
+            "max_output_tokens": 32768,
+            "max_completion_tokens": 16384,
+            "max_tokens": 8192,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "frequency_penalty": 0.1,
+            "presence_penalty": 0.1,
+            "stream_options": {"reasoning_summary_delivery": "sequential_cutoff"},
+            "service_tier": "auto"
+        }))
+        .expect("request"),
+    );
+    let prepared = prepare_subscription_request(
+        &HeaderMap::new(),
+        body,
+        1024 * 1024,
+        "acct_test",
+        "req_test",
+    );
+    let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
+
+    for field in UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS {
+        assert!(value.get(*field).is_none(), "field {field} crossed");
+    }
+    assert_eq!(
+        value["stream_options"]["reasoning_summary_delivery"],
+        "sequential_cutoff"
+    );
+    assert_eq!(value["service_tier"], "auto");
+    assert_eq!(value["reasoning"]["effort"], "medium");
+}
+
+#[test]
+fn strips_unsupported_fields_from_already_subscription_shaped_json() {
+    let body = Bytes::from_static(
+        br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true,"max_output_tokens":64,"prompt_cache_key":"session-test"}"#,
+    );
+    let prepared =
+        prepare_subscription_request(&HeaderMap::new(), body, 1024, "acct_test", "req_test");
+    let value: Value = serde_json::from_slice(&prepared.body).expect("filtered JSON");
+
+    assert!(value.get("max_output_tokens").is_none());
+    assert_eq!(value["prompt_cache_key"], "session-test");
+    assert_eq!(value["input"][0]["type"], "additional_tools");
+}
+
+#[test]
 fn native_and_encoded_requests_remain_byte_exact() {
     let native = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true}"#,
