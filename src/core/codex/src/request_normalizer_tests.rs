@@ -21,7 +21,10 @@ fn normalizes_responses_lite_without_changing_tool_set() {
     let body = serde_json::to_vec(&serde_json::json!({
         "model": "gpt-5.6-sol",
         "instructions": "Be concise",
-        "input": "hello",
+        "input": [
+            {"type":"message","role":"system","content":"Follow system rules"},
+            {"type":"message","role":"user","content":"hello"}
+        ],
         "tools": tools,
         "stream": true,
         "store": true
@@ -42,7 +45,9 @@ fn normalizes_responses_lite_without_changing_tool_set() {
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert_eq!(value["input"][0]["tools"], tools);
     assert_eq!(value["input"][1]["role"], "developer");
-    assert_eq!(value["input"][2]["role"], "user");
+    assert_eq!(value["input"][2]["role"], "developer");
+    assert_eq!(value["input"][2]["content"], "Follow system rules");
+    assert_eq!(value["input"][3]["role"], "user");
     assert_eq!(value["store"], false);
     assert_eq!(value["stream"], true);
     assert_eq!(value["tool_choice"], "auto");
@@ -66,7 +71,10 @@ fn normalizes_non_lite_with_current_model_defaults() {
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.4",
             "instructions": "Be concise",
-            "input": "hello",
+            "input": [
+                {"type":"message","role":"system","content":"Follow system rules"},
+                {"type":"message","role":"user","content":"hello"}
+            ],
             "tools": tools
         }))
         .expect("request"),
@@ -82,7 +90,8 @@ fn normalizes_non_lite_with_current_model_defaults() {
 
     assert_eq!(value["tools"], tools);
     assert_eq!(value["instructions"], "Be concise");
-    assert_eq!(value["input"][0]["role"], "user");
+    assert_eq!(value["input"][0]["role"], "developer");
+    assert_eq!(value["input"][1]["role"], "user");
     assert_eq!(value["parallel_tool_calls"], true);
     assert_eq!(value["reasoning"]["effort"], "medium");
     assert!(value["reasoning"].get("context").is_none());

@@ -225,11 +225,20 @@ fn already_subscription_shaped(object: &Map<String, Value>, profile: ModelProfil
 }
 
 fn normalize_input(input: Value) -> Option<Vec<Value>> {
-    match input {
+    let mut input = match input {
         Value::String(text) => Some(vec![user_message(text)]),
         Value::Array(input) => Some(input),
         _ => None,
+    }?;
+    for item in &mut input {
+        let Some(message) = item.as_object_mut() else {
+            continue;
+        };
+        if message.get("role").and_then(Value::as_str) == Some("system") {
+            message.insert("role".to_string(), Value::String("developer".to_string()));
+        }
     }
+    Some(input)
 }
 
 fn developer_message(text: String) -> Value {
