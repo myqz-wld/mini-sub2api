@@ -144,6 +144,11 @@ Responses endpoint does not accept: `max_output_tokens`, `max_completion_tokens`
 `temperature`, `top_p`, `frequency_penalty`, and `presence_penalty`. OpenAI API-key routes remain
 byte-transparent and retain those fields.
 
+Public Responses clients may send instruction messages with the `system` role. On subscription
+routes, mini-sub2api maps those messages to the equivalent `developer` role required by the current
+internal Codex endpoint. Other roles and message content are preserved; OpenAI API-key routes remain
+byte-transparent.
+
 The subscription request compatibility baseline is Codex CLI `0.147.0`. On subscription routes,
 the core pins the leading Codex version token in the upstream `User-Agent` to that baseline while
 preserving a recognized Codex product name and environment suffix. This does not require clients

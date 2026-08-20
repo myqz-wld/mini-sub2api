@@ -85,6 +85,10 @@ API-key upstreams. Both layers remove cookies, proxy authentication, forwarding 
 length, transfer encoding, connection-specific headers, unknown `X-Stainless-*` headers, and any
 unreviewed `X-Mini-Sub2Api-*` header.
 
+For subscription-backed plain Responses bodies, the core maps input messages with role `system` to
+role `developer`, preserving their content and instruction precedence for the internal Codex
+endpoint. Regular OpenAI API-key request bodies remain byte-transparent.
+
 For subscription upstreams, the core anchors the leading Codex `User-Agent` product/version token
 to the Codex CLI `0.147.0` compatibility baseline. A recognized Codex product name and its suffix
 are preserved; a missing or non-Codex value becomes `codex_cli_rs/0.147.0`. Regular OpenAI API-key

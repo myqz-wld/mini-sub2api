@@ -22,7 +22,7 @@ type parityCapture struct {
 	Body    []byte
 }
 
-func TestPlainResponsesRequestIsNormalizedForSubscriptionWithoutAddingTools(t *testing.T) {
+func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	coreBinary := findCoreBinary(t)
 	stateDir := t.TempDir()
 	coreStateDir := filepath.Join(stateDir, "core-codex")
@@ -83,7 +83,10 @@ func TestPlainResponsesRequestIsNormalizedForSubscriptionWithoutAddingTools(t *t
 		map[string]any{"type": "web_search_preview"},
 	}
 	requestJSON, err := json.Marshal(map[string]any{
-		"model": "gpt-5.6-sol", "instructions": "Be concise", "input": "hello",
+		"model": "gpt-5.6-sol", "input": []any{
+			map[string]any{"type": "message", "role": "system", "content": "Follow system rules"},
+			map[string]any{"type": "message", "role": "user", "content": "hello"},
+		},
 		"tools": tools, "reasoning": map[string]string{"effort": "low"}, "stream": true,
 		"max_output_tokens": 32768, "temperature": 0.2, "top_p": 0.9,
 	})
@@ -177,6 +180,14 @@ func TestPlainResponsesRequestIsNormalizedForSubscriptionWithoutAddingTools(t *t
 	}
 	if !jsonEqual(additional["tools"], tools) {
 		t.Fatalf("normalized tools = %#v, want %#v", additional["tools"], tools)
+	}
+	developer, ok := input[1].(map[string]any)
+	if !ok || developer["role"] != "developer" || developer["content"] != "Follow system rules" {
+		t.Fatalf("normalized system message = %#v", input[1])
+	}
+	user, ok := input[2].(map[string]any)
+	if !ok || user["role"] != "user" {
+		t.Fatalf("normalized user message = %#v", input[2])
 	}
 	assertExactStats(t, store, key.ID, 7)
 }
