@@ -1,12 +1,9 @@
 # mini-sub2api
 
-`mini-sub2api` is a small Responses API gateway. Each downstream `ms2a_…` API key maps to one
-Codex subscription or OpenAI API-key credential, while request status, latency, and token totals
-are recorded per downstream key.
-
-The public API is limited to `POST /v1/responses` over HTTP/SSE. WebSockets, Chat Completions,
-account pooling, quotas, billing, dashboards, and administration HTTP APIs are intentionally out
-of scope.
+`mini-sub2api` is a small Responses API gateway. Each downstream `ms2a_…` key maps to one Codex
+subscription or OpenAI API-key credential, with request status, latency, and token totals recorded
+per key. It exposes only `POST /v1/responses` over HTTP/SSE; WebSockets, Chat Completions, account
+pooling, quotas, billing, dashboards, and administration HTTP APIs are out of scope.
 
 ## Build
 
@@ -34,8 +31,7 @@ build/bin/mini-sub2api --check-installed
 
 ## Quick start
 
-The examples below use `./state` as an isolated state directory. You can instead set
-`MINI_SUB2API_STATE_DIR` once for all commands.
+The examples use `./state`; set `MINI_SUB2API_STATE_DIR` to omit `--state-dir` from each command.
 
 ### 1. Add an upstream credential
 
@@ -46,9 +42,8 @@ build/bin/mini-sub2api --state-dir ./state \
   credential login codex --name personal-subscription
 ```
 
-The device flow is the default and works well on remote or headless servers. Browser PKCE is
-available with `--flow browser`; on a remote server, forward the printed loopback callback port
-over SSH before opening the authorization URL.
+Device flow is the default. Browser PKCE is available with `--flow browser`; for remote servers,
+forward the printed loopback callback port over SSH.
 
 To explicitly import an existing Codex login:
 
@@ -58,9 +53,9 @@ build/bin/mini-sub2api --state-dir ./state \
   --auth-file ~/.codex/auth.json
 ```
 
-Importing copies only the current access/identity snapshot, not the refresh token. It does not
-alter the original Codex login, but the imported credential will require a new login shortly
-before the copied access token expires. Use `credential login codex` for long-running deployments.
+Import copies the current access/identity snapshot, not the refresh token, so it does not alter the
+original login but requires a new login near token expiry. Prefer `credential login codex` for
+long-running deployments.
 
 To use an OpenAI API key, read it from standard input:
 
@@ -69,12 +64,8 @@ build/bin/mini-sub2api --state-dir ./state \
   credential add-api-key codex --name openai-api --secret-stdin
 ```
 
-Paste the key and finish with EOF. The secret is not placed in command arguments, environment
-variables, or SQLite.
-
-OpenAI API-key requests keep the client body byte-for-byte. mini-sub2api replaces only the
-authoritative upstream bearer and preserves documented organization/project routing plus reviewed
-official SDK transport metadata. Those OpenAI-specific headers are not sent on OAuth routes.
+Paste the key and finish with EOF. The secret is not placed in arguments, environment variables,
+or SQLite.
 
 ### 2. Create a downstream API key
 
@@ -85,9 +76,8 @@ build/bin/mini-sub2api --state-dir ./state \
   key create --credential cred_EXAMPLE --name laptop
 ```
 
-The generated `ms2a_…` secret is displayed once. Only its SHA-256 hash and a short display prefix
-are retained. A downstream key is permanently mapped to its credential; revoke it and create a new
-one to change that mapping.
+The `ms2a_…` secret is displayed once; only its SHA-256 hash and a short prefix are retained. To
+change its credential mapping, revoke the key and create another.
 
 ### 3. Start the service
 
@@ -95,9 +85,8 @@ one to change that mapping.
 build/bin/mini-sub2api --state-dir ./state serve
 ```
 
-The default listener is `http://127.0.0.1:8787`. Request details are retained for seven days by
-default; change this with `--usage-retention-days N`, or use `0` to disable automatic detail
-deletion.
+The default listener is `http://127.0.0.1:8787`. Request details are retained for seven days;
+change this with `--usage-retention-days N`, or use `0` to disable automatic deletion.
 
 ### 4. Send a request
 
@@ -135,24 +124,12 @@ Then select the profile and supply only the downstream key:
 MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
 
-Keep `supports_websockets = false`; mini-sub2api supports HTTP/SSE only. Subscription-backed plain
-Responses requests are normalized for current Codex model behavior while preserving explicit
-models, tools, instructions, reasoning controls, and streaming choices.
-
-Subscription normalization removes output-cap and sampling fields that the current internal Codex
-Responses endpoint does not accept: `max_output_tokens`, `max_completion_tokens`, `max_tokens`,
-`temperature`, `top_p`, `frequency_penalty`, and `presence_penalty`. OpenAI API-key routes remain
-byte-transparent and retain those fields.
-
-Public Responses clients may send instruction messages with the `system` role. On subscription
-routes, mini-sub2api maps those messages to the equivalent `developer` role required by the current
-internal Codex endpoint. Other roles and message content are preserved; OpenAI API-key routes remain
-byte-transparent.
-
-The subscription request compatibility baseline is Codex CLI `0.147.0`. On subscription routes,
-the core pins the leading Codex version token in the upstream `User-Agent` to that baseline while
-preserving a recognized Codex product name and environment suffix. This does not require clients
-to install that Codex version; regular OpenAI API-key routes keep the caller's SDK `User-Agent`.
+Keep `supports_websockets = false`; mini-sub2api supports HTTP/SSE only. Subscription routes apply
+Codex compatibility normalization: unsupported output/sampling fields are removed, `system`
+instruction messages become `developer` messages, and the upstream `User-Agent` uses the Codex CLI
+`0.147.0` compatibility baseline. Explicit models, tools, instructions, reasoning controls, and
+streaming choices are preserved. OpenAI API-key routes preserve the client body and SDK metadata,
+changing only the upstream bearer; organization/project headers are not sent on OAuth routes.
 
 ## Administration
 
@@ -191,9 +168,8 @@ build/bin/mini-sub2api --state-dir ./state \
   usage prune --before 2026-08-01 --yes
 ```
 
-Daily per-key aggregates remain after request details expire. Add `--include-aggregates` to
-`usage prune` only when those aggregates should also be permanently deleted. Add global `--json`
-to management commands for machine-readable output.
+Daily per-key aggregates remain after request details expire. Use `--include-aggregates` to delete
+them during `usage prune`, and global `--json` for machine-readable management output.
 
 ## Deployment and security
 
@@ -208,8 +184,8 @@ build/bin/mini-sub2api --state-dir ./state serve \
 ```
 
 For direct IP HTTPS, the certificate must contain that IP as an `iPAddress` subject alternative
-name. mini-sub2api does not issue or renew certificates. A reverse proxy may terminate public TLS
-only when it forwards to a deployment-local loopback listener and preserves streaming.
+name. mini-sub2api does not manage certificates. A reverse proxy may terminate public TLS only when
+it forwards to a deployment-local loopback listener and preserves streaming.
 
 Operational boundaries:
 
