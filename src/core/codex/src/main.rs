@@ -7,6 +7,7 @@ mod http_client;
 mod oauth;
 mod oauth_login;
 mod request_normalizer;
+mod responses_websocket;
 mod server;
 #[cfg(test)]
 mod test_support;

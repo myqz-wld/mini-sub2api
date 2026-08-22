@@ -29,17 +29,23 @@ type Core interface {
 }
 
 type Handler struct {
-	store  *storage.Store
-	core   Core
-	clock  func() time.Time
-	logger *log.Logger
+	store      *storage.Store
+	core       Core
+	clock      func() time.Time
+	logger     *log.Logger
+	websockets *websocketManager
+	wsTimeouts websocketTimeouts
 }
 
 func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
 	if logger == nil {
 		logger = log.New(io.Discard, "", 0)
 	}
-	return &Handler{store: store, core: core, clock: time.Now, logger: logger}
+	return &Handler{
+		store: store, core: core, clock: time.Now, logger: logger,
+		websockets: newWebSocketManager(maxWebSocketsPerKey),
+		wsTimeouts: defaultWebSocketTimeouts(),
+	}
 }
 
 func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -49,10 +55,21 @@ func (h *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
-	if request.URL.Path != "/v1/responses" || request.URL.RawQuery != "" || request.Method != http.MethodPost {
+	if request.URL.Path != "/v1/responses" || request.URL.RawQuery != "" {
 		writeOpenAIError(writer, http.StatusNotFound, "not_found", "The requested endpoint does not exist.", requestID)
 		return
 	}
+	switch request.Method {
+	case http.MethodPost:
+		h.serveHTTPResponses(writer, request, requestID)
+	case http.MethodGet:
+		h.serveWebSocket(writer, request, requestID)
+	default:
+		writeOpenAIError(writer, http.StatusNotFound, "not_found", "The requested endpoint does not exist.", requestID)
+	}
+}
+
+func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.Request, requestID string) {
 	secret, ok := bearerToken(request.Header)
 	if !ok {
 		writeOpenAIError(writer, http.StatusUnauthorized, "invalid_api_key", "The API key is invalid or unavailable.", requestID)

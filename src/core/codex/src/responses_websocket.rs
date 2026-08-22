@@ -1,0 +1,339 @@
+use crate::error::CoreFailure;
+use crate::request_normalizer::prepare_subscription_request;
+use crate::server::AppState;
+use crate::server::account_lock;
+use crate::server::header_text;
+use crate::server::resolve_auth;
+use crate::server::validate_internal_request;
+use crate::upstream_request::ResolvedAuth;
+use crate::upstream_request::build_websocket;
+use axum::body::Body;
+use axum::extract::ConnectInfo;
+use axum::extract::State;
+use axum::extract::ws::CloseFrame;
+use axum::extract::ws::Message as InternalMessage;
+use axum::extract::ws::WebSocket;
+use axum::extract::ws::WebSocketUpgrade;
+use axum::http::HeaderMap;
+use axum::http::HeaderName;
+use axum::http::HeaderValue;
+use axum::http::Response;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use bytes::Bytes;
+use futures_util::SinkExt;
+use futures_util::StreamExt;
+use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
+use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
+use reqwest_websocket::CloseCode;
+use reqwest_websocket::Message as UpstreamMessage;
+use reqwest_websocket::UpgradeResponse;
+use reqwest_websocket::WebSocket as UpstreamWebSocket;
+use serde_json::Value;
+use std::net::SocketAddr;
+use std::time::Instant;
+
+pub(crate) const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_HANDSHAKE_REJECTION_BYTES: usize = 64 * 1024;
+
+const SAFE_UPGRADE_RESPONSE_HEADERS: &[&str] = &[
+    "openai-model",
+    "x-codex-turn-state",
+    "x-models-etag",
+    "x-reasoning-included",
+    "x-request-id",
+];
+
+const SAFE_REJECTION_RESPONSE_HEADERS: &[&str] = &["content-type", "retry-after", "x-request-id"];
+
+pub(crate) async fn responses_socket(
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response<Body> {
+    let request_id = header_text(&headers, REQUEST_ID_HEADER).unwrap_or_default();
+    match responses_socket_inner(peer, state, headers, upgrade).await {
+        Ok(response) => response,
+        Err(error) => error.into_response(request_id),
+    }
+}
+
+async fn responses_socket_inner(
+    peer: SocketAddr,
+    state: AppState,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response<Body>, CoreFailure> {
+    let identity = validate_internal_request(peer, &state, &headers)?;
+    let account_lock = account_lock(&state, &identity.account_ref).await;
+    let _guard = account_lock.lock().await;
+    let (upstream_url, auth) = resolve_auth(&state, &identity.account_ref, None).await?;
+    drop(_guard);
+
+    let started = Instant::now();
+    let mut handshake = send_handshake(&state, &headers, &upstream_url, &auth).await?;
+    let mut final_auth = auth;
+    if handshake.status() == StatusCode::UNAUTHORIZED
+        && matches!(final_auth, ResolvedAuth::CodexOAuth { .. })
+    {
+        let failed_access_token = match &final_auth {
+            ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
+            ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
+        };
+        let _guard = account_lock.lock().await;
+        let (retry_url, retry_auth) =
+            resolve_auth(&state, &identity.account_ref, Some(&failed_access_token)).await?;
+        drop(_guard);
+        handshake = send_handshake(&state, &headers, &retry_url, &retry_auth).await?;
+        final_auth = retry_auth;
+        if handshake.status() == StatusCode::UNAUTHORIZED {
+            return Err(CoreFailure::UpstreamAuthFailed);
+        }
+    }
+
+    if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
+        return Ok(rejection_response(handshake).await);
+    }
+
+    let response_headers = filtered_headers(handshake.headers(), SAFE_UPGRADE_RESPONSE_HEADERS);
+    let upstream = handshake
+        .into_websocket()
+        .await
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
+    let normalize_subscription = matches!(final_auth, ResolvedAuth::CodexOAuth { .. });
+    let account_ref = identity.account_ref;
+    let request_id = identity.request_id;
+    let relay_headers = headers;
+    let mut response = upgrade
+        .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .on_upgrade(move |internal| async move {
+            relay(
+                internal,
+                upstream,
+                relay_headers,
+                account_ref,
+                request_id,
+                normalize_subscription,
+            )
+            .await;
+        })
+        .into_response();
+    copy_headers(response.headers_mut(), &response_headers);
+    if let Ok(value) = HeaderValue::from_str(&started.elapsed().as_millis().to_string()) {
+        response.headers_mut().insert(CORE_TTFB_HEADER, value);
+    }
+    Ok(response)
+}
+
+async fn send_handshake(
+    state: &AppState,
+    headers: &HeaderMap,
+    upstream_url: &str,
+    auth: &ResolvedAuth,
+) -> Result<UpgradeResponse, CoreFailure> {
+    build_websocket(
+        state.websocket_client_for_url(upstream_url),
+        headers,
+        upstream_url,
+        auth,
+        MAX_WEBSOCKET_MESSAGE_BYTES,
+    )?
+    .send()
+    .await
+    .map_err(|_| CoreFailure::UpstreamConnectFailed)
+}
+
+async fn rejection_response(handshake: UpgradeResponse) -> Response<Body> {
+    let upstream = handshake.into_inner();
+    let status = upstream.status();
+    let headers = filtered_headers(upstream.headers(), SAFE_REJECTION_RESPONSE_HEADERS);
+    let preserve_body = headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            let value = value.to_ascii_lowercase();
+            value.starts_with("application/json") || value.starts_with("text/")
+        });
+    let body = if preserve_body {
+        read_bounded(upstream, MAX_HANDSHAKE_REJECTION_BYTES).await
+    } else {
+        Bytes::new()
+    };
+    let mut response = Response::builder()
+        .status(status)
+        .body(Body::from(body))
+        .unwrap_or_else(|_| Response::new(Body::empty()));
+    copy_headers(response.headers_mut(), &headers);
+    response
+}
+
+async fn read_bounded(response: reqwest::Response, maximum: usize) -> Bytes {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let Ok(chunk) = chunk else {
+            return Bytes::new();
+        };
+        if body.len().saturating_add(chunk.len()) > maximum {
+            return Bytes::new();
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Bytes::from(body)
+}
+
+async fn relay(
+    internal: WebSocket,
+    upstream: UpstreamWebSocket,
+    headers: HeaderMap,
+    account_ref: String,
+    request_id: String,
+    normalize_subscription: bool,
+) {
+    let (mut internal_write, mut internal_read) = internal.split();
+    let (mut upstream_write, mut upstream_read) = upstream.split();
+    let client_to_upstream = async {
+        let mut create_sequence = 0_u64;
+        while let Some(message) = internal_read.next().await {
+            let outbound = match message {
+                Ok(InternalMessage::Text(text)) => {
+                    match prepare_client_text(
+                        text.to_string(),
+                        &headers,
+                        &account_ref,
+                        &request_id,
+                        normalize_subscription,
+                        &mut create_sequence,
+                    ) {
+                        Ok(prepared) => UpstreamMessage::Text(prepared),
+                        Err(()) => UpstreamMessage::Close {
+                            code: CloseCode::Protocol,
+                            reason: String::new(),
+                        },
+                    }
+                }
+                Ok(InternalMessage::Binary(_)) => UpstreamMessage::Close {
+                    code: CloseCode::Unsupported,
+                    reason: String::new(),
+                },
+                Ok(InternalMessage::Ping(payload)) => UpstreamMessage::Ping(payload),
+                Ok(InternalMessage::Pong(payload)) => UpstreamMessage::Pong(payload),
+                Ok(InternalMessage::Close(frame)) => {
+                    let (code, reason) = frame
+                        .map(|frame| (allowed_close_code(frame.code), frame.reason.to_string()))
+                        .unwrap_or((CloseCode::Normal, String::new()));
+                    UpstreamMessage::Close { code, reason }
+                }
+                Err(_) => UpstreamMessage::Close {
+                    code: CloseCode::Away,
+                    reason: String::new(),
+                },
+            };
+            let terminal = matches!(outbound, UpstreamMessage::Close { .. });
+            if upstream_write.send(outbound).await.is_err() || terminal {
+                return;
+            }
+        }
+        let _ = upstream_write
+            .send(UpstreamMessage::Close {
+                code: CloseCode::Away,
+                reason: String::new(),
+            })
+            .await;
+    };
+    let upstream_to_client = async {
+        while let Some(message) = upstream_read.next().await {
+            let outbound = match message {
+                Ok(UpstreamMessage::Text(text)) => InternalMessage::Text(text.into()),
+                Ok(UpstreamMessage::Binary(_)) => internal_close(1003),
+                Ok(UpstreamMessage::Ping(payload)) => InternalMessage::Ping(payload),
+                Ok(UpstreamMessage::Pong(payload)) => InternalMessage::Pong(payload),
+                Ok(UpstreamMessage::Close { code, reason }) => {
+                    InternalMessage::Close(Some(CloseFrame {
+                        code: u16::from(code),
+                        reason: reason.into(),
+                    }))
+                }
+                Err(_) => internal_close(1011),
+            };
+            let terminal = matches!(outbound, InternalMessage::Close(_));
+            if internal_write.send(outbound).await.is_err() || terminal {
+                return;
+            }
+        }
+        let _ = internal_write.send(internal_close(1011)).await;
+    };
+    tokio::select! {
+        _ = client_to_upstream => {}
+        _ = upstream_to_client => {}
+    }
+}
+
+fn prepare_client_text(
+    text: String,
+    headers: &HeaderMap,
+    account_ref: &str,
+    request_id: &str,
+    normalize_subscription: bool,
+    create_sequence: &mut u64,
+) -> Result<String, ()> {
+    let value: Value = serde_json::from_str(&text).map_err(|_| ())?;
+    let message_type = value
+        .as_object()
+        .and_then(|object| object.get("type"))
+        .and_then(Value::as_str)
+        .filter(|message_type| !message_type.is_empty())
+        .ok_or(())?;
+    if message_type != "response.create" || !normalize_subscription {
+        return Ok(text);
+    }
+    *create_sequence = create_sequence.saturating_add(1);
+    let frame_request_id = format!("{request_id}-ws-{create_sequence}");
+    let prepared = prepare_subscription_request(
+        headers,
+        Bytes::from(text),
+        MAX_WEBSOCKET_MESSAGE_BYTES,
+        account_ref,
+        &frame_request_id,
+    );
+    String::from_utf8(prepared.body.to_vec()).map_err(|_| ())
+}
+
+fn internal_close(code: u16) -> InternalMessage {
+    InternalMessage::Close(Some(CloseFrame {
+        code,
+        reason: "".into(),
+    }))
+}
+
+fn allowed_close_code(code: u16) -> CloseCode {
+    let code = CloseCode::from(code);
+    if code.is_allowed() {
+        code
+    } else {
+        CloseCode::Protocol
+    }
+}
+
+fn filtered_headers(source: &HeaderMap, allowed: &[&'static str]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for name in allowed {
+        let name = HeaderName::from_static(name);
+        for value in source.get_all(&name) {
+            headers.append(name.clone(), value.clone());
+        }
+    }
+    headers
+}
+
+fn copy_headers(destination: &mut HeaderMap, source: &HeaderMap) {
+    for (name, value) in source {
+        destination.append(name.clone(), value.clone());
+    }
+}
+
+#[cfg(test)]
+#[path = "responses_websocket_tests.rs"]
+mod tests;

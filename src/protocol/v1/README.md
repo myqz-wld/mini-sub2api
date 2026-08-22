@@ -1,6 +1,7 @@
 # Coordinator/Core Protocol v1
 
-This protocol is private to one mini-sub2api deployment unit. It connects the Go coordinator to a supervised provider core over loopback HTTP. It is not a public provider API.
+This protocol is private to one mini-sub2api deployment unit. It connects the Go coordinator to a
+supervised provider core over loopback HTTP and WebSocket. It is not a public provider API.
 
 ## Process startup
 
@@ -22,11 +23,17 @@ The core exits rather than accepting an empty token, a non-loopback internal lis
     "name": "mini-sub2api-core-codex",
     "version": "0.1.0",
     "commit": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "capabilities": {
+    "responsesWebSocket": true
   }
 }
 ```
 
-The coordinator rejects a protocol version other than the exact string `1`.
+The coordinator rejects a protocol version other than the exact string `1`. It also rejects a
+core that does not advertise `capabilities.responsesWebSocket=true` when opening the internal
+WebSocket route. The capability is additive: older v1 readiness decoders may ignore it and the
+existing HTTP inference route does not depend on it.
 
 ## Inference request
 
@@ -101,6 +108,50 @@ routes retain the public client's reviewed `User-Agent` unchanged.
 - The coordinator removes internal headers, adds the public request id, and merges `upstream_ttfb;dur=<milliseconds>` into `Server-Timing`.
 - Neither layer adds, removes, reorders, or mutates SSE events.
 - Client cancellation cancels the internal request and upstream response body.
+
+## Responses WebSocket
+
+The additive readiness capability `capabilities.responsesWebSocket=true` enables this internal
+route:
+
+```text
+GET /internal/v1/responses/ws HTTP/1.1
+Authorization: Bearer <internal-token>
+X-Mini-Sub2Api-Protocol-Version: 1
+X-Mini-Sub2Api-Account-Ref: acct_<opaque-id>
+X-Mini-Sub2Api-Request-Id: req_<opaque-connection-id>
+Connection: Upgrade
+Upgrade: websocket
+```
+
+The coordinator validates the downstream key and dials this route before accepting its public
+socket. The core validates the same loopback, internal-auth, version, account-reference, and
+request-id constraints as the HTTP route, resolves vault-owned auth, and establishes the provider
+WebSocket before returning internal `101 Switching Protocols`. Consequently a non-101 provider
+response remains an HTTP handshake response all the way to the public client.
+
+- One internal socket owns exactly one provider socket. The core does not pool sockets, count
+  tenant/key connections, schedule turns, or enforce active-response admission.
+- The coordinator exclusively owns the eight-per-key limit, per-turn revalidation and accounting,
+  overlap policy, first-frame/inter-turn/write timeouts, and shutdown lifecycle.
+- Application messages are UTF-8 JSON text and are limited to 16 MiB. The core relays valid
+  non-create events without semantic translation.
+- Regular API-key text frames are byte-transparent. For subscription credentials, the core applies
+  the HTTP compatibility normalizer only to `response.create`, preserving `type`, `generate`,
+  `previous_response_id`, and `client_metadata`.
+- Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
+  `ChatGPT-Account-ID`, supplies `originator` when absent, and keeps the reviewed `0.147.0`
+  User-Agent anchor.
+- The public coordinator hop may negotiate per-message deflate. The internal and provider hops do
+  not request WebSocket compression.
+- Ping, pong, close, cancellation, and backpressure remain connection-scoped. Neither layer
+  reconnects or replays an active turn.
+
+Successful internal upgrades may expose only `openai-model`, `x-codex-turn-state`,
+`x-models-etag`, `x-reasoning-included`, `x-request-id`, and the core TTFB header to the
+coordinator. The coordinator applies a narrower public allowlist and constructs its own WebSocket
+handshake fields. Non-101 text/JSON bodies are bounded; cookies, forwarding fields, proxy auth,
+credentials, arbitrary extension negotiation, and other hop-by-hop headers never cross.
 
 ## Internal errors
 

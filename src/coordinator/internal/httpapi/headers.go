@@ -65,6 +65,10 @@ func copyResponseHeaders(destination, source http.Header) *time.Duration {
 			destination.Add(name, value)
 		}
 	}
+	return mergeCoreTTFB(destination, source)
+}
+
+func mergeCoreTTFB(destination, source http.Header) *time.Duration {
 	rawTTFB := source.Get(protocolv1.CoreTTFBHeader)
 	milliseconds, err := strconv.ParseInt(rawTTFB, 10, 64)
 	if err != nil || milliseconds < 0 || milliseconds > int64((24*time.Hour)/time.Millisecond) {

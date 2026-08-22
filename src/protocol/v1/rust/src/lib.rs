@@ -17,11 +17,18 @@ pub struct BuildIdentity {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Capabilities {
+    pub responses_web_socket: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Readiness {
     pub protocol_version: String,
     pub port: u16,
     pub pid: u32,
     pub build: BuildIdentity,
+    pub capabilities: Capabilities,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -54,6 +61,9 @@ mod tests {
                 name: "mini-sub2api-core-codex".to_string(),
                 version: "0.1.0".to_string(),
                 commit: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            },
+            capabilities: Capabilities {
+                responses_web_socket: true,
             },
         };
         assert_eq!(got, want);

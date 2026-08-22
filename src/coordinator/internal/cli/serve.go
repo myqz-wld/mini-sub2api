@@ -76,12 +76,15 @@ func runServe(
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+	server.RegisterOnShutdown(handler.ShutdownWebSockets)
 	scheme := "http"
 	if listener.TLS {
 		scheme = "https"
 	}
 	fmt.Fprintf(environment.Stderr, "mini-sub2api listening on %s://%s (TLS %s)\n", scheme, listener.Addr(), tlsState(listener.TLS))
-	return httpapi.Serve(ctx, server, listener)
+	serveErr := httpapi.Serve(ctx, server, listener)
+	handler.ShutdownWebSockets()
+	return serveErr
 }
 
 func retentionLoop(ctx context.Context, store interface {
