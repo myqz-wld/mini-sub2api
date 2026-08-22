@@ -21,11 +21,11 @@ func (s *Store) FinalizeRequest(
 	}
 	defer tx.Rollback()
 
-	var apiKeyID, startedAt string
+	var apiKeyID, startedAt, operationKind string
 	err = tx.QueryRowContext(ctx, `
-        SELECT api_key_id, started_at FROM requests
+        SELECT api_key_id, started_at, operation_kind FROM requests
         WHERE request_id = ? AND terminal_status = 'in_progress'`, requestID,
-	).Scan(&apiKeyID, &startedAt)
+	).Scan(&apiKeyID, &startedAt, &operationKind)
 	if err == sql.ErrNoRows {
 		return ErrNotFound
 	}
@@ -45,8 +45,10 @@ func (s *Store) FinalizeRequest(
 	if err := completeRequestTx(ctx, tx, requestID, result); err != nil {
 		return err
 	}
-	if err := addDailyUsageTx(ctx, tx, started, apiKeyID, result); err != nil {
-		return err
+	if operationKind == OperationInference {
+		if err := addDailyUsageTx(ctx, tx, started, apiKeyID, result); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit request completion: %w", err)

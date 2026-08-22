@@ -3,16 +3,20 @@ package storage
 import "time"
 
 const (
-	CredentialEnabled       = "enabled"
-	CredentialDisabled      = "disabled"
-	CredentialRequiresLogin = "requires_login"
-	CredentialDeleted       = "deleted"
-	KeyActive               = "active"
-	KeyRevoked              = "revoked"
-	RequestInProgress       = "in_progress"
-	RequestCompleted        = "completed"
-	RequestUpstreamErr      = "upstream_error"
-	RequestDisconnected     = "client_disconnected"
+	CredentialEnabled         = "enabled"
+	CredentialDisabled        = "disabled"
+	CredentialRequiresLogin   = "requires_login"
+	CredentialDeleted         = "deleted"
+	KeyActive                 = "active"
+	KeyRevoked                = "revoked"
+	RequestInProgress         = "in_progress"
+	RequestCompleted          = "completed"
+	RequestUpstreamErr        = "upstream_error"
+	RequestDisconnected       = "client_disconnected"
+	TransportHTTP             = "http"
+	TransportWebSocket        = "websocket"
+	OperationInference        = "inference"
+	OperationWebSocketPrewarm = "websocket_prewarm"
 )
 
 type Credential struct {
@@ -73,6 +77,8 @@ type RequestRecord struct {
 	RequestID            string      `json:"requestId"`
 	APIKeyID             string      `json:"apiKeyId"`
 	CredentialID         string      `json:"credentialId"`
+	Transport            string      `json:"transport"`
+	OperationKind        string      `json:"operationKind"`
 	StartedAt            time.Time   `json:"startedAt"`
 	CompletedAt          *time.Time  `json:"completedAt,omitempty"`
 	Status               string      `json:"status"`

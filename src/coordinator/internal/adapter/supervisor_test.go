@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
@@ -37,6 +39,9 @@ func TestSupervisorStartsAndForwardsWithoutSecretInProcessMetadata(t *testing.T)
 	if !ok || readiness.ProtocolVersion != protocolv1.Version {
 		t.Fatalf("readiness = %#v, %v", readiness, ok)
 	}
+	if !readiness.Capabilities.ResponsesWebSocket {
+		t.Fatalf("WebSocket capability missing: %#v", readiness)
+	}
 	headers := http.Header{
 		"Authorization":      []string{"Bearer downstream-secret"},
 		"Content-Type":       []string{"application/json"},
@@ -59,6 +64,46 @@ func TestSupervisorStartsAndForwardsWithoutSecretInProcessMetadata(t *testing.T)
 	}
 	if response.Header.Get(protocolv1.CoreTTFBHeader) != "3" {
 		t.Fatalf("TTFB header = %q", response.Header.Get(protocolv1.CoreTTFBHeader))
+	}
+}
+
+func TestSupervisorDialsAuthenticatedUncompressedWebSocket(t *testing.T) {
+	t.Setenv("MINI_SUB2API_FAKE_CORE", "1")
+	supervisor, err := Start(context.Background(), Config{
+		Binary: os.Args[0], StateDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = supervisor.Close() })
+	connection, response, err := supervisor.DialWebSocket(
+		context.Background(), "acct_ws_test", "req_ws_test",
+		http.Header{
+			"User-Agent":      []string{"codex_exec/test"},
+			"X-Forwarded-For": []string{"203.0.113.30"},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	writeContext, cancelWrite := context.WithTimeout(context.Background(), time.Second)
+	defer cancelWrite()
+	payload := []byte(`{"type":"response.create","model":"test"}`)
+	if err := connection.Write(writeContext, websocket.MessageText, payload); err != nil {
+		t.Fatal(err)
+	}
+	readContext, cancelRead := context.WithTimeout(context.Background(), time.Second)
+	defer cancelRead()
+	messageType, got, err := connection.Read(readContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messageType != websocket.MessageText || !bytes.Equal(got, payload) {
+		t.Fatalf("echo = %d/%q", messageType, got)
 	}
 }
 
@@ -133,6 +178,7 @@ func runFakeCore() int {
 		Build: protocolv1.BuildIdentity{
 			Name: "fake-core", Version: "0.1.0", Commit: "test",
 		},
+		Capabilities: protocolv1.Capabilities{ResponsesWebSocket: true},
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(readiness); err != nil {
 		return 25
@@ -148,10 +194,29 @@ func runFakeCore() int {
 	}
 	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		expectedAuth := "Bearer " + token
-		if request.URL.Path != "/internal/v1/responses" ||
-			request.Header.Get("Authorization") != expectedAuth ||
+		if request.Header.Get("Authorization") != expectedAuth ||
 			request.Header.Get(protocolv1.VersionHeader) != protocolv1.Version ||
-			request.Header.Get("X-Forwarded-For") != "" {
+			request.Header.Get("X-Forwarded-For") != "" ||
+			request.Header.Get("Sec-WebSocket-Extensions") != "" {
+			http.Error(writer, "invalid internal request", http.StatusUnauthorized)
+			return
+		}
+		if request.Method == http.MethodGet && request.URL.Path == "/internal/v1/responses/ws" {
+			connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
+				CompressionMode: websocket.CompressionDisabled,
+			})
+			if err != nil {
+				return
+			}
+			defer connection.CloseNow()
+			messageType, payload, err := connection.Read(context.Background())
+			if err != nil || messageType != websocket.MessageText {
+				return
+			}
+			_ = connection.Write(context.Background(), websocket.MessageText, payload)
+			return
+		}
+		if request.Method != http.MethodPost || request.URL.Path != "/internal/v1/responses" {
 			http.Error(writer, "invalid internal request", http.StatusUnauthorized)
 			return
 		}

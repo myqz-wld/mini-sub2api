@@ -127,8 +127,9 @@ func (s *Store) AuthenticateAndStart(
 	}
 	_, err = tx.ExecContext(ctx, `
         INSERT INTO requests(
-            request_id, api_key_id, credential_id_snapshot, started_at, terminal_status
-        ) VALUES (?, ?, ?, ?, 'in_progress')`,
+            request_id, api_key_id, credential_id_snapshot, started_at, terminal_status,
+            transport, operation_kind
+        ) VALUES (?, ?, ?, ?, 'in_progress', 'http', 'inference')`,
 		requestID, route.APIKeyID, route.CredentialID, timestamp(s.clock()),
 	)
 	if err != nil {
@@ -138,6 +139,72 @@ func (s *Store) AuthenticateAndStart(
 		return Route{}, fmt.Errorf("commit request authentication: %w", err)
 	}
 	return route, nil
+}
+
+func (s *Store) AuthenticateConnection(ctx context.Context, secret string) (Route, error) {
+	if !validDownstreamKey(secret) {
+		return Route{}, ErrUnauthorized
+	}
+	hash := sha256.Sum256([]byte(secret))
+	var route Route
+	err := s.db.QueryRowContext(ctx, `
+        SELECT k.id, c.id, c.adapter, c.auth_kind, c.account_ref
+        FROM api_keys k JOIN credentials c ON c.id = k.credential_id
+        WHERE k.key_hash = ? AND k.status = 'active'
+          AND c.status = 'enabled' AND c.deleted_at IS NULL`, hash[:],
+	).Scan(&route.APIKeyID, &route.CredentialID, &route.Adapter, &route.AuthKind, &route.AccountRef)
+	if err == sql.ErrNoRows {
+		return Route{}, ErrUnauthorized
+	}
+	if err != nil {
+		return Route{}, fmt.Errorf("authenticate WebSocket API key: %w", err)
+	}
+	return route, nil
+}
+
+func (s *Store) StartWebSocketOperation(
+	ctx context.Context,
+	route Route,
+	requestID, operationKind string,
+) error {
+	if !strings.HasPrefix(requestID, "req_") || len(requestID) > 132 ||
+		(operationKind != OperationInference && operationKind != OperationWebSocketPrewarm) {
+		return fmt.Errorf("invalid WebSocket operation")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin WebSocket operation: %w", err)
+	}
+	defer tx.Rollback()
+	var eligible int
+	err = tx.QueryRowContext(ctx, `
+        SELECT 1
+        FROM api_keys k JOIN credentials c ON c.id = k.credential_id
+        WHERE k.id = ? AND c.id = ? AND c.adapter = ? AND c.auth_kind = ?
+          AND c.account_ref = ? AND k.status = 'active'
+          AND c.status = 'enabled' AND c.deleted_at IS NULL`,
+		route.APIKeyID, route.CredentialID, route.Adapter, route.AuthKind, route.AccountRef,
+	).Scan(&eligible)
+	if err == sql.ErrNoRows {
+		return ErrUnauthorized
+	}
+	if err != nil {
+		return fmt.Errorf("revalidate WebSocket route: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+        INSERT INTO requests(
+            request_id, api_key_id, credential_id_snapshot, started_at, terminal_status,
+            transport, operation_kind
+        ) VALUES (?, ?, ?, ?, 'in_progress', 'websocket', ?)`,
+		requestID, route.APIKeyID, route.CredentialID, timestamp(s.clock()), operationKind,
+	)
+	if err != nil {
+		return fmt.Errorf("start WebSocket operation history: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit WebSocket operation: %w", err)
+	}
+	return nil
 }
 
 func validDownstreamKey(secret string) bool {

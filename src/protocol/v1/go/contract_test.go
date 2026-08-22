@@ -24,6 +24,7 @@ func TestReadinessFixture(t *testing.T) {
 			Version: "0.1.0",
 			Commit:  "0123456789abcdef0123456789abcdef01234567",
 		},
+		Capabilities: Capabilities{ResponsesWebSocket: true},
 	}
 	if got != want {
 		t.Fatalf("readiness mismatch: got %#v want %#v", got, want)

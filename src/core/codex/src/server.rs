@@ -4,6 +4,7 @@ use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
 use crate::request_normalizer::prepare_subscription_request;
+use crate::responses_websocket::responses_socket;
 use crate::upstream_request::ResolvedAuth;
 use crate::upstream_request::build as build_upstream_request;
 use crate::vault::CredentialMaterial;
@@ -21,11 +22,13 @@ use axum::http::HeaderName;
 use axum::http::Request;
 use axum::http::Response;
 use axum::http::StatusCode;
+use axum::routing::get;
 use axum::routing::post;
 use futures_util::StreamExt;
 use mini_sub2api_protocol_v1::ACCOUNT_REF_HEADER;
 use mini_sub2api_protocol_v1::BuildIdentity;
 use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
+use mini_sub2api_protocol_v1::Capabilities;
 use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
 use mini_sub2api_protocol_v1::Readiness;
 use mini_sub2api_protocol_v1::VERSION;
@@ -49,12 +52,14 @@ use tokio::sync::Mutex;
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
-struct AppState {
-    vault: Vault,
-    client: Client,
-    direct_client: Client,
-    internal_token_hash: [u8; 32],
-    account_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+pub(crate) struct AppState {
+    pub(crate) vault: Vault,
+    pub(crate) client: Client,
+    pub(crate) direct_client: Client,
+    pub(crate) websocket_client: Client,
+    pub(crate) direct_websocket_client: Client,
+    pub(crate) internal_token_hash: [u8; 32],
+    pub(crate) account_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
@@ -78,10 +83,25 @@ pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
         .no_proxy()
         .build()
         .context("building direct loopback client")?;
+    let websocket_client = Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .http1_only()
+        .build()
+        .context("building upstream WebSocket client")?;
+    let direct_websocket_client = Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .http1_only()
+        .no_proxy()
+        .build()
+        .context("building direct loopback WebSocket client")?;
     let state = AppState {
         vault,
         client,
         direct_client,
+        websocket_client,
+        direct_websocket_client,
         internal_token_hash: Sha256::digest(token.as_bytes()).into(),
         account_locks: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -93,9 +113,7 @@ pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
     let actual = listener.local_addr()?;
     write_readiness(actual.port())?;
 
-    let app = Router::new()
-        .route("/internal/v1/responses", post(responses))
-        .with_state(state);
+    let app = internal_router(state);
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -103,6 +121,13 @@ pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await
     .context("serving internal API")
+}
+
+pub(crate) fn internal_router(state: AppState) -> Router {
+    Router::new()
+        .route("/internal/v1/responses", post(responses))
+        .route("/internal/v1/responses/ws", get(responses_socket))
+        .with_state(state)
 }
 
 async fn responses(
@@ -124,19 +149,9 @@ async fn responses_inner(
     headers: HeaderMap,
     request: Request<Body>,
 ) -> std::result::Result<Response<Body>, CoreFailure> {
-    if !peer.ip().is_loopback() {
-        return Err(CoreFailure::InvalidInternalAuth);
-    }
-    if header_text(&headers, VERSION_HEADER).as_deref() != Some(VERSION) {
-        return Err(CoreFailure::UnsupportedProtocol);
-    }
-    validate_internal_auth(&headers, &state.internal_token_hash)?;
-    let account_ref = header_text(&headers, ACCOUNT_REF_HEADER)
-        .filter(|value| value.starts_with("acct_") && value.len() <= 133)
-        .ok_or(CoreFailure::InvalidRequest)?;
-    let request_id = header_text(&headers, REQUEST_ID_HEADER)
-        .filter(|value| value.starts_with("req_") && value.len() <= 132)
-        .ok_or(CoreFailure::InvalidRequest)?;
+    let identity = validate_internal_request(peer, state, &headers)?;
+    let account_ref = identity.account_ref;
+    let request_id = identity.request_id;
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
         .map_err(|_| CoreFailure::InvalidRequest)?;
@@ -182,7 +197,7 @@ async fn responses_inner(
     build_streaming_response(upstream, ttfb_ms, expects_sse)
 }
 
-async fn resolve_auth(
+pub(crate) async fn resolve_auth(
     state: &AppState,
     account_ref: &str,
     failed_access_token: Option<&str>,
@@ -256,11 +271,19 @@ async fn send_upstream(
 }
 
 impl AppState {
-    fn client_for_url(&self, url: &str) -> &Client {
+    pub(crate) fn client_for_url(&self, url: &str) -> &Client {
         if has_literal_loopback_host(url) {
             &self.direct_client
         } else {
             &self.client
+        }
+    }
+
+    pub(crate) fn websocket_client_for_url(&self, url: &str) -> &Client {
+        if has_literal_loopback_host(url) {
+            &self.direct_websocket_client
+        } else {
+            &self.websocket_client
         }
     }
 }
@@ -327,7 +350,36 @@ fn validate_internal_auth(
     }
 }
 
-async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mutex<()>> {
+pub(crate) struct InternalRequestIdentity {
+    pub account_ref: String,
+    pub request_id: String,
+}
+
+pub(crate) fn validate_internal_request(
+    peer: SocketAddr,
+    state: &AppState,
+    headers: &HeaderMap,
+) -> std::result::Result<InternalRequestIdentity, CoreFailure> {
+    if !peer.ip().is_loopback() {
+        return Err(CoreFailure::InvalidInternalAuth);
+    }
+    if header_text(headers, VERSION_HEADER).as_deref() != Some(VERSION) {
+        return Err(CoreFailure::UnsupportedProtocol);
+    }
+    validate_internal_auth(headers, &state.internal_token_hash)?;
+    let account_ref = header_text(headers, ACCOUNT_REF_HEADER)
+        .filter(|value| value.starts_with("acct_") && value.len() <= 133)
+        .ok_or(CoreFailure::InvalidRequest)?;
+    let request_id = header_text(headers, REQUEST_ID_HEADER)
+        .filter(|value| value.starts_with("req_") && value.len() <= 132)
+        .ok_or(CoreFailure::InvalidRequest)?;
+    Ok(InternalRequestIdentity {
+        account_ref,
+        request_id,
+    })
+}
+
+pub(crate) async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mutex<()>> {
     let mut locks = state.account_locks.lock().await;
     Arc::clone(
         locks
@@ -355,7 +407,7 @@ fn is_safe_response_header(name: &HeaderName) -> bool {
     )
 }
 
-fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
+pub(crate) fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
@@ -396,6 +448,9 @@ fn write_readiness(port: u16) -> Result<()> {
             commit: option_env!("MINI_SUB2API_BUILD_COMMIT")
                 .unwrap_or("unknown")
                 .to_string(),
+        },
+        capabilities: Capabilities {
+            responses_web_socket: true,
         },
     };
     let mut output = serde_json::to_string(&readiness)?;

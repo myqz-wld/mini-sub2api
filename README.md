@@ -2,8 +2,9 @@
 
 `mini-sub2api` is a small Responses API gateway. Each downstream `ms2a_…` key maps to one Codex
 subscription or OpenAI API-key credential, with request status, latency, and token totals recorded
-per key. It exposes only `POST /v1/responses` over HTTP/SSE; WebSockets, Chat Completions, account
-pooling, quotas, billing, dashboards, and administration HTTP APIs are out of scope.
+per key. It exposes Responses through `POST /v1/responses` over HTTP/SSE and native sequential
+Responses WebSockets through `GET /v1/responses`. Chat Completions, account pooling, quotas,
+billing, dashboards, and administration HTTP APIs are out of scope.
 
 ## Build
 
@@ -110,7 +111,7 @@ name = "mini-sub2api"
 base_url = "http://127.0.0.1:8787/v1"
 env_key = "MINI_SUB2API_API_KEY"
 wire_api = "responses"
-supports_websockets = false
+supports_websockets = true
 request_max_retries = 0
 stream_max_retries = 0
 
@@ -124,12 +125,30 @@ Then select the profile and supply only the downstream key:
 MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
 
-Keep `supports_websockets = false`; mini-sub2api supports HTTP/SSE only. Subscription routes apply
-Codex compatibility normalization: unsupported output/sampling fields are removed, `system`
-instruction messages become `developer` messages, and the upstream `User-Agent` uses the Codex CLI
-`0.147.0` compatibility baseline. Explicit models, tools, instructions, reasoning controls, and
-streaming choices are preserved. OpenAI API-key routes preserve the client body and SDK metadata,
+With `supports_websockets = true`, current Codex uses the Responses WebSocket v2 protocol and may
+reuse one connection for sequential turns. mini-sub2api establishes the upstream socket before
+accepting the public upgrade, so an HTTP handshake failure (including `426`) remains available to
+Codex's HTTP fallback logic. Set the flag to `false` to force the independent HTTP/SSE path.
+
+Subscription routes apply Codex compatibility normalization: unsupported output/sampling fields
+are removed, `system` instruction messages become `developer` messages, and the upstream
+`User-Agent` uses the Codex CLI `0.147.0` compatibility baseline. Explicit models, tools,
+instructions, reasoning controls, WebSocket `generate`/continuation fields, and streaming choices
+are preserved. OpenAI API-key request bodies and WebSocket application frames remain byte-exact,
 changing only the upstream bearer; organization/project headers are not sent on OAuth routes.
+
+WebSocket policy is intentionally small and coordinator-owned:
+
+- One socket is bound to one downstream key and credential; responses are sequential, and an
+  overlapping `response.create` closes the connection with a policy violation.
+- Other valid Responses v2 JSON application events pass through while a response is active.
+- A key may hold at most eight live sockets. The first application frame must arrive within 30
+  seconds, an idle connection between turns closes after five minutes, each write is bounded to
+  120 seconds, and application messages are limited to 16 MiB. There is no hard total lifetime.
+- Codex's `generate=false` startup prewarm is retained in history as `websocket_prewarm` for
+  in-flight/revocation safety, but it is excluded from daily inference aggregates.
+- The public hop supports per-message deflate. The authenticated loopback hop and the provider hop
+  are uncompressed; payload semantics are unchanged.
 
 ## Administration
 
@@ -185,7 +204,8 @@ build/bin/mini-sub2api --state-dir ./state serve \
 
 For direct IP HTTPS, the certificate must contain that IP as an `iPAddress` subject alternative
 name. mini-sub2api does not manage certificates. A reverse proxy may terminate public TLS only when
-it forwards to a deployment-local loopback listener and preserves streaming.
+it forwards to a deployment-local loopback listener, preserves streaming, and passes WebSocket
+HTTP/1.1 Upgrade/Connection headers without buffering the upgraded connection.
 
 Operational boundaries:
 
@@ -194,6 +214,8 @@ Operational boundaries:
 - Provider secrets live in a private `0600` vault and are not encrypted at rest.
 - SQLite stores credential metadata, downstream-key hashes, timing, status, and token counts. It
   does not store prompts, request bodies, response bodies, tool arguments, or generated content.
+- Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or
+  disabling a credential therefore prevents the next turn on an already-open idle socket.
 - Inference is not replayed after transport errors, `429`, or `5xx`. OAuth may refresh once and
   replay once after a pre-response upstream `401`.
 

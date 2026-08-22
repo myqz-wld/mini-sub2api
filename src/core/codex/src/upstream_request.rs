@@ -5,8 +5,13 @@ use http::HeaderName;
 use http::HeaderValue;
 use reqwest::Client;
 use reqwest::Request;
+use reqwest_websocket::RequestBuilderExt;
+use reqwest_websocket::UpgradedRequestBuilder;
+use tungstenite::protocol::WebSocketConfig;
+use url::Url;
 
 pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.147.0";
+pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
 
 const COMMON_ALLOWED: &[&str] = &[
     "accept",
@@ -55,6 +60,46 @@ pub(crate) fn build(
     auth: &ResolvedAuth,
     body: Bytes,
 ) -> Result<Request, CoreFailure> {
+    let headers = authenticated_headers(inbound_headers, auth)?;
+    client
+        .post(upstream_url)
+        .headers(headers)
+        .body(body)
+        .build()
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)
+}
+
+pub(crate) fn build_websocket(
+    client: &Client,
+    inbound_headers: &HeaderMap,
+    upstream_url: &str,
+    auth: &ResolvedAuth,
+    max_message_bytes: usize,
+) -> Result<UpgradedRequestBuilder, CoreFailure> {
+    let mut headers = authenticated_headers(inbound_headers, auth)?;
+    headers.remove(http::header::ACCEPT);
+    headers.remove(http::header::CONTENT_ENCODING);
+    headers.remove(http::header::CONTENT_TYPE);
+    headers.insert(
+        "openai-beta",
+        HeaderValue::from_static(RESPONSES_WEBSOCKET_BETA),
+    );
+    let url = websocket_url(upstream_url)?;
+    let config = WebSocketConfig::default()
+        .max_message_size(Some(max_message_bytes))
+        .max_frame_size(Some(max_message_bytes));
+    Ok(client
+        .get(url)
+        .version(reqwest::Version::HTTP_11)
+        .headers(headers)
+        .upgrade()
+        .web_socket_config(config))
+}
+
+fn authenticated_headers(
+    inbound_headers: &HeaderMap,
+    auth: &ResolvedAuth,
+) -> Result<HeaderMap, CoreFailure> {
     let mut headers = forwarded_headers(inbound_headers, auth);
     let token = match auth {
         ResolvedAuth::CodexOAuth { token, account_id } => {
@@ -72,12 +117,20 @@ pub(crate) fn build(
         HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| CoreFailure::Internal)?;
     authorization.set_sensitive(true);
     headers.insert(http::header::AUTHORIZATION, authorization);
-    client
-        .post(upstream_url)
-        .headers(headers)
-        .body(body)
-        .build()
-        .map_err(|_| CoreFailure::UpstreamConnectFailed)
+    Ok(headers)
+}
+
+pub(crate) fn websocket_url(upstream_url: &str) -> Result<Url, CoreFailure> {
+    let mut url = Url::parse(upstream_url).map_err(|_| CoreFailure::UpstreamConnectFailed)?;
+    let websocket_scheme = match url.scheme() {
+        "http" => "ws",
+        "https" => "wss",
+        "ws" | "wss" => return Ok(url),
+        _ => return Err(CoreFailure::UpstreamConnectFailed),
+    };
+    url.set_scheme(websocket_scheme)
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
+    Ok(url)
 }
 
 fn pin_codex_user_agent(headers: &mut HeaderMap) -> Result<(), CoreFailure> {

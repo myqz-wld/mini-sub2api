@@ -18,7 +18,8 @@ func (s *Store) History(
 		return nil, fmt.Errorf("history limit must be between 1 and 1000")
 	}
 	query := `
-        SELECT request_id, api_key_id, credential_id_snapshot, started_at, completed_at,
+        SELECT request_id, api_key_id, credential_id_snapshot, transport, operation_kind,
+               started_at, completed_at,
                terminal_status, http_status, ttfb_ms, duration_ms, input_tokens,
                cached_input_tokens, cache_write_input_tokens, output_tokens,
                reasoning_output_tokens, total_tokens
@@ -107,7 +108,8 @@ func scanRequestRecord(row rowScanner) (RequestRecord, error) {
 	var httpStatus, ttfb, duration sql.NullInt64
 	var usageFields [6]sql.NullInt64
 	err := row.Scan(
-		&record.RequestID, &record.APIKeyID, &record.CredentialID, &startedAt,
+		&record.RequestID, &record.APIKeyID, &record.CredentialID,
+		&record.Transport, &record.OperationKind, &startedAt,
 		&completedAt, &record.Status, &httpStatus, &ttfb, &duration,
 		&usageFields[0], &usageFields[1], &usageFields[2], &usageFields[3],
 		&usageFields[4], &usageFields[5],

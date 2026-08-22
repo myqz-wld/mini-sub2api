@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 var migrations = []string{`
 CREATE TABLE schema_meta (
@@ -85,6 +85,11 @@ CREATE TABLE daily_usage (
     total_tokens INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(day, api_key_id)
 );
+`, `
+ALTER TABLE requests ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'
+    CHECK (transport IN ('http', 'websocket'));
+ALTER TABLE requests ADD COLUMN operation_kind TEXT NOT NULL DEFAULT 'inference'
+    CHECK (operation_kind IN ('inference', 'websocket_prewarm'));
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

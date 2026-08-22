@@ -14,11 +14,16 @@ type BuildIdentity struct {
 	Commit  string `json:"commit"`
 }
 
+type Capabilities struct {
+	ResponsesWebSocket bool `json:"responsesWebSocket"`
+}
+
 type Readiness struct {
 	ProtocolVersion string        `json:"protocolVersion"`
 	Port            uint16        `json:"port"`
 	PID             int           `json:"pid"`
 	Build           BuildIdentity `json:"build"`
+	Capabilities    Capabilities  `json:"capabilities"`
 }
 
 type ErrorEnvelope struct {
