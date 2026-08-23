@@ -8,6 +8,8 @@ use axum::extract::State as AxumState;
 use axum::response::Response as AxumResponse;
 use axum::routing::get;
 use pretty_assertions::assert_eq;
+use reqwest_websocket::CloseCode as DownstreamCloseCode;
+use reqwest_websocket::Message as DownstreamMessage;
 use reqwest_websocket::RequestBuilderExt;
 use sha2::Digest;
 use sha2::Sha256;
@@ -186,7 +188,7 @@ async fn api_key_route_relays_multiple_turns_and_filters_handshake_headers() {
         r#"{"type":"response.create","model":"second","previous_response_id":"resp_first"}"#;
     for (index, frame) in [first, second].into_iter().enumerate() {
         socket
-            .send(UpstreamMessage::Text(frame.to_string()))
+            .send(DownstreamMessage::Text(frame.to_string()))
             .await
             .expect("send create frame");
         let event = socket
@@ -194,13 +196,13 @@ async fn api_key_route_relays_multiple_turns_and_filters_handshake_headers() {
             .await
             .expect("completion event")
             .expect("valid completion event");
-        let UpstreamMessage::Text(event) = event else {
+        let DownstreamMessage::Text(event) = event else {
             panic!("expected text completion event");
         };
         let value: Value = serde_json::from_str(&event).expect("event JSON");
         assert_eq!(value["sequence"], index + 1);
     }
-    let _ = socket.close(CloseCode::Normal, None).await;
+    let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
     assert_eq!(capture.frames.lock().await.as_slice(), [first, second]);
     let headers = capture
@@ -221,11 +223,14 @@ async fn api_key_route_relays_multiple_turns_and_filters_handshake_headers() {
         header_text(&headers, "openai-organization").as_deref(),
         Some("org-test")
     );
+    assert_eq!(
+        header_text(&headers, "sec-websocket-extensions").as_deref(),
+        Some("permessage-deflate; client_max_window_bits")
+    );
     for forbidden in [
         "cookie",
         "x-forwarded-for",
         mini_sub2api_protocol_v1::ACCOUNT_REF_HEADER,
-        "sec-websocket-extensions",
     ] {
         assert!(!headers.contains_key(forbidden), "header {forbidden}");
     }
@@ -309,10 +314,8 @@ async fn loopback_websocket_uses_direct_client_and_enforces_message_limit() {
     let upstream = spawn_loopback(app).await;
     let (mut state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
     state.transports = Arc::new(
-        crate::transport_registry::TransportRegistry::new_with_proxy(
-            reqwest::Proxy::all("http://127.0.0.1:1").expect("bad test proxy"),
-        )
-        .expect("proxied transport registry"),
+        crate::transport_registry::TransportRegistry::new_with_proxy_url("http://127.0.0.1:1")
+            .expect("proxied transport registry"),
     );
     let core = spawn_internal(state).await;
     let handshake = internal_handshake(&core.base_url, &account_ref)
@@ -325,12 +328,12 @@ async fn loopback_websocket_uses_direct_client_and_enforces_message_limit() {
         "{{\"type\":\"response.create\",\"padding\":\"{}\"}}",
         "a".repeat(MAX_WEBSOCKET_MESSAGE_BYTES)
     );
-    let send_result = socket.send(UpstreamMessage::Text(oversized)).await;
+    let send_result = socket.send(DownstreamMessage::Text(oversized)).await;
     if send_result.is_ok() {
         let closed = tokio::time::timeout(Duration::from_secs(2), socket.next())
             .await
             .expect("oversized close timeout");
-        assert!(!matches!(closed, Some(Ok(UpstreamMessage::Text(_)))));
+        assert!(!matches!(closed, Some(Ok(DownstreamMessage::Text(_)))));
     }
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(capture.frames.lock().await.is_empty());

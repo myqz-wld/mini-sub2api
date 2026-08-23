@@ -4,6 +4,8 @@ use crate::vault::CredentialMaterial;
 use axum::Json;
 use axum::routing::post;
 use pretty_assertions::assert_eq;
+use reqwest_websocket::CloseCode as DownstreamCloseCode;
+use reqwest_websocket::Message as DownstreamMessage;
 
 #[derive(Clone)]
 struct OAuthWebSocketState {
@@ -91,7 +93,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
     let mut socket = handshake.into_websocket().await.expect("internal socket");
     socket
-        .send(UpstreamMessage::Text(
+        .send(DownstreamMessage::Text(
             serde_json::json!({
                 "type": "response.create",
                 "model": "gpt-5.6-sol",
@@ -115,8 +117,8 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         .await
         .expect("completion")
         .expect("valid event");
-    assert!(matches!(completion, UpstreamMessage::Text(_)));
-    let _ = socket.close(CloseCode::Normal, None).await;
+    assert!(matches!(completion, DownstreamMessage::Text(_)));
+    let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
     assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 2);
     assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 1);
@@ -163,6 +165,10 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         header_text(&headers, "openai-beta").as_deref(),
         Some(crate::upstream_request::RESPONSES_WEBSOCKET_BETA)
     );
+    assert_eq!(
+        header_text(&headers, "sec-websocket-extensions").as_deref(),
+        Some("permessage-deflate; client_max_window_bits")
+    );
     assert!(
         header_text(&headers, "x-codex-installation-id").as_deref()
             == Some(expected_device.as_str())
@@ -180,11 +186,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         .await
         .expect("fingerprint after refresh");
     assert!(fingerprint_after_refresh.installation_id() == expected_device.as_str());
-    for forbidden in [
-        "openai-organization",
-        "x-stainless-lang",
-        "sec-websocket-extensions",
-    ] {
+    for forbidden in ["openai-organization", "x-stainless-lang"] {
         assert!(!headers.contains_key(forbidden), "header {forbidden}");
     }
 }

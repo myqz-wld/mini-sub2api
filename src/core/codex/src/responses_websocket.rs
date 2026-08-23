@@ -13,10 +13,12 @@ use crate::transport_registry::CredentialTransportContext;
 use crate::upstream_request::ResolvedAuth;
 use crate::upstream_request::build_websocket;
 use crate::vault::Vault;
+use crate::websocket_connector::WebSocketConnection as UpstreamWebSocket;
+use crate::websocket_connector::WebSocketHandshake;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
-use axum::extract::ws::CloseFrame;
+use axum::extract::ws::CloseFrame as InternalCloseFrame;
 use axum::extract::ws::Message as InternalMessage;
 use axum::extract::ws::WebSocket;
 use axum::extract::ws::WebSocketUpgrade;
@@ -31,13 +33,12 @@ use futures_util::SinkExt;
 use futures_util::StreamExt;
 use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
 use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
-use reqwest_websocket::CloseCode;
-use reqwest_websocket::Message as UpstreamMessage;
-use reqwest_websocket::UpgradeResponse;
-use reqwest_websocket::WebSocket as UpstreamWebSocket;
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::time::Instant;
+use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamCloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as UpstreamCloseCode;
 
 pub(crate) const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_HANDSHAKE_REJECTION_BYTES: usize = 64 * 1024;
@@ -120,10 +121,10 @@ async fn responses_socket_inner(
     }
 
     let response_headers = filtered_headers(handshake.headers(), SAFE_UPGRADE_RESPONSE_HEADERS);
-    let upstream = handshake
-        .into_websocket()
-        .await
-        .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
+    let upstream = match handshake {
+        WebSocketHandshake::Connected { socket, .. } => *socket,
+        WebSocketHandshake::Rejected(_) => return Err(CoreFailure::Internal),
+    };
     let normalize_subscription = matches!(final_auth, ResolvedAuth::CodexOAuth { .. });
     let account_ref = identity.account_ref;
     let request_id = identity.request_id;
@@ -154,21 +155,20 @@ async fn send_handshake(
     headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
-) -> Result<UpgradeResponse, CoreFailure> {
-    build_websocket(
-        transport.websocket_client_for_url(upstream_url),
-        headers,
-        upstream_url,
-        auth,
-        MAX_WEBSOCKET_MESSAGE_BYTES,
-    )?
-    .send()
-    .await
-    .map_err(|_| CoreFailure::UpstreamConnectFailed)
+) -> Result<WebSocketHandshake, CoreFailure> {
+    let (request, config) =
+        build_websocket(headers, upstream_url, auth, MAX_WEBSOCKET_MESSAGE_BYTES)?;
+    transport
+        .websocket_connector_for_url(upstream_url)
+        .connect(request, config)
+        .await
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)
 }
 
-async fn rejection_response(handshake: UpgradeResponse) -> Response<Body> {
-    let upstream = handshake.into_inner();
+async fn rejection_response(handshake: WebSocketHandshake) -> Response<Body> {
+    let WebSocketHandshake::Rejected(upstream) = handshake else {
+        return Response::new(Body::empty());
+    };
     let status = upstream.status();
     let headers = filtered_headers(upstream.headers(), SAFE_REJECTION_RESPONSE_HEADERS);
     let preserve_body = headers
@@ -179,7 +179,11 @@ async fn rejection_response(handshake: UpgradeResponse) -> Response<Body> {
             value.starts_with("application/json") || value.starts_with("text/")
         });
     let body = if preserve_body {
-        read_bounded(upstream, MAX_HANDSHAKE_REJECTION_BYTES).await
+        upstream
+            .into_body()
+            .filter(|body| body.len() <= MAX_HANDSHAKE_REJECTION_BYTES)
+            .map(Bytes::from)
+            .unwrap_or_default()
     } else {
         Bytes::new()
     };
@@ -189,21 +193,6 @@ async fn rejection_response(handshake: UpgradeResponse) -> Response<Body> {
         .unwrap_or_else(|_| Response::new(Body::empty()));
     copy_headers(response.headers_mut(), &headers);
     response
-}
-
-async fn read_bounded(response: reqwest::Response, maximum: usize) -> Bytes {
-    let mut stream = response.bytes_stream();
-    let mut body = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let Ok(chunk) = chunk else {
-            return Bytes::new();
-        };
-        if body.len().saturating_add(chunk.len()) > maximum {
-            return Bytes::new();
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Bytes::from(body)
 }
 
 struct RelayContext {
@@ -236,10 +225,7 @@ async fn relay(internal: WebSocket, upstream: UpstreamWebSocket, context: RelayC
                         let is_create = match is_response_create(&text) {
                             Ok(is_create) => is_create,
                             Err(()) => {
-                                let close = UpstreamMessage::Close {
-                                    code: CloseCode::Protocol,
-                                    reason: String::new(),
-                                };
+                                let close = upstream_close(UpstreamCloseCode::Protocol);
                                 let _ = upstream_write.send(close).await;
                                 return RelayExit::Complete;
                             }
@@ -258,56 +244,52 @@ async fn relay(internal: WebSocket, upstream: UpstreamWebSocket, context: RelayC
                             &fingerprint,
                             &mut create_sequence,
                         ) {
-                            Ok(prepared) => UpstreamMessage::Text(prepared),
-                            Err(()) => UpstreamMessage::Close {
-                                code: CloseCode::Protocol,
-                                reason: String::new(),
-                            },
+                            Ok(prepared) => UpstreamMessage::Text(prepared.into()),
+                            Err(()) => upstream_close(UpstreamCloseCode::Protocol),
                         }
                     }
-                    Ok(InternalMessage::Binary(_)) => UpstreamMessage::Close {
-                        code: CloseCode::Unsupported,
-                        reason: String::new(),
-                    },
+                    Ok(InternalMessage::Binary(_)) => {
+                        upstream_close(UpstreamCloseCode::Unsupported)
+                    }
                     Ok(InternalMessage::Ping(payload)) => UpstreamMessage::Ping(payload),
                     Ok(InternalMessage::Pong(payload)) => UpstreamMessage::Pong(payload),
                     Ok(InternalMessage::Close(frame)) => {
                         let (code, reason) = frame
                             .map(|frame| (allowed_close_code(frame.code), frame.reason.to_string()))
-                            .unwrap_or((CloseCode::Normal, String::new()));
-                        UpstreamMessage::Close { code, reason }
+                            .unwrap_or((UpstreamCloseCode::Normal, String::new()));
+                        UpstreamMessage::Close(Some(UpstreamCloseFrame {
+                            code,
+                            reason: reason.into(),
+                        }))
                     }
-                    Err(_) => UpstreamMessage::Close {
-                        code: CloseCode::Away,
-                        reason: String::new(),
-                    },
+                    Err(_) => upstream_close(UpstreamCloseCode::Away),
                 };
-                let terminal = matches!(outbound, UpstreamMessage::Close { .. });
+                let terminal = matches!(outbound, UpstreamMessage::Close(_));
                 if upstream_write.send(outbound).await.is_err() || terminal {
                     return RelayExit::Complete;
                 }
             }
             let _ = upstream_write
-                .send(UpstreamMessage::Close {
-                    code: CloseCode::Away,
-                    reason: String::new(),
-                })
+                .send(upstream_close(UpstreamCloseCode::Away))
                 .await;
             RelayExit::Complete
         };
         let upstream_to_client = async {
             while let Some(message) = upstream_read.next().await {
                 let outbound = match message {
-                    Ok(UpstreamMessage::Text(text)) => InternalMessage::Text(text.into()),
+                    Ok(UpstreamMessage::Text(text)) => {
+                        InternalMessage::Text(text.to_string().into())
+                    }
                     Ok(UpstreamMessage::Binary(_)) => internal_close(1003),
                     Ok(UpstreamMessage::Ping(payload)) => InternalMessage::Ping(payload),
                     Ok(UpstreamMessage::Pong(payload)) => InternalMessage::Pong(payload),
-                    Ok(UpstreamMessage::Close { code, reason }) => {
-                        InternalMessage::Close(Some(CloseFrame {
-                            code: u16::from(code),
-                            reason: reason.into(),
+                    Ok(UpstreamMessage::Close(frame)) => {
+                        InternalMessage::Close(frame.map(|frame| InternalCloseFrame {
+                            code: u16::from(frame.code),
+                            reason: frame.reason.to_string().into(),
                         }))
                     }
+                    Ok(UpstreamMessage::Frame(_)) => internal_close(1011),
                     Err(_) => internal_close(1011),
                 };
                 let terminal = matches!(outbound, InternalMessage::Close(_));
@@ -327,10 +309,7 @@ async fn relay(internal: WebSocket, upstream: UpstreamWebSocket, context: RelayC
     if exit == RelayExit::StaleFingerprint {
         let _ = internal_write.send(internal_close(1012)).await;
         let _ = upstream_write
-            .send(UpstreamMessage::Close {
-                code: CloseCode::Restart,
-                reason: String::new(),
-            })
+            .send(upstream_close(UpstreamCloseCode::Restart))
             .await;
     }
 }
@@ -406,18 +385,25 @@ fn prepare_client_text(
 }
 
 fn internal_close(code: u16) -> InternalMessage {
-    InternalMessage::Close(Some(CloseFrame {
+    InternalMessage::Close(Some(InternalCloseFrame {
         code,
         reason: "".into(),
     }))
 }
 
-fn allowed_close_code(code: u16) -> CloseCode {
-    let code = CloseCode::from(code);
+fn upstream_close(code: UpstreamCloseCode) -> UpstreamMessage {
+    UpstreamMessage::Close(Some(UpstreamCloseFrame {
+        code,
+        reason: "".into(),
+    }))
+}
+
+fn allowed_close_code(code: u16) -> UpstreamCloseCode {
+    let code = UpstreamCloseCode::from(code);
     if code.is_allowed() {
         code
     } else {
-        CloseCode::Protocol
+        UpstreamCloseCode::Protocol
     }
 }
 

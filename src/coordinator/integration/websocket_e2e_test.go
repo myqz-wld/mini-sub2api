@@ -118,7 +118,7 @@ func TestCrossLanguageWebSocketPassthroughAndHTTPIndependence(t *testing.T) {
 	defer upstream.mu.Unlock()
 	if upstream.headers.Get("Authorization") != "Bearer "+upstreamAPIKey ||
 		upstream.headers.Get("Openai-Beta") != "responses_websockets=2026-02-06" ||
-		upstream.headers.Get("Sec-WebSocket-Extensions") != "" ||
+		upstream.headers.Get("Sec-WebSocket-Extensions") != "permessage-deflate; client_max_window_bits" ||
 		upstream.headers.Get("X-Forwarded-For") != "" ||
 		upstream.headers.Get("X-Stainless-Other") != "" {
 		t.Fatalf("upstream headers = %#v", upstream.headers)

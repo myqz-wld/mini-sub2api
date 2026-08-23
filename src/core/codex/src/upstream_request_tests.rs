@@ -1,6 +1,9 @@
 use super::*;
 use crate::vault::DEFAULT_OPENAI_RESPONSES_URL;
 use pretty_assertions::assert_eq;
+use std::collections::BTreeSet;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 
 const OFFICIAL_SDK_BODY: &[u8] = br#"{"input":"offline parity check","model":"gpt-5.2","reasoning":{"effort":"none"},"text":{"verbosity":"low"}}"#;
 
@@ -175,4 +178,189 @@ fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
             .and_then(|value| value.to_str().ok()),
         Some("codex_exec/0.149.0 (Mac OS 15.0.0; arm64) Apple_Terminal")
     );
+}
+
+#[test]
+fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        ("user-agent", "codex_exec/0.149.0"),
+        ("originator", "codex_exec"),
+        ("x-codex-turn-metadata", r#"{"request_kind":"prewarm"}"#),
+        ("x-codex-beta-features", "feature-test"),
+        ("x-client-request-id", "request-test"),
+        ("session-id", "session-test"),
+        ("thread-id", "thread-test"),
+        ("x-codex-window-id", "window-test"),
+    ] {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+    let (request, config) = build_websocket(
+        &headers,
+        "https://example.test/v1/responses",
+        &ResolvedAuth::OpenAiApiKey {
+            token: "offline-websocket-key-not-real".to_string(),
+        },
+        1024 * 1024,
+    )
+    .expect("WebSocket request");
+    let (raw, _) = tokio_tungstenite::tungstenite::handshake::client::generate_request(
+        request,
+        Some(&config.extensions),
+    )
+    .expect("raw handshake");
+    let raw = String::from_utf8(raw).expect("ASCII handshake");
+    let names = raw
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        [
+            "Host",
+            "Connection",
+            "Upgrade",
+            "Sec-WebSocket-Version",
+            "Sec-WebSocket-Key",
+            "authorization",
+            "user-agent",
+            "originator",
+            "openai-beta",
+            "x-codex-turn-metadata",
+            "x-codex-beta-features",
+            "x-client-request-id",
+            "session-id",
+            "thread-id",
+            "x-codex-window-id",
+            "sec-websocket-extensions",
+        ]
+    );
+    assert!(
+        raw.contains("sec-websocket-extensions: permessage-deflate; client_max_window_bits\r\n")
+    );
+    assert!(!raw.to_ascii_lowercase().contains("\r\naccept:"));
+}
+
+#[tokio::test]
+async fn http_request_emission_matches_codex_common_header_order() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("loopback listener");
+    let address = listener.local_addr().expect("loopback address");
+    let url = format!("http://{address}/v1/responses");
+    crate::test_support::assert_loopback_url(&url);
+
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        ("x-codex-beta-features", "feature-test"),
+        ("x-codex-window-id", "window-test"),
+        ("x-codex-turn-metadata", r#"{"request_kind":"turn"}"#),
+        ("x-openai-internal-codex-responses-lite", "true"),
+        ("x-client-request-id", "request-test"),
+        ("session-id", "session-test"),
+        ("thread-id", "thread-test"),
+        ("accept", "text/event-stream"),
+        ("content-type", "application/json"),
+        ("originator", "codex_exec"),
+        ("user-agent", "codex_exec/0.149.0"),
+    ] {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+    let client = Client::builder()
+        .no_proxy()
+        .build()
+        .expect("loopback client");
+    let request = build(
+        &client,
+        &headers,
+        &url,
+        &ResolvedAuth::OpenAiApiKey {
+            token: "offline-http-key-not-real".to_string(),
+        },
+        Bytes::from_static(br#"{"model":"offline"}"#),
+    )
+    .expect("HTTP request");
+    let request_task = tokio::spawn(async move { client.execute(request).await });
+
+    let (mut stream, _) = listener.accept().await.expect("loopback request");
+    let mut captured = Vec::new();
+    while !captured.windows(4).any(|window| window == b"\r\n\r\n") {
+        let mut chunk = [0_u8; 2048];
+        let count = stream.read(&mut chunk).await.expect("request bytes");
+        assert!(count > 0, "request closed before headers");
+        captured.extend_from_slice(&chunk[..count]);
+        assert!(captured.len() < 64 * 1024, "request headers too large");
+    }
+    stream
+        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("loopback response");
+    assert_eq!(
+        request_task
+            .await
+            .expect("request task")
+            .expect("HTTP response")
+            .status(),
+        http::StatusCode::OK
+    );
+
+    let header_end = captured
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("header terminator");
+    let raw_headers = std::str::from_utf8(&captured[..header_end]).expect("ASCII headers");
+    let names = raw_headers
+        .split("\r\n")
+        .skip(1)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "x-codex-beta-features",
+            "x-codex-window-id",
+            "x-codex-turn-metadata",
+            "x-openai-internal-codex-responses-lite",
+            "x-client-request-id",
+            "session-id",
+            "thread-id",
+            "accept",
+            "content-type",
+            "authorization",
+            "originator",
+            "user-agent",
+            "host",
+            "content-length",
+        ]
+    );
+}
+
+#[test]
+fn wire_order_tables_cover_every_reviewed_header_without_duplicates() {
+    let http = HTTP_HEADER_ORDER.iter().copied().collect::<BTreeSet<_>>();
+    let websocket = WEBSOCKET_WIRE_HEADER_ORDER
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(http.len(), HTTP_HEADER_ORDER.len());
+    assert_eq!(websocket.len(), WEBSOCKET_WIRE_HEADER_ORDER.len());
+
+    for name in COMMON_ALLOWED.iter().chain(OPENAI_API_KEY_ALLOWED) {
+        assert!(http.contains(name), "HTTP order omitted {name}");
+        if !["accept", "content-encoding", "content-type"].contains(name) {
+            assert!(websocket.contains(name), "WebSocket order omitted {name}");
+        }
+    }
+    for name in ["authorization", "chatgpt-account-id"] {
+        assert!(http.contains(name));
+        assert!(websocket.contains(name));
+    }
 }

@@ -8,7 +8,10 @@ use axum::extract::State as AxumState;
 use axum::response::Response as AxumResponse;
 use axum::routing::get;
 use pretty_assertions::assert_eq;
+use reqwest_websocket::CloseCode as DownstreamCloseCode;
+use reqwest_websocket::Message as DownstreamMessage;
 use reqwest_websocket::RequestBuilderExt;
+use reqwest_websocket::WebSocket as DownstreamWebSocket;
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
@@ -92,7 +95,7 @@ async fn device_projects_handshake_and_create_frames_but_not_control_frames() {
     send_and_receive(&mut socket, prewarm).await;
     let control = " {\"type\":\"response.append_input_item\", \"item\":{}} ";
     send_and_receive(&mut socket, control).await;
-    let _ = socket.close(CloseCode::Normal, None).await;
+    let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
     let handshakes = capture.handshakes.lock().await;
     let upstream_headers = &handshakes[0];
@@ -196,7 +199,7 @@ async fn stale_socket_forwards_zero_post_change_frames_and_reconnects() {
     assert_eq!(capture.frames.lock().await.as_slice(), [control]);
     let frames_before_stale_create = capture.frames.lock().await.len();
     old_socket
-        .send(UpstreamMessage::Text(
+        .send(DownstreamMessage::Text(
             r#"{"type":"response.create","model":"stale"}"#.to_string(),
         ))
         .await
@@ -206,10 +209,10 @@ async fn stale_socket_forwards_zero_post_change_frames_and_reconnects() {
         .expect("stale close timeout")
         .expect("stale close frame")
         .expect("valid stale close");
-    let UpstreamMessage::Close { code, reason } = close else {
+    let DownstreamMessage::Close { code, reason } = close else {
         panic!("expected stale close")
     };
-    assert_eq!(code, CloseCode::Restart);
+    assert_eq!(code, DownstreamCloseCode::Restart);
     assert!(reason.is_empty());
     assert_eq!(
         capture.frames.lock().await.len(),
@@ -410,9 +413,9 @@ fn internal_handshake(base_url: &str, account_ref: &str) -> reqwest::RequestBuil
         .header(mini_sub2api_protocol_v1::REQUEST_ID_HEADER, "req_ws_fp")
 }
 
-async fn send_and_receive(socket: &mut UpstreamWebSocket, frame: &str) {
+async fn send_and_receive(socket: &mut DownstreamWebSocket, frame: &str) {
     socket
-        .send(UpstreamMessage::Text(frame.to_string()))
+        .send(DownstreamMessage::Text(frame.to_string()))
         .await
         .expect("send frame");
     let message = socket
@@ -420,5 +423,5 @@ async fn send_and_receive(socket: &mut UpstreamWebSocket, frame: &str) {
         .await
         .expect("completion")
         .expect("valid completion");
-    assert!(matches!(message, UpstreamMessage::Text(_)));
+    assert!(matches!(message, DownstreamMessage::Text(_)));
 }
