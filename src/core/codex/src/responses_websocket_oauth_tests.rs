@@ -59,9 +59,17 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
                 client_id: "client-websocket-test".to_string(),
             },
             format!("{}/responses", upstream.base_url),
+            crate::fingerprint::FingerprintMode::Device,
         )
         .await
         .expect("OAuth record");
+    let expected_device = vault
+        .fingerprint_snapshot(&metadata.account_ref)
+        .await
+        .expect("fingerprint")
+        .installation_id()
+        .to_string();
+    let vault_after_refresh = vault.clone();
     let core = spawn_internal(app_state(vault)).await;
 
     let handshake = internal_handshake(&core.base_url, &metadata.account_ref)
@@ -71,6 +79,11 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         )
         .header("openai-organization", "must-not-cross")
         .header("x-stainless-lang", "must-not-cross")
+        .header("x-codex-installation-id", "handshake-conflict")
+        .header(
+            "x-codex-turn-metadata",
+            r#"{"installation_id":"turn-conflict","session_id":"session-kept"}"#,
+        )
         .upgrade()
         .send()
         .await
@@ -86,7 +99,11 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
                 "tools": [],
                 "generate": false,
                 "previous_response_id": "resp_previous",
-                "client_metadata": {"custom": "kept"},
+                "client_metadata": {
+                    "custom": "kept",
+                    "x-codex-installation-id": "frame-conflict",
+                    "x-codex-turn-metadata": "{\"installation_id\":\"frame-turn-conflict\",\"thread_id\":\"thread-kept\"}"
+                },
                 "max_output_tokens": 1000
             })
             .to_string(),
@@ -109,6 +126,18 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert_eq!(value["generate"], false);
     assert_eq!(value["previous_response_id"], "resp_previous");
     assert_eq!(value["client_metadata"]["custom"], "kept");
+    assert!(
+        value["client_metadata"]["x-codex-installation-id"].as_str()
+            == Some(expected_device.as_str())
+    );
+    let turn_metadata: Value = serde_json::from_str(
+        value["client_metadata"]["x-codex-turn-metadata"]
+            .as_str()
+            .expect("turn metadata"),
+    )
+    .expect("turn metadata JSON");
+    assert!(turn_metadata["installation_id"].as_str() == Some(expected_device.as_str()));
+    assert_eq!(turn_metadata["thread_id"], "thread-kept");
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert!(value.get("max_output_tokens").is_none());
 
@@ -128,12 +157,29 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     );
     assert_eq!(
         header_text(&headers, http::header::USER_AGENT.as_str()).as_deref(),
-        Some("codex_exec/0.147.0 (Mac OS test; arm64)")
+        Some("codex_exec/0.149.0 (Mac OS test; arm64)")
     );
     assert_eq!(
         header_text(&headers, "openai-beta").as_deref(),
         Some(crate::upstream_request::RESPONSES_WEBSOCKET_BETA)
     );
+    assert!(
+        header_text(&headers, "x-codex-installation-id").as_deref()
+            == Some(expected_device.as_str())
+    );
+    let header_turn: Value = serde_json::from_str(
+        header_text(&headers, "x-codex-turn-metadata")
+            .as_deref()
+            .expect("handshake turn metadata"),
+    )
+    .expect("handshake turn metadata JSON");
+    assert!(header_turn["installation_id"].as_str() == Some(expected_device.as_str()));
+    assert_eq!(header_turn["session_id"], "session-kept");
+    let fingerprint_after_refresh = vault_after_refresh
+        .fingerprint_snapshot(&metadata.account_ref)
+        .await
+        .expect("fingerprint after refresh");
+    assert!(fingerprint_after_refresh.installation_id() == expected_device.as_str());
     for forbidden in [
         "openai-organization",
         "x-stainless-lang",

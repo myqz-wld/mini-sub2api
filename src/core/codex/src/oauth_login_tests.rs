@@ -60,6 +60,7 @@ async fn device_flow_uses_loopback_mock_and_persists_tokens() {
             issuer: mock.base_url.clone(),
             client_id: "client-test".to_string(),
             upstream_url: format!("{}/responses", mock.base_url),
+            fingerprint_mode: crate::fingerprint::FingerprintMode::Device,
         },
     )
     .await

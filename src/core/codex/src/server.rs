@@ -1,10 +1,15 @@
 use crate::error::CoreFailure;
-use crate::http_client::has_literal_loopback_host;
+use crate::fingerprint::FingerprintMode;
+use crate::fingerprint::FingerprintSnapshot;
+use crate::fingerprint_projection::project_http_device;
 use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
 use crate::request_normalizer::prepare_subscription_request;
 use crate::responses_websocket::responses_socket;
+use crate::transport_registry::CredentialTransportContext;
+use crate::transport_registry::CredentialTransportPolicy;
+use crate::transport_registry::TransportRegistry;
 use crate::upstream_request::ResolvedAuth;
 use crate::upstream_request::build as build_upstream_request;
 use crate::vault::CredentialMaterial;
@@ -33,7 +38,6 @@ use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
 use mini_sub2api_protocol_v1::Readiness;
 use mini_sub2api_protocol_v1::VERSION;
 use mini_sub2api_protocol_v1::VERSION_HEADER;
-use reqwest::Client;
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
@@ -44,7 +48,6 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
@@ -54,12 +57,16 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) vault: Vault,
-    pub(crate) client: Client,
-    pub(crate) direct_client: Client,
-    pub(crate) websocket_client: Client,
-    pub(crate) direct_websocket_client: Client,
+    pub(crate) transports: Arc<TransportRegistry>,
     pub(crate) internal_token_hash: [u8; 32],
     pub(crate) account_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+}
+
+pub(crate) struct ResolvedCredential {
+    pub(crate) upstream_url: String,
+    pub(crate) auth: ResolvedAuth,
+    pub(crate) fingerprint: FingerprintSnapshot,
+    pub(crate) transport: Arc<CredentialTransportContext>,
 }
 
 pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
@@ -70,38 +77,9 @@ pub async fn run(listen: SocketAddr, state_dir: PathBuf) -> Result<()> {
     let token = read_internal_token().await?;
     let vault = Vault::open(state_dir)?;
     let _instance_lock = vault.acquire_instance_lock()?;
-    let client = Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(300))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .context("building upstream client")?;
-    let direct_client = Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .read_timeout(Duration::from_secs(300))
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .build()
-        .context("building direct loopback client")?;
-    let websocket_client = Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .http1_only()
-        .build()
-        .context("building upstream WebSocket client")?;
-    let direct_websocket_client = Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .http1_only()
-        .no_proxy()
-        .build()
-        .context("building direct loopback WebSocket client")?;
     let state = AppState {
         vault,
-        client,
-        direct_client,
-        websocket_client,
-        direct_websocket_client,
+        transports: Arc::new(TransportRegistry::new()?),
         internal_token_hash: Sha256::digest(token.as_bytes()).into(),
         account_locks: Arc::new(Mutex::new(HashMap::new())),
     };
@@ -158,9 +136,9 @@ async fn responses_inner(
     let account_lock = account_lock(state, &account_ref).await;
 
     let _guard = account_lock.lock().await;
-    let (upstream_url, auth) = resolve_auth(state, &account_ref, None).await?;
+    let resolved = resolve_auth(state, &account_ref, None).await?;
     drop(_guard);
-    let (forward_headers, body) = if matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+    let (forward_headers, body) = if matches!(resolved.auth, ResolvedAuth::CodexOAuth { .. }) {
         let prepared = prepare_subscription_request(
             &headers,
             body,
@@ -172,23 +150,47 @@ async fn responses_inner(
     } else {
         (headers, body)
     };
+    let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device {
+        let projected = project_http_device(
+            forward_headers,
+            body,
+            &resolved.fingerprint,
+            MAX_REQUEST_BYTES,
+        )
+        .map_err(|_| CoreFailure::InvalidRequest)?;
+        (projected.headers, projected.body)
+    } else {
+        (forward_headers, body)
+    };
     let expects_sse = request_expects_sse(&body);
 
     let started = Instant::now();
-    let mut upstream =
-        send_upstream(state, &forward_headers, &upstream_url, &auth, body.clone()).await?;
+    let mut upstream = send_upstream(
+        &resolved.transport,
+        &forward_headers,
+        &resolved.upstream_url,
+        &resolved.auth,
+        body.clone(),
+    )
+    .await?;
     if upstream.status() == StatusCode::UNAUTHORIZED
-        && matches!(auth, ResolvedAuth::CodexOAuth { .. })
+        && matches!(resolved.auth, ResolvedAuth::CodexOAuth { .. })
     {
-        let failed_access_token = match &auth {
+        let failed_access_token = match &resolved.auth {
             ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
             ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
         };
         let _guard = account_lock.lock().await;
-        let (retry_url, retry_auth) =
-            resolve_auth(state, &account_ref, Some(&failed_access_token)).await?;
+        let retry = resolve_auth(state, &account_ref, Some(&failed_access_token)).await?;
         drop(_guard);
-        upstream = send_upstream(state, &forward_headers, &retry_url, &retry_auth, body).await?;
+        upstream = send_upstream(
+            &retry.transport,
+            &forward_headers,
+            &retry.upstream_url,
+            &retry.auth,
+            body,
+        )
+        .await?;
         if upstream.status() == StatusCode::UNAUTHORIZED {
             return Err(CoreFailure::UpstreamAuthFailed);
         }
@@ -201,7 +203,7 @@ pub(crate) async fn resolve_auth(
     state: &AppState,
     account_ref: &str,
     failed_access_token: Option<&str>,
-) -> std::result::Result<(String, ResolvedAuth), CoreFailure> {
+) -> std::result::Result<ResolvedCredential, CoreFailure> {
     let mut locked = state
         .vault
         .lock_record(account_ref)
@@ -210,6 +212,11 @@ pub(crate) async fn resolve_auth(
     if locked.record.status == CredentialStatus::RequiresLogin {
         return Err(CoreFailure::CredentialRequiresLogin);
     }
+    let transport = state
+        .transports
+        .context(account_ref, CredentialTransportPolicy::default())
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
+    let fingerprint = locked.fingerprint().clone();
     if matches!(
         locked.record.material,
         CredentialMaterial::CodexOAuth { .. }
@@ -228,7 +235,7 @@ pub(crate) async fn resolve_auth(
         if refresh_needed {
             refresh_if_needed(
                 &mut locked,
-                state.client_for_url(&issuer),
+                transport.http_client_for_url(&issuer),
                 failed_access_token.is_some(),
             )
             .await
@@ -252,40 +259,27 @@ pub(crate) async fn resolve_auth(
             CredentialMaterial::CodexOAuth { .. } => return Err(CoreFailure::Internal),
         }
     };
-    Ok((upstream_url, auth))
+    Ok(ResolvedCredential {
+        upstream_url,
+        auth,
+        fingerprint,
+        transport,
+    })
 }
 
 async fn send_upstream(
-    state: &AppState,
+    transport: &CredentialTransportContext,
     inbound_headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
     body: bytes::Bytes,
 ) -> std::result::Result<reqwest::Response, CoreFailure> {
-    let client = state.client_for_url(upstream_url);
+    let client = transport.http_client_for_url(upstream_url);
     let request = build_upstream_request(client, inbound_headers, upstream_url, auth, body)?;
     client
         .execute(request)
         .await
         .map_err(|_| CoreFailure::UpstreamConnectFailed)
-}
-
-impl AppState {
-    pub(crate) fn client_for_url(&self, url: &str) -> &Client {
-        if has_literal_loopback_host(url) {
-            &self.direct_client
-        } else {
-            &self.client
-        }
-    }
-
-    pub(crate) fn websocket_client_for_url(&self, url: &str) -> &Client {
-        if has_literal_loopback_host(url) {
-            &self.direct_websocket_client
-        } else {
-            &self.websocket_client
-        }
-    }
 }
 
 fn build_streaming_response(
@@ -479,5 +473,21 @@ pub fn parse_internal_listen(raw: &str) -> Result<SocketAddr> {
 mod tests;
 
 #[cfg(test)]
+#[path = "server_integration_support.rs"]
+mod integration_support;
+
+#[cfg(test)]
 #[path = "server_integration_tests.rs"]
 mod integration_tests;
+
+#[cfg(test)]
+#[path = "server_fingerprint_tests.rs"]
+mod fingerprint_http_tests;
+
+#[cfg(test)]
+#[path = "server_oauth_tests.rs"]
+mod oauth_integration_tests;
+
+#[cfg(test)]
+#[path = "server_compaction_tests.rs"]
+mod compaction_integration_tests;

@@ -141,7 +141,15 @@ func runFakeCredentialCore() int {
 	if len(arguments) < 2 || arguments[0] != "credential" {
 		return 32
 	}
+	if expected := os.Getenv("MINI_SUB2API_EXPECT_FINGERPRINT_MODE"); expected != "" {
+		actual, found := fakeArgumentValue(arguments, "--fingerprint-mode")
+		if !found || actual != expected {
+			return 35
+		}
+	}
 	switch arguments[1] {
+	case "login":
+		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_login","authKind":"codex_oauth","upstreamAccountId":"chatgpt-fake-login","status":"ready"}`)
 	case "add-api-key":
 		if trimmedSecret == "" {
 			return 33
@@ -149,6 +157,23 @@ func runFakeCredentialCore() int {
 		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_cli","authKind":"openai_api_key","status":"ready"}`)
 	case "import-codex-auth":
 		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_import","authKind":"codex_oauth","upstreamAccountId":"chatgpt-fake-account","status":"ready"}`)
+	case "fingerprint":
+		if os.Getenv("MINI_SUB2API_FAKE_FINGERPRINT_FAIL") == "1" {
+			return 36
+		}
+		mode := os.Getenv("MINI_SUB2API_FAKE_FINGERPRINT_MODE")
+		if mode == "" {
+			mode = "device"
+		}
+		revision := 1
+		if mode == "off" {
+			revision = 2
+		}
+		if os.Getenv("MINI_SUB2API_FAKE_FINGERPRINT_LEAK") == "1" {
+			fmt.Fprintf(os.Stdout, `{"accountRef":"acct_fake_cli","mode":%q,"revision":%d,"installationId":"11111111-1111-4111-8111-111111111111"}`+"\n", mode, revision)
+		} else {
+			fmt.Fprintf(os.Stdout, `{"accountRef":"acct_fake_cli","mode":%q,"revision":%d}`+"\n", mode, revision)
+		}
 	case "remove":
 		fmt.Fprintln(os.Stdout, `{"accountRef":"acct_fake_cli","removed":true}`)
 	case "revoke":
@@ -157,4 +182,16 @@ func runFakeCredentialCore() int {
 		return 34
 	}
 	return 0
+}
+
+func fakeArgumentValue(arguments []string, name string) (string, bool) {
+	for index, argument := range arguments {
+		if argument == name && index+1 < len(arguments) {
+			return arguments[index+1], true
+		}
+		if strings.HasPrefix(argument, name+"=") {
+			return strings.TrimPrefix(argument, name+"="), true
+		}
+	}
+	return "", false
 }

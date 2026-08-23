@@ -158,6 +158,59 @@ func (s *Store) InFlightCount(ctx context.Context, credentialID string) (int, er
 	return count, err
 }
 
+// WithCredentialMutationFence runs a short external credential mutation while an immediate
+// SQLite transaction prevents credential enablement or request admission from racing it.
+func (s *Store) WithCredentialMutationFence(
+	ctx context.Context,
+	credentialID string,
+	mutate func(accountRef string) error,
+) error {
+	if mutate == nil {
+		return fmt.Errorf("credential mutation callback is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin credential mutation fence: %w", err)
+	}
+	defer tx.Rollback()
+
+	var accountRef, status string
+	err = tx.QueryRowContext(ctx, `
+        SELECT account_ref, status FROM credentials
+        WHERE id = ? AND deleted_at IS NULL`, credentialID,
+	).Scan(&accountRef, &status)
+	if err == sql.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("resolve credential mutation target: %w", err)
+	}
+	if status != CredentialDisabled {
+		return fmt.Errorf("credential must be disabled before mutation: %w", ErrConflict)
+	}
+
+	var inFlight int
+	if err := tx.QueryRowContext(ctx, `
+        SELECT count(*) FROM requests
+        WHERE credential_id_snapshot = ? AND terminal_status = 'in_progress'`,
+		credentialID,
+	).Scan(&inFlight); err != nil {
+		return fmt.Errorf("count in-flight credential requests: %w", err)
+	}
+	if inFlight != 0 {
+		return fmt.Errorf(
+			"credential still has %d in-flight request(s): %w", inFlight, ErrConflict,
+		)
+	}
+	if err := mutate(accountRef); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit credential mutation fence: %w", err)
+	}
+	return nil
+}
+
 const credentialSelect = `
 SELECT id, name, adapter, auth_kind, account_ref, upstream_account_id,
        status, created_at, updated_at, deleted_at

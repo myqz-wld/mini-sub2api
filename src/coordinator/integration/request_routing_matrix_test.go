@@ -260,7 +260,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				}
 				if capture.Headers.Get("Originator") != "codex_exec" ||
 					capture.Headers.Get("Session-Id") != "oauth-session" ||
-					capture.Headers.Get("User-Agent") != "codex_cli_rs/0.147.0 routing-matrix" {
+					capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0 routing-matrix" {
 					t.Fatalf("native subscription headers = %#v", capture.Headers)
 				}
 			},
@@ -337,8 +337,8 @@ func assertSubscriptionCapture(
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("Originator") == "" ||
-		capture.Headers.Get("User-Agent") != "codex_cli_rs/0.147.0" &&
-			capture.Headers.Get("User-Agent") != "codex_cli_rs/0.147.0 routing-matrix" {
+		capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0" &&
+			capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0 routing-matrix" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("OpenAI-Organization") != "" ||

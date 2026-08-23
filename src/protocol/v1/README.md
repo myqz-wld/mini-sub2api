@@ -97,9 +97,28 @@ role `developer`, preserving their content and instruction precedence for the in
 endpoint. Regular OpenAI API-key request bodies remain byte-transparent.
 
 For subscription upstreams, the core anchors the leading Codex `User-Agent` product/version token
-to the Codex CLI `0.147.0` compatibility baseline. A recognized Codex product name and its suffix
-are preserved; a missing or non-Codex value becomes `codex_cli_rs/0.147.0`. Regular OpenAI API-key
+to the Codex CLI `0.149.0` compatibility baseline. A recognized Codex product name and its suffix
+are preserved; a missing or non-Codex value becomes `codex_cli_rs/0.149.0`. Regular OpenAI API-key
 routes retain the public client's reviewed `User-Agent` unchanged.
+
+## Credential-scoped device projection
+
+The runtime protocol still carries only the opaque `X-Mini-Sub2Api-Account-Ref`; fingerprint mode
+and installation identity never become v1 fields. The core resolves them from a private,
+versioned sidecar for that credential. Both new and legacy credentials default to `device` unless
+the operator explicitly selected `off`.
+
+In `device`, the core sets `x-codex-installation-id` and converges recognized installation values
+inside `client_metadata` and serialized `x-codex-turn-metadata`. It changes only the
+`installation_id` member of turn metadata, preserving session, thread, turn, window, compaction,
+subagent, and unknown future members. Carrier-free API-key bodies stay byte-exact. Unsafe encoded,
+malformed, non-object, or oversized device projections fail before an upstream send. In `off`, the
+core preserves caller-provided installation carriers under the existing auth-specific behavior.
+
+One credential owns independent HTTP and WebSocket connection pools. HTTP uses transport-default
+TLS; provider WebSocket uses AWS-LC rustls with native roots and HTTP/1. These fixed builders are
+the Codex `0.149.0` compatibility split and do not vary by credential. Pool selection and device
+projection require no coordinator parsing of request bodies or WebSocket frames.
 
 ## Inference response
 
@@ -136,16 +155,27 @@ response remains an HTTP handshake response all the way to the public client.
   overlap policy, first-frame/inter-turn/write timeouts, and shutdown lifecycle.
 - Application messages are UTF-8 JSON text and are limited to 16 MiB. The core relays valid
   non-create events without semantic translation.
-- Regular API-key text frames are byte-transparent. For subscription credentials, the core applies
-  the HTTP compatibility normalizer only to `response.create`, preserving `type`, `generate`,
-  `previous_response_id`, and `client_metadata`.
+- Regular API-key text frames are byte-transparent in `off`, and remain byte-transparent in
+  `device` when they have no recognized body carrier. For subscription credentials, the core
+  applies the HTTP compatibility normalizer only to `response.create`, preserving `type`,
+  `generate`, `previous_response_id`, and `client_metadata`; device projection then converges any
+  recognized installation carriers.
+- The fingerprint snapshot used for the handshake is retained for that socket. Before each
+  `response.create`, the core re-reads the sidecar revision; a changed or unreadable fingerprint
+  closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.
+  Other valid application events do not trigger this stale-policy check and remain byte-exact.
 - Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
-  `ChatGPT-Account-ID`, supplies `originator` when absent, and keeps the reviewed `0.147.0`
+  `ChatGPT-Account-ID`, supplies `originator` when absent, and keeps the reviewed `0.149.0`
   User-Agent anchor.
 - The public coordinator hop may negotiate per-message deflate. The internal and provider hops do
   not request WebSocket compression.
 - Ping, pong, close, cancellation, and backpressure remain connection-scoped. Neither layer
   reconnects or replays an active turn.
+
+Codex `0.149.0` remote compaction v2 uses this same ordinary Responses path. Its
+`compaction_trigger` input item and `request_kind=compaction` metadata pass through normal
+subscription normalization and device projection; no additional public or internal route is
+required.
 
 Successful internal upgrades may expose only `openai-model`, `x-codex-turn-state`,
 `x-models-etag`, `x-reasoning-included`, `x-request-id`, and the core TTFB header to the

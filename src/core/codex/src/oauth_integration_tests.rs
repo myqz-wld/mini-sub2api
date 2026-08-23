@@ -44,9 +44,16 @@ async fn concurrent_expiry_refresh_rotates_once_and_persists() {
         .create_oauth(
             oauth_material(account_id, &mock.base_url, -3600),
             format!("{}/responses", mock.base_url),
+            crate::fingerprint::FingerprintMode::Device,
         )
         .await
         .expect("create OAuth record");
+    let initial_device = vault
+        .fingerprint_snapshot(&metadata.account_ref)
+        .await
+        .expect("initial fingerprint")
+        .installation_id()
+        .to_string();
     let client = Client::builder().build().expect("client");
 
     let mut tasks = Vec::new();
@@ -70,6 +77,7 @@ async fn concurrent_expiry_refresh_rotates_once_and_persists() {
         .lock_record(&metadata.account_ref)
         .await
         .expect("final record");
+    assert!(initial_device == locked.fingerprint().installation_id());
     match &locked.record.material {
         CredentialMaterial::CodexOAuth {
             access_token,
@@ -103,6 +111,7 @@ async fn permanent_refresh_failure_marks_requires_login() {
         .create_oauth(
             oauth_material("chatgpt-permanent-test", &mock.base_url, -3600),
             format!("{}/responses", mock.base_url),
+            crate::fingerprint::FingerprintMode::Device,
         )
         .await
         .expect("create OAuth record");
@@ -134,7 +143,11 @@ async fn access_only_import_requires_login_without_attempting_refresh() {
     };
     refresh_token.clear();
     let metadata = vault
-        .create_oauth(material, "http://127.0.0.1:1/responses".to_string())
+        .create_oauth(
+            material,
+            "http://127.0.0.1:1/responses".to_string(),
+            crate::fingerprint::FingerprintMode::Device,
+        )
         .await
         .expect("create OAuth record");
     let mut locked = vault
@@ -174,6 +187,7 @@ async fn unparseable_rotated_access_token_marks_requires_login() {
         .create_oauth(
             oauth_material(account_id, &mock.base_url, -3600),
             format!("{}/responses", mock.base_url),
+            crate::fingerprint::FingerprintMode::Device,
         )
         .await
         .expect("create OAuth record");
@@ -212,6 +226,7 @@ async fn revoke_posts_refresh_token_to_loopback_authority() {
         .create_oauth(
             oauth_material("chatgpt-revoke-test", &mock.base_url, 3600),
             format!("{}/responses", mock.base_url),
+            crate::fingerprint::FingerprintMode::Device,
         )
         .await
         .expect("create OAuth record");

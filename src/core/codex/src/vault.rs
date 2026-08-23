@@ -1,3 +1,9 @@
+use crate::fingerprint::{self, FingerprintMetadata, FingerprintMode, FingerprintSnapshot};
+use crate::vault_io::open_private_file;
+use crate::vault_io::read_json_limited;
+use crate::vault_io::set_private_directory;
+use crate::vault_io::sync_directory;
+use crate::vault_io::write_json_atomically;
 use anyhow::Context;
 use anyhow::Result;
 use chrono::DateTime;
@@ -6,13 +12,6 @@ use fs2::FileExt;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::Read;
-use std::io::Write;
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -110,6 +109,7 @@ pub struct LockedRecord {
     lock_file: File,
     record_path: PathBuf,
     accounts_dir: PathBuf,
+    fingerprint: FingerprintSnapshot,
     pub record: VaultRecord,
 }
 
@@ -119,6 +119,7 @@ impl Vault {
         std::fs::create_dir_all(&accounts_dir).context("creating credential vault")?;
         set_private_directory(&state_dir)?;
         set_private_directory(&accounts_dir)?;
+        cleanup_orphan_fingerprints(&accounts_dir)?;
         Ok(Self {
             state_dir,
             accounts_dir,
@@ -137,29 +138,50 @@ impl Vault {
         &self,
         material: CredentialMaterial,
         upstream_url: String,
+        fingerprint_mode: FingerprintMode,
     ) -> Result<CredentialMetadata> {
         let record = new_record(material, upstream_url);
-        self.create_record(record).await
+        self.create_record(record, fingerprint_mode).await
     }
 
     pub async fn create_api_key(
         &self,
         api_key: String,
         upstream_url: String,
+        fingerprint_mode: FingerprintMode,
     ) -> Result<CredentialMetadata> {
         let record = new_record(CredentialMaterial::OpenAiApiKey { api_key }, upstream_url);
-        self.create_record(record).await
+        self.create_record(record, fingerprint_mode).await
     }
 
-    async fn create_record(&self, record: VaultRecord) -> Result<CredentialMetadata> {
+    async fn create_record(
+        &self,
+        record: VaultRecord,
+        fingerprint_mode: FingerprintMode,
+    ) -> Result<CredentialMetadata> {
         let metadata = record.metadata();
         let accounts_dir = self.accounts_dir.clone();
         tokio::task::spawn_blocking(move || {
             let path = record_path(&accounts_dir, &record.account_ref)?;
+            let _lock = lock_account(&accounts_dir, &record.account_ref)?;
             if path.exists() {
                 anyhow::bail!("credential reference collision");
             }
-            write_record_atomically(&accounts_dir, &path, &record)
+            anyhow::ensure!(
+                !fingerprint::sidecar_path(&accounts_dir, &record.account_ref).exists(),
+                "credential fingerprint reference collision"
+            );
+            anyhow::ensure!(
+                !receipt_path(&accounts_dir, &record.account_ref)?.exists(),
+                "credential removal reference collision"
+            );
+            fingerprint::create(&accounts_dir, &record.account_ref, fingerprint_mode)?;
+            if let Err(write_error) = write_record_atomically(&accounts_dir, &path, &record) {
+                fingerprint::remove_if_exists(&accounts_dir, &record.account_ref)
+                    .context("cleaning failed credential creation")?;
+                return Err(write_error);
+            }
+            Ok(())
         })
         .await
         .context("credential write task failed")??;
@@ -173,11 +195,32 @@ impl Vault {
         tokio::task::spawn_blocking(move || {
             let record_path = record_path(&accounts_dir, &account_ref)?;
             let lock_file = lock_account(&accounts_dir, &account_ref)?;
-            let record = read_record(&record_path)?;
+            let record = match read_record(&record_path) {
+                Ok(record) => record,
+                Err(error) => {
+                    if is_not_found(&error)
+                        && let Some(receipt) =
+                            read_optional_receipt(&receipt_path(&accounts_dir, &account_ref)?)?
+                    {
+                        anyhow::ensure!(
+                            receipt.account_ref == account_ref,
+                            "credential removal receipt identity mismatch"
+                        );
+                        fingerprint::remove_if_exists(&accounts_dir, &account_ref)?;
+                    }
+                    return Err(error);
+                }
+            };
+            anyhow::ensure!(
+                record.account_ref == account_ref,
+                "credential record identity mismatch"
+            );
+            let fingerprint = fingerprint::load_or_materialize(&accounts_dir, &account_ref)?;
             Ok(LockedRecord {
                 lock_file,
                 record_path,
                 accounts_dir,
+                fingerprint,
                 record,
             })
         })
@@ -197,6 +240,9 @@ impl Vault {
                     receipt.account_ref == account_ref,
                     "credential removal receipt identity mismatch"
                 );
+                if !record_path(&accounts_dir, &account_ref)?.exists() {
+                    fingerprint::remove_if_exists(&accounts_dir, &account_ref)?;
+                }
             }
             Ok(receipt)
         })
@@ -220,9 +266,33 @@ impl Vault {
         .await
         .context("credential removal task failed")?
     }
+
+    pub async fn fingerprint_snapshot(&self, account_ref: &str) -> Result<FingerprintSnapshot> {
+        let locked = self.lock_record(account_ref).await?;
+        Ok(locked.fingerprint.clone())
+    }
+
+    pub async fn fingerprint_metadata(&self, account_ref: &str) -> Result<FingerprintMetadata> {
+        let locked = self.lock_record(account_ref).await?;
+        Ok(locked.fingerprint.metadata(account_ref))
+    }
+
+    pub async fn set_fingerprint_mode(
+        &self,
+        account_ref: &str,
+        mode: FingerprintMode,
+    ) -> Result<FingerprintMetadata> {
+        let mut locked = self.lock_record(account_ref).await?;
+        locked.set_fingerprint_mode(mode).await?;
+        Ok(locked.fingerprint.metadata(account_ref))
+    }
 }
 
 impl LockedRecord {
+    pub fn fingerprint(&self) -> &FingerprintSnapshot {
+        &self.fingerprint
+    }
+
     pub async fn persist(&mut self) -> Result<()> {
         self.record.updated_at = Utc::now();
         let accounts_dir = self.accounts_dir.clone();
@@ -247,6 +317,18 @@ impl LockedRecord {
         })
         .await
         .context("locked credential removal task failed")?
+    }
+
+    pub async fn set_fingerprint_mode(&mut self, mode: FingerprintMode) -> Result<()> {
+        let accounts_dir = self.accounts_dir.clone();
+        let account_ref = self.record.account_ref.clone();
+        let fingerprint = self.fingerprint.clone();
+        self.fingerprint = tokio::task::spawn_blocking(move || {
+            fingerprint::update_mode(&accounts_dir, &account_ref, &fingerprint, mode)
+        })
+        .await
+        .context("credential fingerprint update task failed")??;
+        Ok(())
     }
 }
 
@@ -294,6 +376,34 @@ fn record_path(accounts_dir: &Path, account_ref: &str) -> Result<PathBuf> {
     Ok(accounts_dir.join(format!("{account_ref}.json")))
 }
 
+fn cleanup_orphan_fingerprints(accounts_dir: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(accounts_dir).context("scanning credential vault")? {
+        let entry = entry.context("reading credential vault entry")?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(account_ref) = fingerprint::account_ref_from_sidecar_name(name) else {
+            continue;
+        };
+        if validate_account_ref(account_ref).is_err() {
+            continue;
+        }
+        let _lock = lock_account(accounts_dir, account_ref)?;
+        if record_path(accounts_dir, account_ref)?.exists() {
+            continue;
+        }
+        if let Some(receipt) = read_optional_receipt(&receipt_path(accounts_dir, account_ref)?)? {
+            anyhow::ensure!(
+                receipt.account_ref == account_ref,
+                "credential removal receipt identity mismatch"
+            );
+        }
+        fingerprint::remove_if_exists(accounts_dir, account_ref)?;
+    }
+    Ok(())
+}
+
 fn read_record(path: &Path) -> Result<VaultRecord> {
     read_json_limited(path, 1024 * 1024, "credential record")
 }
@@ -312,35 +422,8 @@ fn read_optional_receipt(path: &Path) -> Result<Option<RemovalReceipt>> {
     }
 }
 
-fn read_json_limited<T: serde::de::DeserializeOwned>(
-    path: &Path,
-    maximum: u64,
-    description: &'static str,
-) -> Result<T> {
-    let file = File::open(path).context("opening credential record")?;
-    let mut bytes = Vec::new();
-    file.take(maximum + 1)
-        .read_to_end(&mut bytes)
-        .with_context(|| format!("reading {description}"))?;
-    anyhow::ensure!(bytes.len() as u64 <= maximum, "{description} is too large");
-    serde_json::from_slice(&bytes).with_context(|| format!("decoding {description}"))
-}
-
 fn write_record_atomically(accounts_dir: &Path, path: &Path, record: &VaultRecord) -> Result<()> {
     write_json_atomically(accounts_dir, path, record)
-}
-
-fn write_json_atomically<T: Serialize>(accounts_dir: &Path, path: &Path, value: &T) -> Result<()> {
-    let temp_path = accounts_dir.join(format!(".credential-{}.tmp", Uuid::new_v4().simple()));
-    let bytes = serde_json::to_vec(value).context("encoding private vault state")?;
-    let mut file = open_private_file(&temp_path)?;
-    file.set_len(0).context("truncating credential temp file")?;
-    file.write_all(&bytes)
-        .context("writing credential temp file")?;
-    file.sync_all().context("syncing credential temp file")?;
-    std::fs::rename(&temp_path, path).context("replacing credential record")?;
-    sync_directory(accounts_dir);
-    Ok(())
 }
 
 fn lock_account(accounts_dir: &Path, account_ref: &str) -> Result<File> {
@@ -394,35 +477,22 @@ fn complete_removal_locked(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("removing credential record"),
     }
+    fingerprint::remove_if_exists(accounts_dir, account_ref)?;
     sync_directory(accounts_dir);
     Ok(receipt)
 }
 
-fn sync_directory(accounts_dir: &Path) {
-    if let Ok(directory) = File::open(accounts_dir) {
-        let _ = directory.sync_all();
-    }
-}
-
-fn open_private_file(path: &Path) -> Result<File> {
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let file = options.open(path).context("opening private state file")?;
-    #[cfg(unix)]
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-        .context("setting private file permissions")?;
-    Ok(file)
-}
-
-fn set_private_directory(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-        .context("setting private directory permissions")?;
-    Ok(())
+fn is_not_found(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .filter_map(|source| source.downcast_ref::<std::io::Error>())
+        .any(|source| source.kind() == std::io::ErrorKind::NotFound)
 }
 
 #[cfg(test)]
 #[path = "vault_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "fingerprint_vault_tests.rs"]
+mod fingerprint_tests;

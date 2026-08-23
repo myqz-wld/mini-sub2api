@@ -138,7 +138,7 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok()),
-        Some("codex_cli_rs/0.147.0")
+        Some("codex_cli_rs/0.149.0")
     );
     for name in OPENAI_API_KEY_ALLOWED {
         assert!(!request.headers().contains_key(*name), "header {name}");
@@ -173,6 +173,6 @@ fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok()),
-        Some("codex_exec/0.147.0 (Mac OS 15.0.0; arm64) Apple_Terminal")
+        Some("codex_exec/0.149.0 (Mac OS 15.0.0; arm64) Apple_Terminal")
     );
 }

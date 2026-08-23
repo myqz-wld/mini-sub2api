@@ -27,6 +27,8 @@ func runCredential(
 		return credentialAddAPIKey(ctx, options, arguments[1:], environment)
 	case "list":
 		return credentialList(ctx, options, arguments[1:], environment)
+	case "fingerprint":
+		return credentialFingerprint(ctx, options, arguments[1:], environment)
 	case "enable", "disable":
 		return credentialSetEnabled(ctx, options, arguments[0] == "enable", arguments[1:], environment)
 	case "revoke":
@@ -34,7 +36,7 @@ func runCredential(
 	case "remove":
 		return credentialRemove(ctx, options, arguments[1:], environment)
 	case "help", "--help", "-h":
-		_, err := fmt.Fprintln(environment.Stdout, "credential commands: login, import-codex, add-api-key, list, enable, disable, revoke, remove")
+		_, err := fmt.Fprintln(environment.Stdout, "credential commands: login, import-codex, add-api-key, list, fingerprint, enable, disable, revoke, remove")
 		return err
 	default:
 		return fmt.Errorf("unknown credential command %q", arguments[0])
@@ -48,7 +50,7 @@ func credentialImportCodex(
 	environment Environment,
 ) error {
 	if requestedHelp(arguments) {
-		_, err := fmt.Fprintln(environment.Stdout, "usage: credential import-codex --name NAME --auth-file FILE")
+		_, err := fmt.Fprintln(environment.Stdout, "usage: credential import-codex --name NAME --auth-file FILE [--fingerprint-mode off|device]")
 		return err
 	}
 	flags := newFlagSet("credential import-codex", environment.Stderr)
@@ -57,11 +59,15 @@ func credentialImportCodex(
 	issuer := flags.String("issuer", "https://auth.openai.com", "OAuth issuer override")
 	clientID := flags.String("client-id", "app_EMoamEEZ73f0CkXaXp7hrann", "OAuth client id override")
 	upstreamURL := flags.String("upstream-url", "https://chatgpt.com/backend-api/codex/responses", "Codex Responses URL")
+	fingerprintMode := flags.String("fingerprint-mode", fingerprintModeDevice, "fingerprint mode: off or device")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 || *name == "" || *authFile == "" {
-		return fmt.Errorf("usage: credential import-codex --name NAME --auth-file FILE")
+		return fmt.Errorf("usage: credential import-codex --name NAME --auth-file FILE [--fingerprint-mode off|device]")
+	}
+	if err := validateFingerprintMode(*fingerprintMode); err != nil {
+		return err
 	}
 	absoluteAuthFile, err := filepath.Abs(*authFile)
 	if err != nil {
@@ -71,6 +77,7 @@ func credentialImportCodex(
 		"import-codex-auth", "--state-dir", coreStateDirectory(options),
 		"--auth-file", absoluteAuthFile, "--issuer", *issuer,
 		"--client-id", *clientID, "--upstream-url", *upstreamURL,
+		"--fingerprint-mode", *fingerprintMode,
 	}, nil, environment.Stderr)
 	if err != nil {
 		return err
@@ -85,7 +92,7 @@ func credentialLogin(
 	environment Environment,
 ) error {
 	if requestedHelp(arguments) {
-		_, err := fmt.Fprintln(environment.Stdout, "usage: credential login codex --name NAME [--flow device|browser]")
+		_, err := fmt.Fprintln(environment.Stdout, "usage: credential login codex --name NAME [--flow device|browser] [--fingerprint-mode off|device]")
 		return err
 	}
 	if len(arguments) == 0 || arguments[0] != "codex" {
@@ -97,6 +104,7 @@ func credentialLogin(
 	issuer := flags.String("issuer", "https://auth.openai.com", "OAuth issuer override")
 	clientID := flags.String("client-id", "app_EMoamEEZ73f0CkXaXp7hrann", "OAuth client id override")
 	upstreamURL := flags.String("upstream-url", "https://chatgpt.com/backend-api/codex/responses", "Codex Responses URL")
+	fingerprintMode := flags.String("fingerprint-mode", fingerprintModeDevice, "fingerprint mode: off or device")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
 	}
@@ -106,9 +114,13 @@ func credentialLogin(
 	if *name == "" || (*flow != "device" && *flow != "browser") {
 		return fmt.Errorf("--name is required and --flow must be device or browser")
 	}
+	if err := validateFingerprintMode(*fingerprintMode); err != nil {
+		return err
+	}
 	metadata, err := runCoreCredential(ctx, options, []string{
 		"login", "--state-dir", coreStateDirectory(options), "--flow", *flow,
 		"--issuer", *issuer, "--client-id", *clientID, "--upstream-url", *upstreamURL,
+		"--fingerprint-mode", *fingerprintMode,
 	}, environment.Stdin, environment.Stderr)
 	if err != nil {
 		return err
@@ -123,7 +135,7 @@ func credentialAddAPIKey(
 	environment Environment,
 ) error {
 	if requestedHelp(arguments) {
-		_, err := fmt.Fprintln(environment.Stdout, "usage: credential add-api-key codex --name NAME --secret-stdin")
+		_, err := fmt.Fprintln(environment.Stdout, "usage: credential add-api-key codex --name NAME --secret-stdin [--fingerprint-mode off|device]")
 		return err
 	}
 	if len(arguments) == 0 || arguments[0] != "codex" {
@@ -133,15 +145,20 @@ func credentialAddAPIKey(
 	name := flags.String("name", "", "credential display name")
 	secretStdin := flags.Bool("secret-stdin", false, "read the upstream API key from stdin")
 	upstreamURL := flags.String("upstream-url", "https://api.openai.com/v1/responses", "OpenAI Responses URL")
+	fingerprintMode := flags.String("fingerprint-mode", fingerprintModeDevice, "fingerprint mode: off or device")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 || *name == "" || !*secretStdin {
-		return fmt.Errorf("usage: credential add-api-key codex --name NAME --secret-stdin")
+		return fmt.Errorf("usage: credential add-api-key codex --name NAME --secret-stdin [--fingerprint-mode off|device]")
+	}
+	if err := validateFingerprintMode(*fingerprintMode); err != nil {
+		return err
 	}
 	metadata, err := runCoreCredential(ctx, options, []string{
 		"add-api-key", "--state-dir", coreStateDirectory(options),
 		"--upstream-url", *upstreamURL, "--secret-stdin",
+		"--fingerprint-mode", *fingerprintMode,
 	}, environment.Stdin, environment.Stderr)
 	if err != nil {
 		return err

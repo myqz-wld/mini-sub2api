@@ -16,8 +16,10 @@ futures-util = "0.3"
 http = "1"
 mini-sub2api-protocol-v1 = { path = "../../protocol/v1/rust" }
 rand = "0.9"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls-native-roots-no-provider", "stream"] }
 reqwest-websocket = "0.5.1"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

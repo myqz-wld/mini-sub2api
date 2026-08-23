@@ -1,12 +1,18 @@
 use crate::error::CoreFailure;
+use crate::fingerprint::FingerprintMode;
+use crate::fingerprint::FingerprintSnapshot;
+use crate::fingerprint_projection::project_device_headers;
+use crate::fingerprint_projection::project_websocket_device;
 use crate::request_normalizer::prepare_subscription_request;
 use crate::server::AppState;
 use crate::server::account_lock;
 use crate::server::header_text;
 use crate::server::resolve_auth;
 use crate::server::validate_internal_request;
+use crate::transport_registry::CredentialTransportContext;
 use crate::upstream_request::ResolvedAuth;
 use crate::upstream_request::build_websocket;
+use crate::vault::Vault;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
@@ -68,12 +74,24 @@ async fn responses_socket_inner(
     let identity = validate_internal_request(peer, &state, &headers)?;
     let account_lock = account_lock(&state, &identity.account_ref).await;
     let _guard = account_lock.lock().await;
-    let (upstream_url, auth) = resolve_auth(&state, &identity.account_ref, None).await?;
+    let resolved = resolve_auth(&state, &identity.account_ref, None).await?;
     drop(_guard);
+    let fingerprint = resolved.fingerprint.clone();
+    let mut upstream_headers = headers;
+    if fingerprint.mode() == FingerprintMode::Device {
+        project_device_headers(&mut upstream_headers, &fingerprint)
+            .map_err(|_| CoreFailure::InvalidRequest)?;
+    }
 
     let started = Instant::now();
-    let mut handshake = send_handshake(&state, &headers, &upstream_url, &auth).await?;
-    let mut final_auth = auth;
+    let mut handshake = send_handshake(
+        &resolved.transport,
+        &upstream_headers,
+        &resolved.upstream_url,
+        &resolved.auth,
+    )
+    .await?;
+    let mut final_auth = resolved.auth;
     if handshake.status() == StatusCode::UNAUTHORIZED
         && matches!(final_auth, ResolvedAuth::CodexOAuth { .. })
     {
@@ -82,11 +100,16 @@ async fn responses_socket_inner(
             ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
         };
         let _guard = account_lock.lock().await;
-        let (retry_url, retry_auth) =
-            resolve_auth(&state, &identity.account_ref, Some(&failed_access_token)).await?;
+        let retry = resolve_auth(&state, &identity.account_ref, Some(&failed_access_token)).await?;
         drop(_guard);
-        handshake = send_handshake(&state, &headers, &retry_url, &retry_auth).await?;
-        final_auth = retry_auth;
+        handshake = send_handshake(
+            &retry.transport,
+            &upstream_headers,
+            &retry.upstream_url,
+            &retry.auth,
+        )
+        .await?;
+        final_auth = retry.auth;
         if handshake.status() == StatusCode::UNAUTHORIZED {
             return Err(CoreFailure::UpstreamAuthFailed);
         }
@@ -104,20 +127,19 @@ async fn responses_socket_inner(
     let normalize_subscription = matches!(final_auth, ResolvedAuth::CodexOAuth { .. });
     let account_ref = identity.account_ref;
     let request_id = identity.request_id;
-    let relay_headers = headers;
+    let relay_context = RelayContext {
+        headers: upstream_headers,
+        account_ref,
+        request_id,
+        normalize_subscription,
+        vault: state.vault.clone(),
+        fingerprint,
+    };
     let mut response = upgrade
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .on_upgrade(move |internal| async move {
-            relay(
-                internal,
-                upstream,
-                relay_headers,
-                account_ref,
-                request_id,
-                normalize_subscription,
-            )
-            .await;
+            relay(internal, upstream, relay_context).await;
         })
         .into_response();
     copy_headers(response.headers_mut(), &response_headers);
@@ -128,13 +150,13 @@ async fn responses_socket_inner(
 }
 
 async fn send_handshake(
-    state: &AppState,
+    transport: &CredentialTransportContext,
     headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
 ) -> Result<UpgradeResponse, CoreFailure> {
     build_websocket(
-        state.websocket_client_for_url(upstream_url),
+        transport.websocket_client_for_url(upstream_url),
         headers,
         upstream_url,
         auth,
@@ -184,91 +206,163 @@ async fn read_bounded(response: reqwest::Response, maximum: usize) -> Bytes {
     Bytes::from(body)
 }
 
-async fn relay(
-    internal: WebSocket,
-    upstream: UpstreamWebSocket,
+struct RelayContext {
     headers: HeaderMap,
     account_ref: String,
     request_id: String,
     normalize_subscription: bool,
-) {
+    vault: Vault,
+    fingerprint: FingerprintSnapshot,
+}
+
+async fn relay(internal: WebSocket, upstream: UpstreamWebSocket, context: RelayContext) {
+    let RelayContext {
+        headers,
+        account_ref,
+        request_id,
+        normalize_subscription,
+        vault,
+        fingerprint,
+    } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
-    let client_to_upstream = async {
-        let mut create_sequence = 0_u64;
-        while let Some(message) = internal_read.next().await {
-            let outbound = match message {
-                Ok(InternalMessage::Text(text)) => {
-                    match prepare_client_text(
-                        text.to_string(),
-                        &headers,
-                        &account_ref,
-                        &request_id,
-                        normalize_subscription,
-                        &mut create_sequence,
-                    ) {
-                        Ok(prepared) => UpstreamMessage::Text(prepared),
-                        Err(()) => UpstreamMessage::Close {
-                            code: CloseCode::Protocol,
-                            reason: String::new(),
-                        },
+    let exit = {
+        let client_to_upstream = async {
+            let mut create_sequence = 0_u64;
+            while let Some(message) = internal_read.next().await {
+                let outbound = match message {
+                    Ok(InternalMessage::Text(text)) => {
+                        let text = text.to_string();
+                        let is_create = match is_response_create(&text) {
+                            Ok(is_create) => is_create,
+                            Err(()) => {
+                                let close = UpstreamMessage::Close {
+                                    code: CloseCode::Protocol,
+                                    reason: String::new(),
+                                };
+                                let _ = upstream_write.send(close).await;
+                                return RelayExit::Complete;
+                            }
+                        };
+                        if is_create
+                            && !fingerprint_is_current(&vault, &account_ref, &fingerprint).await
+                        {
+                            return RelayExit::StaleFingerprint;
+                        }
+                        match prepare_client_text(
+                            text,
+                            &headers,
+                            &account_ref,
+                            &request_id,
+                            normalize_subscription,
+                            &fingerprint,
+                            &mut create_sequence,
+                        ) {
+                            Ok(prepared) => UpstreamMessage::Text(prepared),
+                            Err(()) => UpstreamMessage::Close {
+                                code: CloseCode::Protocol,
+                                reason: String::new(),
+                            },
+                        }
                     }
+                    Ok(InternalMessage::Binary(_)) => UpstreamMessage::Close {
+                        code: CloseCode::Unsupported,
+                        reason: String::new(),
+                    },
+                    Ok(InternalMessage::Ping(payload)) => UpstreamMessage::Ping(payload),
+                    Ok(InternalMessage::Pong(payload)) => UpstreamMessage::Pong(payload),
+                    Ok(InternalMessage::Close(frame)) => {
+                        let (code, reason) = frame
+                            .map(|frame| (allowed_close_code(frame.code), frame.reason.to_string()))
+                            .unwrap_or((CloseCode::Normal, String::new()));
+                        UpstreamMessage::Close { code, reason }
+                    }
+                    Err(_) => UpstreamMessage::Close {
+                        code: CloseCode::Away,
+                        reason: String::new(),
+                    },
+                };
+                let terminal = matches!(outbound, UpstreamMessage::Close { .. });
+                if upstream_write.send(outbound).await.is_err() || terminal {
+                    return RelayExit::Complete;
                 }
-                Ok(InternalMessage::Binary(_)) => UpstreamMessage::Close {
-                    code: CloseCode::Unsupported,
-                    reason: String::new(),
-                },
-                Ok(InternalMessage::Ping(payload)) => UpstreamMessage::Ping(payload),
-                Ok(InternalMessage::Pong(payload)) => UpstreamMessage::Pong(payload),
-                Ok(InternalMessage::Close(frame)) => {
-                    let (code, reason) = frame
-                        .map(|frame| (allowed_close_code(frame.code), frame.reason.to_string()))
-                        .unwrap_or((CloseCode::Normal, String::new()));
-                    UpstreamMessage::Close { code, reason }
-                }
-                Err(_) => UpstreamMessage::Close {
+            }
+            let _ = upstream_write
+                .send(UpstreamMessage::Close {
                     code: CloseCode::Away,
                     reason: String::new(),
-                },
-            };
-            let terminal = matches!(outbound, UpstreamMessage::Close { .. });
-            if upstream_write.send(outbound).await.is_err() || terminal {
-                return;
+                })
+                .await;
+            RelayExit::Complete
+        };
+        let upstream_to_client = async {
+            while let Some(message) = upstream_read.next().await {
+                let outbound = match message {
+                    Ok(UpstreamMessage::Text(text)) => InternalMessage::Text(text.into()),
+                    Ok(UpstreamMessage::Binary(_)) => internal_close(1003),
+                    Ok(UpstreamMessage::Ping(payload)) => InternalMessage::Ping(payload),
+                    Ok(UpstreamMessage::Pong(payload)) => InternalMessage::Pong(payload),
+                    Ok(UpstreamMessage::Close { code, reason }) => {
+                        InternalMessage::Close(Some(CloseFrame {
+                            code: u16::from(code),
+                            reason: reason.into(),
+                        }))
+                    }
+                    Err(_) => internal_close(1011),
+                };
+                let terminal = matches!(outbound, InternalMessage::Close(_));
+                if internal_write.send(outbound).await.is_err() || terminal {
+                    return RelayExit::Complete;
+                }
             }
+            let _ = internal_write.send(internal_close(1011)).await;
+            RelayExit::Complete
+        };
+        tokio::select! {
+            biased;
+            exit = client_to_upstream => exit,
+            exit = upstream_to_client => exit,
         }
+    };
+    if exit == RelayExit::StaleFingerprint {
+        let _ = internal_write.send(internal_close(1012)).await;
         let _ = upstream_write
             .send(UpstreamMessage::Close {
-                code: CloseCode::Away,
+                code: CloseCode::Restart,
                 reason: String::new(),
             })
             .await;
-    };
-    let upstream_to_client = async {
-        while let Some(message) = upstream_read.next().await {
-            let outbound = match message {
-                Ok(UpstreamMessage::Text(text)) => InternalMessage::Text(text.into()),
-                Ok(UpstreamMessage::Binary(_)) => internal_close(1003),
-                Ok(UpstreamMessage::Ping(payload)) => InternalMessage::Ping(payload),
-                Ok(UpstreamMessage::Pong(payload)) => InternalMessage::Pong(payload),
-                Ok(UpstreamMessage::Close { code, reason }) => {
-                    InternalMessage::Close(Some(CloseFrame {
-                        code: u16::from(code),
-                        reason: reason.into(),
-                    }))
-                }
-                Err(_) => internal_close(1011),
-            };
-            let terminal = matches!(outbound, InternalMessage::Close(_));
-            if internal_write.send(outbound).await.is_err() || terminal {
-                return;
-            }
-        }
-        let _ = internal_write.send(internal_close(1011)).await;
-    };
-    tokio::select! {
-        _ = client_to_upstream => {}
-        _ = upstream_to_client => {}
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RelayExit {
+    Complete,
+    StaleFingerprint,
+}
+
+async fn fingerprint_is_current(
+    vault: &Vault,
+    account_ref: &str,
+    captured: &FingerprintSnapshot,
+) -> bool {
+    let Ok(current) = vault.fingerprint_snapshot(account_ref).await else {
+        return false;
+    };
+    current.revision() == captured.revision()
+        && current.mode() == captured.mode()
+        && current.installation_id() == captured.installation_id()
+}
+
+fn is_response_create(text: &str) -> Result<bool, ()> {
+    let value: Value = serde_json::from_str(text).map_err(|_| ())?;
+    let message_type = value
+        .as_object()
+        .and_then(|object| object.get("type"))
+        .and_then(Value::as_str)
+        .filter(|message_type| !message_type.is_empty())
+        .ok_or(())?;
+    Ok(message_type == "response.create")
 }
 
 fn prepare_client_text(
@@ -277,6 +371,7 @@ fn prepare_client_text(
     account_ref: &str,
     request_id: &str,
     normalize_subscription: bool,
+    fingerprint: &FingerprintSnapshot,
     create_sequence: &mut u64,
 ) -> Result<String, ()> {
     let value: Value = serde_json::from_str(&text).map_err(|_| ())?;
@@ -286,19 +381,28 @@ fn prepare_client_text(
         .and_then(Value::as_str)
         .filter(|message_type| !message_type.is_empty())
         .ok_or(())?;
-    if message_type != "response.create" || !normalize_subscription {
+    if message_type != "response.create" {
         return Ok(text);
     }
-    *create_sequence = create_sequence.saturating_add(1);
-    let frame_request_id = format!("{request_id}-ws-{create_sequence}");
-    let prepared = prepare_subscription_request(
-        headers,
-        Bytes::from(text),
-        MAX_WEBSOCKET_MESSAGE_BYTES,
-        account_ref,
-        &frame_request_id,
-    );
-    String::from_utf8(prepared.body.to_vec()).map_err(|_| ())
+    let prepared = if normalize_subscription {
+        *create_sequence = create_sequence.saturating_add(1);
+        let frame_request_id = format!("{request_id}-ws-{create_sequence}");
+        let prepared = prepare_subscription_request(
+            headers,
+            Bytes::from(text),
+            MAX_WEBSOCKET_MESSAGE_BYTES,
+            account_ref,
+            &frame_request_id,
+        );
+        String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?
+    } else {
+        text
+    };
+    if fingerprint.mode() == FingerprintMode::Device {
+        project_websocket_device(prepared, fingerprint, MAX_WEBSOCKET_MESSAGE_BYTES).map_err(|_| ())
+    } else {
+        Ok(prepared)
+    }
 }
 
 fn internal_close(code: u16) -> InternalMessage {
@@ -337,3 +441,7 @@ fn copy_headers(destination: &mut HeaderMap, source: &HeaderMap) {
 #[cfg(test)]
 #[path = "responses_websocket_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "responses_websocket_fingerprint_tests.rs"]
+mod fingerprint_tests;

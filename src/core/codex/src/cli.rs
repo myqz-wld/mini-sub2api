@@ -1,4 +1,5 @@
 use crate::codex_auth_import;
+use crate::fingerprint::FingerprintMode;
 use crate::http_client::apply_loopback_proxy_policy;
 use crate::oauth;
 use crate::oauth::LoginFlow;
@@ -54,6 +55,7 @@ enum CredentialCommand {
     ImportCodexAuth(ImportCodexAuthArgs),
     AddApiKey(AddApiKeyArgs),
     Inspect(AccountArgs),
+    Fingerprint(FingerprintArgs),
     Revoke(AccountArgs),
     Remove(AccountArgs),
 }
@@ -70,6 +72,8 @@ struct LoginArgs {
     client_id: String,
     #[arg(long, default_value = DEFAULT_CODEX_RESPONSES_URL)]
     upstream_url: String,
+    #[arg(long, value_enum, default_value_t = FingerprintMode::Device)]
+    fingerprint_mode: FingerprintMode,
 }
 
 #[derive(Debug, Args)]
@@ -84,6 +88,8 @@ struct ImportCodexAuthArgs {
     client_id: String,
     #[arg(long, default_value = DEFAULT_CODEX_RESPONSES_URL)]
     upstream_url: String,
+    #[arg(long, value_enum, default_value_t = FingerprintMode::Device)]
+    fingerprint_mode: FingerprintMode,
 }
 
 #[derive(Debug, Args)]
@@ -94,6 +100,8 @@ struct AddApiKeyArgs {
     upstream_url: String,
     #[arg(long, default_value_t = false)]
     secret_stdin: bool,
+    #[arg(long, value_enum, default_value_t = FingerprintMode::Device)]
+    fingerprint_mode: FingerprintMode,
 }
 
 #[derive(Debug, Args)]
@@ -101,6 +109,15 @@ struct AccountArgs {
     #[arg(long)]
     state_dir: Option<PathBuf>,
     account_ref: String,
+}
+
+#[derive(Debug, Args)]
+struct FingerprintArgs {
+    #[arg(long)]
+    state_dir: Option<PathBuf>,
+    account_ref: String,
+    #[arg(long, value_enum)]
+    mode: Option<FingerprintMode>,
 }
 
 impl Cli {
@@ -139,6 +156,7 @@ impl CredentialCommand {
                         issuer: args.issuer,
                         client_id: args.client_id,
                         upstream_url: args.upstream_url,
+                        fingerprint_mode: args.fingerprint_mode,
                     },
                 )
                 .await?;
@@ -155,6 +173,7 @@ impl CredentialCommand {
                         issuer: args.issuer,
                         client_id: args.client_id,
                         upstream_url: args.upstream_url,
+                        fingerprint_mode: args.fingerprint_mode,
                     },
                 )
                 .await?;
@@ -165,13 +184,23 @@ impl CredentialCommand {
                 validate_url(&args.upstream_url)?;
                 let api_key = read_secret_stdin().await?;
                 let vault = Vault::open(state_dir(args.state_dir))?;
-                let metadata = vault.create_api_key(api_key, args.upstream_url).await?;
+                let metadata = vault
+                    .create_api_key(api_key, args.upstream_url, args.fingerprint_mode)
+                    .await?;
                 print_json(&metadata)
             }
             Self::Inspect(args) => {
                 let vault = Vault::open(state_dir(args.state_dir))?;
                 let locked = vault.lock_record(&args.account_ref).await?;
                 print_json(&locked.record.metadata())
+            }
+            Self::Fingerprint(args) => {
+                let vault = Vault::open(state_dir(args.state_dir))?;
+                let metadata = match args.mode {
+                    Some(mode) => vault.set_fingerprint_mode(&args.account_ref, mode).await?,
+                    None => vault.fingerprint_metadata(&args.account_ref).await?,
+                };
+                print_json(&metadata)
             }
             Self::Revoke(args) => {
                 let vault = Vault::open(state_dir(args.state_dir))?;
@@ -294,3 +323,7 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
     println!("{}", serde_json::to_string(value)?);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "cli_tests.rs"]
+mod tests;

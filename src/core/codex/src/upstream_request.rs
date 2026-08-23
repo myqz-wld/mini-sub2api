@@ -10,7 +10,7 @@ use reqwest_websocket::UpgradedRequestBuilder;
 use tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
-pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.147.0";
+pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.149.0";
 pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
 
 const COMMON_ALLOWED: &[&str] = &[
