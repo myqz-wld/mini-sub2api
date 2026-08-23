@@ -80,7 +80,9 @@ pub async fn import(
         issuer: config.issuer,
         client_id: config.client_id,
     };
-    vault.create_oauth(material, config.upstream_url).await
+    vault
+        .create_oauth(material, config.upstream_url, config.fingerprint_mode)
+        .await
 }
 
 fn ensure_present(label: &str, value: &str) -> Result<()> {
@@ -91,6 +93,7 @@ fn ensure_present(label: &str, value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fingerprint::FingerprintMode;
     use crate::test_support::test_jwt;
     use crate::vault::CredentialMaterial;
     use pretty_assertions::assert_eq;
@@ -124,6 +127,7 @@ mod tests {
                 issuer: "https://auth.openai.com".to_string(),
                 client_id: "client-import-test".to_string(),
                 upstream_url: "https://chatgpt.com/backend-api/codex/responses".to_string(),
+                fingerprint_mode: FingerprintMode::Device,
             },
         )
         .await
@@ -177,6 +181,7 @@ mod tests {
                 issuer: "https://auth.openai.com".to_string(),
                 client_id: "client-import-test".to_string(),
                 upstream_url: "https://chatgpt.com/backend-api/codex/responses".to_string(),
+                fingerprint_mode: FingerprintMode::Device,
             },
         )
         .await

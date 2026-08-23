@@ -20,6 +20,11 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 const INTERNAL_TOKEN: &str = "internal-websocket-test-token-at-least-32-bytes";
+const TEST_DEVICE_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+fn device_fingerprint() -> FingerprintSnapshot {
+    FingerprintSnapshot::for_test(FingerprintMode::Device, 1, TEST_DEVICE_ID)
+}
 
 #[test]
 fn converts_only_supported_upstream_url_schemes() {
@@ -48,6 +53,7 @@ fn api_key_create_frame_is_byte_exact() {
         "acct_test",
         "req_test",
         false,
+        &device_fingerprint(),
         &mut sequence,
     )
     .expect("valid frame");
@@ -74,6 +80,7 @@ fn subscription_create_normalization_preserves_websocket_fields() {
         "acct_test",
         "req_test",
         true,
+        &device_fingerprint(),
         &mut sequence,
     )
     .expect("valid frame");
@@ -98,6 +105,7 @@ fn valid_non_create_application_event_is_byte_exact() {
         "acct_test",
         "req_test",
         true,
+        &device_fingerprint(),
         &mut sequence,
     )
     .expect("valid control frame");
@@ -115,6 +123,7 @@ fn malformed_or_untyped_application_frames_are_rejected() {
                 "acct_test",
                 "req_test",
                 false,
+                &device_fingerprint(),
                 &mut 0,
             )
             .is_err(),
@@ -299,10 +308,12 @@ async fn loopback_websocket_uses_direct_client_and_enforces_message_limit() {
         .with_state(capture.clone());
     let upstream = spawn_loopback(app).await;
     let (mut state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
-    state.websocket_client = reqwest::Client::builder()
-        .proxy(reqwest::Proxy::all("http://127.0.0.1:1").expect("bad test proxy"))
-        .build()
-        .expect("proxied client");
+    state.transports = Arc::new(
+        crate::transport_registry::TransportRegistry::new_with_proxy(
+            reqwest::Proxy::all("http://127.0.0.1:1").expect("bad test proxy"),
+        )
+        .expect("proxied transport registry"),
+    );
     let core = spawn_internal(state).await;
     let handshake = internal_handshake(&core.base_url, &account_ref)
         .upgrade()
@@ -373,6 +384,7 @@ async fn api_key_state(base_url: &str) -> (AppState, String, tempfile::TempDir) 
         .create_api_key(
             "upstream-websocket-api-key-test".to_string(),
             format!("{base_url}/responses"),
+            crate::fingerprint::FingerprintMode::Device,
         )
         .await
         .expect("API key record");
@@ -383,26 +395,9 @@ async fn api_key_state(base_url: &str) -> (AppState, String, tempfile::TempDir) 
 fn app_state(vault: Vault) -> AppState {
     AppState {
         vault,
-        client: reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("client"),
-        direct_client: reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .no_proxy()
-            .build()
-            .expect("direct client"),
-        websocket_client: reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .http1_only()
-            .build()
-            .expect("WebSocket client"),
-        direct_websocket_client: reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .http1_only()
-            .no_proxy()
-            .build()
-            .expect("direct WebSocket client"),
+        transports: Arc::new(
+            crate::transport_registry::TransportRegistry::new().expect("transport registry"),
+        ),
         internal_token_hash: Sha256::digest(INTERNAL_TOKEN.as_bytes()).into(),
         account_locks: Arc::new(Mutex::new(HashMap::new())),
     }

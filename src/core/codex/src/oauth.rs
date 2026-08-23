@@ -1,3 +1,4 @@
+use crate::fingerprint::FingerprintMode;
 use crate::http_body::decode_auth_json;
 use crate::http_body::read_auth_error;
 use crate::vault::CredentialMaterial;
@@ -30,6 +31,7 @@ pub struct OAuthConfig {
     pub issuer: String,
     pub client_id: String,
     pub upstream_url: String,
+    pub fingerprint_mode: FingerprintMode,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]

@@ -80,7 +80,9 @@ pub(crate) async fn login(
         issuer: config.issuer,
         client_id: config.client_id,
     };
-    vault.create_oauth(material, config.upstream_url).await
+    vault
+        .create_oauth(material, config.upstream_url, config.fingerprint_mode)
+        .await
 }
 
 async fn device_login(client: &Client, config: &OAuthConfig) -> Result<TokenResponse> {

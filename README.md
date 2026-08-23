@@ -68,6 +68,12 @@ build/bin/mini-sub2api --state-dir ./state \
 Paste the key and finish with EOF. The secret is not placed in arguments, environment variables,
 or SQLite.
 
+Every new OAuth or upstream API-key credential defaults to `--fingerprint-mode device`. In this
+mode, one credential represents one persistent Codex installation identity across HTTP and
+WebSocket requests. Use `--fingerprint-mode off` on any of the three creation commands only when
+caller-supplied installation identity must pass through unchanged. Existing credentials receive
+the same `device` default when first opened by this version.
+
 ### 2. Create a downstream API key
 
 ```bash
@@ -132,16 +138,22 @@ Codex's HTTP fallback logic. Set the flag to `false` to force the independent HT
 
 Subscription routes apply Codex compatibility normalization: unsupported output/sampling fields
 are removed, `system` instruction messages become `developer` messages, and the upstream
-`User-Agent` uses the Codex CLI `0.147.0` compatibility baseline. Explicit models, tools,
+`User-Agent` uses the Codex CLI `0.149.0` compatibility baseline. Explicit models, tools,
 instructions, reasoning controls, WebSocket `generate`/continuation fields, and streaming choices
-are preserved. OpenAI API-key request bodies and WebSocket application frames remain byte-exact,
-changing only the upstream bearer; organization/project headers are not sent on OAuth routes.
+are preserved. Remote compaction v2 continues through the normal Responses request stream, with
+its compaction trigger and turn metadata preserved. OpenAI API-key request bodies and WebSocket
+application frames without recognized installation carriers remain byte-exact. In `device` mode,
+recognized carriers are rewritten to the credential identity; organization/project headers are
+not sent on OAuth routes.
 
-WebSocket policy is intentionally small and coordinator-owned:
+WebSocket policy is intentionally small and split across the coordinator and core:
 
 - One socket is bound to one downstream key and credential; responses are sequential, and an
   overlapping `response.create` closes the connection with a policy violation.
 - Other valid Responses v2 JSON application events pass through while a response is active.
+- The core captures one credential fingerprint at the upstream handshake. It checks the current
+  fingerprint revision before every `response.create`; after a mode change, an idle old socket
+  closes once with reconnectable service-restart semantics before forwarding another create.
 - A key may hold at most eight live sockets. The first application frame must arrive within 30
   seconds, an idle connection between turns closes after five minutes, each write is bounded to
   120 seconds, and application messages are limited to 16 MiB. There is no hard total lifetime.
@@ -156,13 +168,20 @@ Credential commands:
 
 ```bash
 build/bin/mini-sub2api --state-dir ./state credential list
+build/bin/mini-sub2api --state-dir ./state credential fingerprint cred_EXAMPLE
 build/bin/mini-sub2api --state-dir ./state credential disable cred_EXAMPLE
+build/bin/mini-sub2api --state-dir ./state \
+  credential fingerprint cred_EXAMPLE --mode off
 build/bin/mini-sub2api --state-dir ./state credential enable cred_EXAMPLE
 build/bin/mini-sub2api --state-dir ./state credential revoke cred_EXAMPLE --yes
 build/bin/mini-sub2api --state-dir ./state credential remove cred_EXAMPLE --yes
 ```
 
 - `disable` and `enable` are reversible service-side operations.
+- `credential fingerprint ID` reports only the safe mode and revision. Changing the mode requires
+  the credential to be disabled; the command waits for active HTTP/WebSocket operations, performs
+  a fenced core update, and leaves it disabled for an explicit later `enable`. Switching modes does
+  not rotate the saved device identity.
 - `revoke` is for OAuth credentials. It requires no active downstream keys, waits for in-flight
   requests, revokes upstream first, and removes local material only after success.
 - `remove` deletes service-side material. OpenAI API-key deletion at the provider remains the
@@ -212,12 +231,20 @@ Operational boundaries:
 - Run only one coordinator/core pair per state directory.
 - Stop the service before backing up or restoring the complete state directory.
 - Provider secrets live in a private `0600` vault and are not encrypted at rest.
+- Credential fingerprint sidecars are also private `0600` core-vault state. Their installation IDs
+  are not copied into SQLite, the coordinator/core runtime protocol, usage records, logs, or CLI
+  output. OAuth refresh and complete state-directory backup/restore preserve the ID; deleting and
+  newly creating/importing a credential creates a new one.
 - SQLite stores credential metadata, downstream-key hashes, timing, status, and token counts. It
   does not store prompts, request bodies, response bodies, tool arguments, or generated content.
 - Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or
   disabling a credential therefore prevents the next turn on an already-open idle socket.
 - Inference is not replayed after transport errors, `429`, or `5xx`. OAuth may refresh once and
   replay once after a pre-response upstream `401`.
+
+Upstream connection pools are isolated per credential. HTTP uses the platform transport-default
+TLS backend; Responses WebSocket uses AWS-LC rustls with platform-native roots, matching the fixed
+Codex `0.149.0` transport split. These profiles are internal and are not user-configurable.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.

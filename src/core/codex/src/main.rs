@@ -2,6 +2,8 @@ mod build_info;
 mod cli;
 mod codex_auth_import;
 mod error;
+mod fingerprint;
+mod fingerprint_projection;
 mod http_body;
 mod http_client;
 mod oauth;
@@ -11,8 +13,10 @@ mod responses_websocket;
 mod server;
 #[cfg(test)]
 mod test_support;
+mod transport_registry;
 mod upstream_request;
 mod vault;
+mod vault_io;
 
 use clap::Parser;
 

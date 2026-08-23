@@ -1,12 +1,24 @@
 use super::*;
+use bytes::Bytes;
+use http::HeaderValue;
+
+const INTERNAL_TOKEN: &str = "internal-test-token-with-at-least-32-bytes";
 
 pub(super) async fn api_key_state(base_url: &str) -> (AppState, String, tempfile::TempDir) {
+    api_key_state_with_mode(base_url, crate::fingerprint::FingerprintMode::Device).await
+}
+
+pub(super) async fn api_key_state_with_mode(
+    base_url: &str,
+    mode: crate::fingerprint::FingerprintMode,
+) -> (AppState, String, tempfile::TempDir) {
     let temp = tempfile::tempdir().expect("tempdir");
     let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
     let metadata = vault
         .create_api_key(
             "upstream-api-key-test".to_string(),
             format!("{base_url}/responses"),
+            mode,
         )
         .await
         .expect("API key record");
@@ -16,16 +28,7 @@ pub(super) async fn api_key_state(base_url: &str) -> (AppState, String, tempfile
 pub(super) fn app_state(vault: Vault) -> AppState {
     AppState {
         vault,
-        client: Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("client"),
-        direct_client: Client::builder().no_proxy().build().expect("direct client"),
-        websocket_client: Client::new(),
-        direct_websocket_client: Client::builder()
-            .no_proxy()
-            .build()
-            .expect("direct WS client"),
+        transports: Arc::new(TransportRegistry::new().expect("transport registry")),
         internal_token_hash: Sha256::digest(INTERNAL_TOKEN.as_bytes()).into(),
         account_locks: Arc::new(Mutex::new(HashMap::new())),
     }
