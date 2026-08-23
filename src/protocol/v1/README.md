@@ -116,9 +116,12 @@ malformed, non-object, or oversized device projections fail before an upstream s
 core preserves caller-provided installation carriers under the existing auth-specific behavior.
 
 One credential owns independent HTTP and WebSocket connection pools. HTTP uses transport-default
-TLS; provider WebSocket uses AWS-LC rustls with native roots and HTTP/1. These fixed builders are
-the Codex `0.149.0` compatibility split and do not vary by credential. Pool selection and device
-projection require no coordinator parsing of request bodies or WebSocket frames.
+TLS; provider WebSocket uses AWS-LC rustls with native roots, a PQ-first key-group list, and an
+HTTP/1 handshake without an ALPN offer. These fixed builders are the Codex `0.149.0` compatibility
+split and do not vary by credential. Provider WebSockets use the same pinned OpenAI
+`tokio-tungstenite`/`tungstenite` fork revisions and per-message-deflate offer as that release. Pool
+selection and device projection require no coordinator parsing of request bodies or WebSocket
+frames.
 
 ## Inference response
 
@@ -167,8 +170,9 @@ response remains an HTTP handshake response all the way to the public client.
 - Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
   `ChatGPT-Account-ID`, supplies `originator` when absent, and keeps the reviewed `0.149.0`
   User-Agent anchor.
-- The public coordinator hop may negotiate per-message deflate. The internal and provider hops do
-  not request WebSocket compression.
+- The public coordinator and provider hops may negotiate per-message deflate. The provider sends
+  the Codex `0.149.0` offer `permessage-deflate; client_max_window_bits`; the authenticated internal
+  loopback hop does not request WebSocket compression.
 - Ping, pong, close, cancellation, and backpressure remain connection-scoped. Neither layer
   reconnects or replays an active turn.
 

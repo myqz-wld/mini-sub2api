@@ -159,8 +159,9 @@ WebSocket policy is intentionally small and split across the coordinator and cor
   120 seconds, and application messages are limited to 16 MiB. There is no hard total lifetime.
 - Codex's `generate=false` startup prewarm is retained in history as `websocket_prewarm` for
   in-flight/revocation safety, but it is excluded from daily inference aggregates.
-- The public hop supports per-message deflate. The authenticated loopback hop and the provider hop
-  are uncompressed; payload semantics are unchanged.
+- The public and provider hops support per-message deflate. The provider offer matches Codex
+  `0.149.0` (`permessage-deflate; client_max_window_bits`); the authenticated loopback hop remains
+  uncompressed, and payload semantics are unchanged.
 
 ## Administration
 
@@ -244,7 +245,10 @@ Operational boundaries:
 
 Upstream connection pools are isolated per credential. HTTP uses the platform transport-default
 TLS backend; Responses WebSocket uses AWS-LC rustls with platform-native roots, matching the fixed
-Codex `0.149.0` transport split. These profiles are internal and are not user-configurable.
+Codex `0.149.0` transport split, including its absent WebSocket ALPN offer and PQ-first key groups.
+The provider WebSocket handshake and compression path use the same pinned OpenAI
+`tokio-tungstenite`/`tungstenite` fork revisions as that release. These profiles are internal and
+are not user-configurable.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.

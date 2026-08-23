@@ -1,4 +1,5 @@
 use crate::http_client::has_literal_loopback_host;
+use crate::websocket_connector::WebSocketConnector;
 use anyhow::Context;
 use anyhow::Result;
 use reqwest::Client;
@@ -32,8 +33,8 @@ struct TransportKey {
 pub(crate) struct CredentialTransportContext {
     http: Client,
     direct_http: Client,
-    websocket: Client,
-    direct_websocket: Client,
+    websocket: WebSocketConnector,
+    direct_websocket: WebSocketConnector,
 }
 
 impl CredentialTransportContext {
@@ -45,7 +46,7 @@ impl CredentialTransportContext {
         }
     }
 
-    pub(crate) fn websocket_client_for_url(&self, url: &str) -> &Client {
+    pub(crate) fn websocket_connector_for_url(&self, url: &str) -> &WebSocketConnector {
         if has_literal_loopback_host(url) {
             &self.direct_websocket
         } else {
@@ -65,14 +66,14 @@ impl TransportRegistry {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_proxy(proxy: reqwest::Proxy) -> Result<Self> {
-        Self::new_inner(Some(proxy))
+    pub(crate) fn new_with_proxy_url(proxy_url: &str) -> Result<Self> {
+        Self::new_inner(Some(proxy_url))
     }
 
-    fn new_inner(explicit_proxy: Option<reqwest::Proxy>) -> Result<Self> {
+    fn new_inner(explicit_proxy_url: Option<&str>) -> Result<Self> {
         Ok(Self {
             contexts: Mutex::new(HashMap::new()),
-            factory: TransportFactory::new(explicit_proxy)?,
+            factory: TransportFactory::new(explicit_proxy_url)?,
         })
     }
 
@@ -102,21 +103,27 @@ impl TransportRegistry {
 struct TransportFactory {
     websocket_roots: RootCertStore,
     explicit_proxy: Option<reqwest::Proxy>,
+    explicit_proxy_url: Option<String>,
 }
 
 impl TransportFactory {
-    fn new(explicit_proxy: Option<reqwest::Proxy>) -> Result<Self> {
+    fn new(explicit_proxy_url: Option<&str>) -> Result<Self> {
         let (websocket_roots, _) = load_websocket_roots()?;
+        let explicit_proxy = explicit_proxy_url
+            .map(reqwest::Proxy::all)
+            .transpose()
+            .context("building explicit test proxy")?;
         Ok(Self {
             websocket_roots,
             explicit_proxy,
+            explicit_proxy_url: explicit_proxy_url.map(str::to_string),
         })
     }
 
     fn build(&self) -> Result<CredentialTransportContext> {
         // A fresh config gives each credential an independent TLS resumption cache while retaining
-        // the same provider, roots, versions, and ALPN policy.
-        let websocket_tls = build_websocket_tls_config(self.websocket_roots.clone())?;
+        // the same provider, roots, versions, and absent-ALPN policy as Codex 0.149.0.
+        let websocket_tls = Arc::new(build_websocket_tls_config(self.websocket_roots.clone())?);
         let http = self
             .http_builder()
             .build()
@@ -126,15 +133,16 @@ impl TransportFactory {
             .no_proxy()
             .build()
             .context("building direct credential HTTP client")?;
-        let websocket = self
-            .websocket_builder(&websocket_tls)
-            .build()
-            .context("building credential WebSocket client")?;
-        let direct_websocket = self
-            .websocket_builder(&websocket_tls)
-            .no_proxy()
-            .build()
-            .context("building direct credential WebSocket client")?;
+        let websocket = match self.explicit_proxy_url.as_deref() {
+            Some(proxy_url) => WebSocketConnector::with_proxy(
+                Arc::clone(&websocket_tls),
+                CONNECT_TIMEOUT,
+                proxy_url,
+            ),
+            None => WebSocketConnector::system(Arc::clone(&websocket_tls), CONNECT_TIMEOUT),
+        };
+        let direct_websocket =
+            WebSocketConnector::direct(Arc::clone(&websocket_tls), CONNECT_TIMEOUT);
         Ok(CredentialTransportContext {
             http,
             direct_http,
@@ -150,17 +158,6 @@ impl TransportFactory {
                 .connect_timeout(CONNECT_TIMEOUT)
                 .read_timeout(HTTP_READ_TIMEOUT)
                 .redirect(reqwest::redirect::Policy::none()),
-        )
-    }
-
-    /// Uses the Codex 0.149.0 WebSocket split: explicit AWS-LC rustls/native roots and HTTP/1.
-    fn websocket_builder(&self, websocket_tls: &ClientConfig) -> ClientBuilder {
-        self.apply_explicit_test_proxy(
-            Client::builder()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::none())
-                .http1_only()
-                .use_preconfigured_tls(websocket_tls.clone()),
         )
     }
 
@@ -190,10 +187,9 @@ fn load_websocket_roots() -> Result<(RootCertStore, usize)> {
 
 fn build_websocket_tls_config(roots: RootCertStore) -> Result<ClientConfig> {
     ensure_aws_lc_provider()?;
-    let mut config = ClientConfig::builder()
+    let config = ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(config)
 }
 

@@ -1,11 +1,13 @@
 use super::*;
 use crate::test_support::spawn_loopback;
+use crate::upstream_request::ResolvedAuth;
+use crate::upstream_request::build_websocket;
+use crate::websocket_connector::WebSocketHandshake;
 use axum::Router;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::routing::get;
-use reqwest_websocket::RequestBuilderExt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
@@ -27,6 +29,13 @@ fn registry_reuses_one_context_per_account_and_policy_revision() {
     assert!(Arc::ptr_eq(&first, &repeated));
     assert!(!Arc::ptr_eq(&first, &second));
     assert!(!Arc::ptr_eq(&first, &revised));
+    assert!(
+        first
+            .websocket
+            .shares_tls_state_with(&first.direct_websocket)
+    );
+    assert!(!first.websocket.shares_tls_state_with(&second.websocket));
+    assert!(!first.websocket.shares_tls_state_with(&revised.websocket));
 }
 
 #[test]
@@ -53,17 +62,21 @@ fn concurrent_first_access_builds_exactly_one_context() {
 }
 
 #[test]
-fn websocket_tls_uses_aws_lc_native_roots_and_http1_alpn() {
+fn websocket_tls_uses_aws_lc_native_roots_without_alpn_and_prefers_pq() {
     let (roots, native_root_count) = load_websocket_roots().expect("native roots");
     let config = build_websocket_tls_config(roots).expect("TLS config");
     assert!(native_root_count > 0);
-    assert_eq!(config.alpn_protocols, [b"http/1.1".to_vec()]);
+    assert!(config.alpn_protocols.is_empty());
     let provider = rustls::crypto::CryptoProvider::get_default().expect("installed provider");
     assert!(
         provider
             .signature_verification_algorithms
             .supported_schemes()
             .contains(&REQUIRED_AWS_LC_SIGNATURE_SCHEME)
+    );
+    assert_eq!(
+        provider.kx_groups.first().map(|group| group.name()),
+        Some(rustls::NamedGroup::X25519MLKEM768)
     );
 }
 
@@ -142,8 +155,7 @@ async fn literal_loopback_http_and_websocket_bypass_bad_proxy() {
     );
     let websocket_server = spawn_loopback(websocket_app).await;
     let http_server = spawn_loopback(Router::new().route("/", get(|| async { "direct" }))).await;
-    let proxy = reqwest::Proxy::all("http://127.0.0.1:1").expect("bad proxy");
-    let registry = TransportRegistry::new_with_proxy(proxy).expect("registry");
+    let registry = TransportRegistry::new_with_proxy_url("http://127.0.0.1:1").expect("registry");
     let context = registry
         .context("acct_direct", CredentialTransportPolicy::default())
         .expect("context");
@@ -157,15 +169,25 @@ async fn literal_loopback_http_and_websocket_bypass_bad_proxy() {
     assert_eq!(response.text().await.expect("HTTP body"), "direct");
 
     let websocket_url = format!("{}/responses", websocket_server.base_url);
+    let (request, config) = build_websocket(
+        &http::HeaderMap::new(),
+        &websocket_url,
+        &ResolvedAuth::OpenAiApiKey {
+            token: "offline-test-key".to_string(),
+        },
+        crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES,
+    )
+    .expect("WebSocket request");
     let handshake = context
-        .websocket_client_for_url(&websocket_url)
-        .get(&websocket_url)
-        .upgrade()
-        .send()
+        .websocket_connector_for_url(&websocket_url)
+        .connect(request, config)
         .await
         .expect("direct WebSocket");
-    assert_eq!(handshake.status(), reqwest::StatusCode::SWITCHING_PROTOCOLS);
-    drop(handshake.into_websocket().await.expect("WebSocket"));
+    assert_eq!(handshake.status(), http::StatusCode::SWITCHING_PROTOCOLS);
+    let WebSocketHandshake::Connected { socket, .. } = handshake else {
+        panic!("expected WebSocket connection");
+    };
+    drop(socket);
 }
 
 #[tokio::test]

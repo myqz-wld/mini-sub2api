@@ -17,6 +17,7 @@ mod transport_registry;
 mod upstream_request;
 mod vault;
 mod vault_io;
+mod websocket_connector;
 
 use clap::Parser;
 

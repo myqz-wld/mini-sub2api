@@ -5,9 +5,11 @@ use http::HeaderName;
 use http::HeaderValue;
 use reqwest::Client;
 use reqwest::Request;
-use reqwest_websocket::RequestBuilderExt;
-use reqwest_websocket::UpgradedRequestBuilder;
-use tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::extensions::ExtensionsConfig;
+use tokio_tungstenite::tungstenite::extensions::compression::deflate::DeflateConfig;
+use tokio_tungstenite::tungstenite::handshake::client::Request as WebSocketRequest;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
 pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.149.0";
@@ -47,6 +49,69 @@ const OPENAI_API_KEY_ALLOWED: &[&str] = &[
     "x-stainless-timeout",
 ];
 
+const HTTP_HEADER_ORDER: &[&str] = &[
+    "x-codex-beta-features",
+    "x-codex-window-id",
+    "x-codex-turn-metadata",
+    "x-codex-installation-id",
+    "x-openai-internal-codex-responses-lite",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "accept",
+    "content-encoding",
+    "content-type",
+    "authorization",
+    "chatgpt-account-id",
+    "originator",
+    "user-agent",
+    "openai-beta",
+    "x-codex-turn-state",
+    "x-codex-parent-thread-id",
+    "session_id",
+    "conversation_id",
+    "openai-organization",
+    "openai-project",
+    "x-stainless-arch",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout",
+];
+
+const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
+    "authorization",
+    "chatgpt-account-id",
+    "user-agent",
+    "originator",
+    "openai-beta",
+    "x-codex-turn-metadata",
+    "x-codex-installation-id",
+    "x-codex-beta-features",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "x-codex-window-id",
+    "x-codex-turn-state",
+    "x-codex-parent-thread-id",
+    "x-openai-internal-codex-responses-lite",
+    "session_id",
+    "conversation_id",
+    "openai-organization",
+    "openai-project",
+    "x-stainless-arch",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout",
+];
+
 #[derive(Clone)]
 pub(crate) enum ResolvedAuth {
     CodexOAuth { token: String, account_id: String },
@@ -60,7 +125,7 @@ pub(crate) fn build(
     auth: &ResolvedAuth,
     body: Bytes,
 ) -> Result<Request, CoreFailure> {
-    let headers = authenticated_headers(inbound_headers, auth)?;
+    let headers = ordered_authenticated_headers(inbound_headers, auth, HTTP_HEADER_ORDER)?;
     client
         .post(upstream_url)
         .headers(headers)
@@ -70,12 +135,11 @@ pub(crate) fn build(
 }
 
 pub(crate) fn build_websocket(
-    client: &Client,
     inbound_headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
     max_message_bytes: usize,
-) -> Result<UpgradedRequestBuilder, CoreFailure> {
+) -> Result<(WebSocketRequest, WebSocketConfig), CoreFailure> {
     let mut headers = authenticated_headers(inbound_headers, auth)?;
     headers.remove(http::header::ACCEPT);
     headers.remove(http::header::CONTENT_ENCODING);
@@ -85,15 +149,58 @@ pub(crate) fn build_websocket(
         HeaderValue::from_static(RESPONSES_WEBSOCKET_BETA),
     );
     let url = websocket_url(upstream_url)?;
-    let config = WebSocketConfig::default()
-        .max_message_size(Some(max_message_bytes))
-        .max_frame_size(Some(max_message_bytes));
-    Ok(client
-        .get(url)
-        .version(reqwest::Version::HTTP_11)
-        .headers(headers)
-        .upgrade()
-        .web_socket_config(config))
+    let mut request = url
+        .as_str()
+        .into_client_request()
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
+    insert_websocket_headers(request.headers_mut(), &headers);
+
+    let mut extensions = ExtensionsConfig::default();
+    extensions.permessage_deflate = Some(DeflateConfig::default());
+    let mut config = WebSocketConfig::default();
+    config.max_message_size = Some(max_message_bytes);
+    config.max_frame_size = Some(max_message_bytes);
+    config.extensions = extensions;
+    Ok((request, config))
+}
+
+fn ordered_authenticated_headers(
+    inbound_headers: &HeaderMap,
+    auth: &ResolvedAuth,
+    order: &[&'static str],
+) -> Result<HeaderMap, CoreFailure> {
+    let headers = authenticated_headers(inbound_headers, auth)?;
+    Ok(ordered_headers(&headers, order))
+}
+
+fn ordered_headers(source: &HeaderMap, order: &[&'static str]) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for name in order {
+        let name = HeaderName::from_static(name);
+        for value in source.get_all(&name) {
+            headers.append(name.clone(), value.clone());
+        }
+    }
+    headers
+}
+
+fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
+    let desired = WEBSOCKET_WIRE_HEADER_ORDER
+        .iter()
+        .filter_map(|name| {
+            source
+                .get(*name)
+                .map(|value| (HeaderName::from_static(name), value.clone()))
+        })
+        .collect::<Vec<_>>();
+
+    // The pinned tungstenite generator removes five mandatory headers with HeaderMap::remove.
+    // HeaderMap uses swap-remove, so those removals move the last five custom entries to the
+    // front in reverse order. Pre-rotate the entries so their final wire order matches Codex.
+    let moved = desired.len().min(5);
+    for (name, value) in desired[moved..].iter().chain(desired[..moved].iter().rev()) {
+        destination.insert(name.clone(), value.clone());
+    }
 }
 
 fn authenticated_headers(
