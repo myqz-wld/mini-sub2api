@@ -2,6 +2,7 @@ use crate::error::CoreFailure;
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_http_device;
+use crate::inference_fingerprint::headers_for_retry;
 use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
@@ -143,7 +144,7 @@ async fn responses_inner(
             &headers,
             body,
             MAX_REQUEST_BYTES,
-            &account_ref,
+            resolved.fingerprint.installation_id(),
             &request_id,
         );
         (prepared.headers, prepared.body)
@@ -183,9 +184,10 @@ async fn responses_inner(
         let _guard = account_lock.lock().await;
         let retry = resolve_auth(state, &account_ref, Some(&failed_access_token)).await?;
         drop(_guard);
+        let retry_headers = headers_for_retry(&forward_headers);
         upstream = send_upstream(
             &retry.transport,
-            &forward_headers,
+            &retry_headers,
             &retry.upstream_url,
             &retry.auth,
             body,

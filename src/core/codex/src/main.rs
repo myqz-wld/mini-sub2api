@@ -1,16 +1,26 @@
+mod ascii_json;
 mod build_info;
 mod cli;
+mod cloudflare_cookies;
 mod codex_auth_import;
+mod codex_user_agent;
 mod error;
 mod fingerprint;
 mod fingerprint_projection;
 mod http_body;
 mod http_client;
+mod inference_fingerprint;
 mod oauth;
 mod oauth_login;
+mod request_defaults;
+mod request_identity;
 mod request_normalizer;
+mod response_item_metadata;
+mod responses_lite;
 mod responses_websocket;
+mod responses_websocket_deferred;
 mod server;
+mod terminal_detection;
 #[cfg(test)]
 mod test_support;
 mod transport_registry;

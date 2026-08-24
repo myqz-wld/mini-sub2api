@@ -93,6 +93,39 @@ fn rejects_non_http_auth_urls_before_network_access() {
     assert!(validate_auth_url("http://127.0.0.1:1234/oauth").is_ok());
 }
 
+#[test]
+fn browser_authorize_url_uses_codex_originator_and_registered_ports() {
+    let config = OAuthConfig {
+        issuer: "https://auth.openai.com".to_string(),
+        client_id: "client-test".to_string(),
+        upstream_url: "https://chatgpt.com/backend-api/codex/responses".to_string(),
+        fingerprint_mode: crate::fingerprint::FingerprintMode::Device,
+    };
+    let pkce = Pkce {
+        verifier: "verifier".to_string(),
+        challenge: "challenge".to_string(),
+    };
+    let url = authorize_url(
+        &config,
+        &format!("http://localhost:{DEFAULT_CALLBACK_PORT}/auth/callback"),
+        &pkce,
+        "state-test",
+    )
+    .expect("authorize URL");
+    let pairs = url.query_pairs().into_owned().collect::<HashMap<_, _>>();
+
+    assert_eq!(
+        pairs.get("originator").map(String::as_str),
+        Some(crate::upstream_request::DEFAULT_CODEX_ORIGINATOR)
+    );
+    assert_eq!(
+        pairs.get("redirect_uri").map(String::as_str),
+        Some("http://localhost:1455/auth/callback")
+    );
+    assert!(url.as_str().contains("scope=openid%20profile%20email"));
+    assert_eq!(FALLBACK_CALLBACK_PORT, 1457);
+}
+
 #[tokio::test]
 async fn browser_callback_accepts_only_matching_state() {
     let (result, response) = send_callback("state-test", "state-test").await;

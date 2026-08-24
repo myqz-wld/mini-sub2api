@@ -3,12 +3,12 @@ package integration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +29,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 	coreBinary := findCoreBinary(t)
 	captures := make(chan routingMatrixCapture, 8)
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		body, err := io.ReadAll(request.Body)
+		body, err := readCapturedUpstreamBody(request)
 		if err != nil {
 			http.Error(writer, "capture body", http.StatusInternalServerError)
 			return
@@ -246,7 +246,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			},
 		},
 		{
-			name:   "oauth_turns_codex_api_into_sub_auth_and_keeps_native_body",
+			name:   "oauth_turns_codex_api_into_exact_subscription_shape",
 			secret: oauthKey.Secret,
 			body:   codexToSubscriptionBody,
 			headers: func() http.Header {
@@ -257,9 +257,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			wantRoute: "Codex Sub native",
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertSubscriptionCapture(t, capture, oauthAccessToken, accountID)
-				if !bytes.Equal(capture.Body, codexToSubscriptionBody) {
-					t.Fatalf("native Codex body changed:\n got: %s\nwant: %s", capture.Body, codexToSubscriptionBody)
-				}
+				assertNativeSubscriptionBody(t, capture.Body, messages)
 				if capture.Headers.Get("Originator") != "codex_exec" ||
 					capture.Headers.Get("Session-Id") != "oauth-session" ||
 					capture.Headers.Get("X-Openai-Subagent") != "review" ||
@@ -341,16 +339,24 @@ func assertSubscriptionCapture(
 		capture.Headers.Get("ChatGPT-Account-ID") != wantAccountID {
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
-	if capture.Headers.Get("Originator") == "" ||
-		capture.Headers.Get("Version") != "0.149.0" ||
-		capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0" &&
-			capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0 routing-matrix" {
+	userAgent := capture.Headers.Get("User-Agent")
+	if capture.Headers.Get("Originator") == "" || capture.Headers.Get("Version") != "0.149.0" ||
+		userAgent != "codex_cli_rs/0.149.0 routing-matrix" &&
+			!strings.HasPrefix(userAgent, "codex_cli_rs/0.149.0 (") {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("OpenAI-Organization") != "" ||
 		capture.Headers.Get("OpenAI-Project") != "" ||
 		capture.Headers.Get("X-Stainless-Lang") != "" {
 		t.Fatalf("API-only headers crossed into subscription route: %#v", capture.Headers)
+	}
+	if capture.Headers.Get("Content-Encoding") != "zstd" ||
+		capture.Headers.Get("Accept") != "text/event-stream" ||
+		capture.Headers.Get("Content-Type") != "application/json" {
+		t.Fatalf("subscription representation headers = %#v", capture.Headers)
+	}
+	if capture.Headers.Get("X-Codex-Installation-Id") != "" {
+		t.Fatalf("installation id must not be a direct HTTP header: %#v", capture.Headers)
 	}
 }
 
@@ -362,18 +368,20 @@ func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any
 		t.Fatalf("lite input = %#v", value["input"])
 	}
 	additional, ok := input[0].(map[string]any)
-	if !ok || additional["type"] != "additional_tools" || !jsonEqual(additional["tools"], tools) {
+	if !ok || additional["type"] != "additional_tools" ||
+		!jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
 		t.Fatalf("lite additional tools = %#v", input[0])
 	}
 	developer, ok := input[1].(map[string]any)
 	if !ok || developer["role"] != "developer" {
 		t.Fatalf("lite developer message = %#v", input[1])
 	}
-	if !jsonEqual(input[2:], messages) {
-		t.Fatalf("lite messages changed = %#v", input[2:])
+	assertNormalizedMessages(t, input[2:], messages)
+	if additional["id"] != nil || developer["id"] != nil {
+		t.Fatalf("synthetic lite items received ids: additional=%#v developer=%#v", additional, developer)
 	}
 	if value["tools"] != nil || value["instructions"] != nil || value["store"] != false ||
-		value["stream"] != false || value["parallel_tool_calls"] != false {
+		value["stream"] != true || value["parallel_tool_calls"] != false {
 		t.Fatalf("lite controls = %#v", value)
 	}
 }
@@ -381,11 +389,16 @@ func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any
 func assertNonLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any) {
 	t.Helper()
 	value := decodeRequestObject(t, body)
-	if !jsonEqual(value["input"], messages) || !jsonEqual(value["tools"], tools) {
+	input, ok := value["input"].([]any)
+	if !ok {
+		t.Fatalf("non-lite input = %#v", value["input"])
+	}
+	assertNormalizedMessages(t, input, messages)
+	if !jsonEqual(value["tools"], canonicalExpectedTools(tools)) {
 		t.Fatalf("non-lite messages/tools = %#v", value)
 	}
 	if value["instructions"] != "Look up the requested order." || value["store"] != false ||
-		value["stream"] != false || value["parallel_tool_calls"] != true ||
+		value["stream"] != true || value["parallel_tool_calls"] != true ||
 		value["tool_choice"] != "auto" {
 		t.Fatalf("non-lite controls = %#v", value)
 	}
@@ -394,20 +407,54 @@ func assertNonLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []
 	}
 }
 
-func mustRequestJSON(t *testing.T, value any) []byte {
+func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	t.Helper()
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
+	value := decodeRequestObject(t, body)
+	input, ok := value["input"].([]any)
+	if !ok {
+		t.Fatalf("native subscription input = %#v", value["input"])
 	}
-	return encoded
+	assertMessageSemantics(t, input, messages)
+	if value["model"] != "gpt-5.4" || value["instructions"] != "Continue the existing turn." ||
+		value["store"] != false || value["stream"] != true || value["tool_choice"] != "auto" ||
+		value["parallel_tool_calls"] != true || value["prompt_cache_key"] != "oauth-codex-session" {
+		t.Fatalf("native subscription controls = %#v", value)
+	}
+	metadata, ok := value["client_metadata"].(map[string]any)
+	if !ok || metadata["session_id"] != "oauth-codex-session" ||
+		metadata["thread_id"] != "oauth-codex-thread" || metadata["turn_id"] != "oauth-codex-turn" ||
+		metadata["x-codex-installation-id"] == "" || metadata["x-codex-turn-metadata"] == "" {
+		t.Fatalf("native subscription metadata = %#v", value["client_metadata"])
+	}
 }
 
-func decodeRequestObject(t *testing.T, body []byte) map[string]any {
+func assertNormalizedMessages(t *testing.T, got, want []any) {
 	t.Helper()
-	var value map[string]any
-	if err := json.Unmarshal(body, &value); err != nil {
-		t.Fatalf("decode upstream request: %v; body=%s", err, body)
+	assertMessageSemantics(t, got, want)
+	for index := range want {
+		gotMessage := got[index].(map[string]any)
+		id, _ := gotMessage["id"].(string)
+		metadata, _ := gotMessage["internal_chat_message_metadata_passthrough"].(map[string]any)
+		role, _ := gotMessage["role"].(string)
+		wantCreateTime := role == "user" || role == "developer"
+		hasCreateTime := metadata["create_time"] != nil
+		if id == "" || metadata["turn_id"] == "" || hasCreateTime != wantCreateTime {
+			t.Fatalf("normalized message %d identity = %#v", index, gotMessage)
+		}
 	}
-	return value
+}
+
+func assertMessageSemantics(t *testing.T, got, want []any) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("normalized message count = %d, want %d", len(got), len(want))
+	}
+	for index := range want {
+		gotMessage, gotOK := got[index].(map[string]any)
+		wantMessage, wantOK := want[index].(map[string]any)
+		if !gotOK || !wantOK || gotMessage["type"] != wantMessage["type"] ||
+			gotMessage["role"] != wantMessage["role"] || !jsonEqual(gotMessage["content"], wantMessage["content"]) {
+			t.Fatalf("normalized message %d = %#v, want semantic %#v", index, got[index], want[index])
+		}
+	}
 }

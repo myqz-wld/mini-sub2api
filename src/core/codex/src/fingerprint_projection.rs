@@ -1,3 +1,4 @@
+use crate::ascii_json::to_ascii_json_string;
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use anyhow::Context;
@@ -93,7 +94,9 @@ fn project_json_body(body: Bytes, installation_id: &str, maximum: usize) -> Resu
         .as_object_mut()
         .context("device client_metadata is not a JSON object")?;
     let mut changed = false;
-    if let Some(value) = metadata.get_mut(INSTALLATION_HEADER) {
+    if let Some(value) = metadata.get_mut(INSTALLATION_HEADER)
+        && value.as_str() != Some(installation_id)
+    {
         *value = Value::String(installation_id.to_string());
         changed = true;
     }
@@ -101,8 +104,11 @@ fn project_json_body(body: Bytes, installation_id: &str, maximum: usize) -> Resu
         let raw = value
             .as_str()
             .context("device client turn metadata is not a string")?;
-        *value = Value::String(rewrite_serialized_turn_metadata(raw, installation_id)?);
-        changed = true;
+        let rewritten = rewrite_serialized_turn_metadata(raw, installation_id)?;
+        if rewritten != raw {
+            *value = Value::String(rewritten);
+            changed = true;
+        }
     }
     if !changed {
         return Ok(body);
@@ -121,11 +127,11 @@ fn rewrite_serialized_turn_metadata(raw: &str, installation_id: &str) -> Result<
     let object = value
         .as_object_mut()
         .context("device turn metadata is not a JSON object")?;
-    object.insert(
-        "installation_id".to_string(),
-        Value::String(installation_id.to_string()),
-    );
-    serde_json::to_string(&value).context("encoding projected device turn metadata")
+    let Some(current) = object.get_mut("installation_id") else {
+        return Ok(raw.to_string());
+    };
+    *current = Value::String(installation_id.to_string());
+    to_ascii_json_string(&value).context("encoding projected device turn metadata")
 }
 
 fn ensure_identity_encoding(headers: &HeaderMap) -> Result<()> {

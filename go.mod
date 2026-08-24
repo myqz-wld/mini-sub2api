@@ -6,6 +6,7 @@ toolchain go1.26.4
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/klauspost/compress v1.18.2
 	modernc.org/sqlite v1.56.0
 )
 

@@ -14,6 +14,7 @@ use chrono::Duration;
 use chrono::Utc;
 use rand::RngCore;
 use reqwest::Client;
+use reqwest::RequestBuilder;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
@@ -113,8 +114,8 @@ pub async fn refresh_if_needed(
     }
 
     let endpoint = format!("{}/oauth/token", issuer.trim_end_matches('/'));
-    let response = client
-        .post(&endpoint)
+    let response = codex_auth_request(client.post(&endpoint))
+        .header(http::header::CONTENT_TYPE, "application/json")
         .json(&RefreshRequest {
             client_id: &client_id,
             grant_type: "refresh_token",
@@ -131,7 +132,7 @@ pub async fn refresh_if_needed(
         let body = read_auth_error(response)
             .await
             .map_err(OAuthFailure::Transport)?;
-        if is_permanent_refresh_error(&body) {
+        if is_permanent_refresh_error(status, &body) {
             return mark_requires_login(locked).await;
         }
         return Err(OAuthFailure::Transport(anyhow::anyhow!(
@@ -215,8 +216,8 @@ pub async fn revoke(locked: &mut LockedRecord, client: &Client) -> Result<()> {
     if let Some(client_id) = request_client_id {
         body["client_id"] = Value::String(client_id.to_string());
     }
-    let response = client
-        .post(endpoint)
+    let response = codex_auth_request(client.post(endpoint))
+        .header(http::header::CONTENT_TYPE, "application/json")
         .timeout(StdDuration::from_secs(10))
         .json(&body)
         .send()
@@ -280,19 +281,33 @@ fn jwt_claims(token: &str) -> Result<Value> {
     serde_json::from_slice(&bytes).context("decoding JWT claims")
 }
 
-fn is_permanent_refresh_error(body: &str) -> bool {
+fn codex_auth_request(request: RequestBuilder) -> RequestBuilder {
+    let originator = crate::upstream_request::DEFAULT_CODEX_ORIGINATOR;
+    request.header("originator", originator).header(
+        http::header::USER_AGENT,
+        crate::codex_user_agent::for_originator(originator),
+    )
+}
+
+fn is_permanent_refresh_error(status: StatusCode, body: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(body) else {
         return false;
     };
     let code = value
         .get("error")
-        .and_then(|error| error.get("code"))
-        .or_else(|| value.get("code"))
-        .and_then(Value::as_str);
-    matches!(
-        code,
-        Some("refresh_token_expired" | "refresh_token_reused" | "refresh_token_invalidated")
-    )
+        .and_then(|error| {
+            error
+                .get("code")
+                .and_then(Value::as_str)
+                .or_else(|| error.as_str())
+        })
+        .or_else(|| value.get("code").and_then(Value::as_str));
+    code.is_some_and(|code| {
+        matches!(
+            code.to_ascii_lowercase().as_str(),
+            "refresh_token_expired" | "refresh_token_reused" | "refresh_token_invalidated"
+        ) || (status == StatusCode::BAD_REQUEST && code.eq_ignore_ascii_case("invalid_grant"))
+    })
 }
 
 pub fn default_state_dir() -> PathBuf {

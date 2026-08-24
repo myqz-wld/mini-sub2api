@@ -43,7 +43,8 @@ build/bin/mini-sub2api --state-dir ./state \
   credential login codex --name personal-subscription
 ```
 
-Device flow is the default. Browser PKCE is available with `--flow browser`; for remote servers,
+Device flow is the default. Browser PKCE is available with `--flow browser` and uses Codex's
+registered loopback ports `1455`, then `1457` when the first is occupied. For remote servers,
 forward the printed loopback callback port over SSH.
 
 To explicitly import an existing Codex login:
@@ -132,19 +133,23 @@ MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
 
 With `supports_websockets = true`, current Codex uses the Responses WebSocket v2 protocol and may
-reuse one connection for sequential turns. mini-sub2api establishes the upstream socket before
-accepting the public upgrade, so an HTTP handshake failure (including `426`) remains available to
-Codex's HTTP fallback logic. Set the flag to `false` to force the independent HTTP/SSE path.
+reuse one connection for sequential turns. API-key credentials establish the upstream socket before
+the public upgrade. Subscription credentials accept the authenticated internal/public upgrade,
+then use the first `response.create` model and service tier to construct the exact OAuth routing
+handshake. A subscription-side rejection after that upgrade is a WebSocket close, not an HTTP
+`426`; set the flag to `false` when client-side HTTP fallback is required.
 
-Subscription routes apply Codex compatibility normalization: unsupported output/sampling fields
-are removed, `system` instruction messages become `developer` messages, and the upstream
-`User-Agent` uses the Codex CLI `0.149.0` compatibility baseline. Explicit models, tools,
-instructions, reasoning controls, WebSocket `generate`/continuation fields, and streaming choices
-are preserved. Remote compaction v2 continues through the normal Responses request stream, with
-its compaction trigger and turn metadata preserved. OpenAI API-key request bodies and WebSocket
-application frames without recognized installation carriers remain byte-exact. In `device` mode,
-recognized carriers are rewritten to the credential identity; organization/project headers are
-not sent on OAuth routes.
+Subscription routes apply the Codex CLI `0.149.0` request contract: unsupported top-level fields
+are removed, `system` instruction messages become `developer` messages, request/tool/item JSON is
+serialized in the pinned CLI order, and synthesized conversation items use UUIDv7 plus turn/create
+metadata. Responses Lite uses the official `functions` namespace without inventing the opt-in
+`tool_namespaces_info` field. OAuth HTTP pins streaming, JSON media types, level-3 zstd, `version`,
+and the Codex User-Agent. The bundled model defaults, unknown-model fallback, output schema name,
+OAuth authorize/refresh identity, and wire-critical dependency lock all follow `0.149.0`. Explicit
+models, tools, instructions, reasoning controls, and WebSocket `generate`/continuation fields remain
+authoritative. Remote compaction and sparse memory metadata retain their request kinds. OpenAI
+API-key bodies and carrier-free WebSocket frames remain byte-exact; organization/project headers
+are not sent on OAuth routes.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
@@ -248,10 +253,20 @@ TLS backend; Responses WebSocket uses AWS-LC rustls with platform-native roots, 
 Codex `0.149.0` transport split, including its absent WebSocket ALPN offer and PQ-first key groups.
 The provider WebSocket handshake and compression path use the same pinned OpenAI
 `tokio-tungstenite`/`tungstenite` fork revisions as that release. These profiles are internal and
-are not user-configurable. Subscription requests also pin Codex's `version` header to `0.149.0`;
+are not user-configurable, and every new provider WebSocket gets fresh TLS session state.
+Subscription requests also pin Codex's `version` header to `0.149.0`;
 regular OpenAI API-key routes preserve a reviewed client-supplied value. Reviewed
 `x-openai-subagent` identity crosses both HTTP and WebSocket routes, including Codex's conditional
-subagent handshake order.
+subagent handshake order. Managed residency and runtime-timing headers retain their captured
+conditional order; reviewed attestation, inference-call, and memory-generation names cross the Go
+filters. OAuth HTTP clients share only the official allowlist of Cloudflare infrastructure cookies;
+account, session, and arbitrary application cookies are never retained.
+
+Compatibility is exact for request state that a `0.149.0` client supplies or the gateway can derive.
+The gateway does not fabricate absent caller workspace, sandbox, thread-source, trace, attestation,
+or tool-inventory state, and it preserves explicit public Responses controls. Its provider HTTP
+clients also refuse redirects so credentials cannot be replayed to a redirected authority; this is
+an intentional security boundary from the stock CLI client.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.

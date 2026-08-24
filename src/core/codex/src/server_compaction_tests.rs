@@ -117,9 +117,14 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
     assert_eq!(response.status(), StatusCode::OK);
     let captured_headers = capture.headers.lock().await;
     let captured_headers = captured_headers.as_ref().expect("captured headers");
-    assert!(
-        header_text(captured_headers, "x-codex-installation-id").as_deref()
-            == Some(expected_device.as_str())
+    assert!(!captured_headers.contains_key("x-codex-installation-id"));
+    assert_eq!(
+        header_text(captured_headers, "x-codex-routing-hint").as_deref(),
+        Some("model=gpt-5.6-sol")
+    );
+    assert_eq!(
+        header_text(captured_headers, "content-encoding").as_deref(),
+        Some("zstd")
     );
     assert_compaction_metadata(
         &header_text(captured_headers, "x-codex-turn-metadata").expect("captured turn metadata"),
@@ -127,8 +132,11 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
     );
 
     let captured_body = capture.body.lock().await;
-    let body: Value = serde_json::from_slice(captured_body.as_ref().expect("captured body"))
-        .expect("captured body JSON");
+    let body = zstd::stream::decode_all(std::io::Cursor::new(
+        captured_body.as_ref().expect("captured body").as_ref(),
+    ))
+    .expect("decompress captured body");
+    let body: Value = serde_json::from_slice(&body).expect("captured body JSON");
     assert_eq!(
         body["input"]
             .as_array()

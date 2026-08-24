@@ -15,7 +15,7 @@ struct OAuthWebSocketState {
     handshake_calls: Arc<AtomicUsize>,
     refresh_calls: Arc<AtomicUsize>,
     headers: Arc<Mutex<Option<HeaderMap>>>,
-    frame: Arc<Mutex<Option<String>>>,
+    frames: Arc<Mutex<Vec<String>>>,
 }
 
 #[tokio::test]
@@ -28,7 +28,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         handshake_calls: Arc::new(AtomicUsize::new(0)),
         refresh_calls: Arc::new(AtomicUsize::new(0)),
         headers: Arc::new(Mutex::new(None)),
-        frame: Arc::new(Mutex::new(None)),
+        frames: Arc::new(Mutex::new(Vec::new())),
     };
     let app = Router::new()
         .route("/responses", get(oauth_upstream))
@@ -93,12 +93,14 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         .await
         .expect("refreshed handshake");
     assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 0);
     let mut socket = handshake.into_websocket().await.expect("internal socket");
     socket
         .send(DownstreamMessage::Text(
             serde_json::json!({
                 "type": "response.create",
                 "model": "gpt-5.6-sol",
+                "service_tier": "priority",
                 "input": "hello",
                 "tools": [],
                 "generate": false,
@@ -120,16 +122,60 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         .expect("completion")
         .expect("valid event");
     assert!(matches!(completion, DownstreamMessage::Text(_)));
+
+    socket
+        .send(DownstreamMessage::Text(
+            serde_json::json!({
+                "type": "response.create",
+                "model": "gpt-5.6-sol",
+                "previous_response_id": "resp_first",
+                "input": [],
+                "tool_choice": "auto",
+                "parallel_tool_calls": false,
+                "reasoning": {"effort": "low", "context": "all_turns"},
+                "store": false,
+                "stream": true,
+                "include": ["reasoning.encrypted_content"],
+                "prompt_cache_key": "session-kept",
+                "text": {"verbosity": "low"},
+                "client_metadata": {
+                    "session_id": "session-kept",
+                    "thread_id": "thread-kept",
+                    "turn_id": "turn-two"
+                }
+            })
+            .to_string(),
+        ))
+        .await
+        .expect("send reused create frame");
+    let second_completion = socket
+        .next()
+        .await
+        .expect("second completion")
+        .expect("valid second event");
+    assert!(matches!(second_completion, DownstreamMessage::Text(_)));
     let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
     assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 2);
     assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 1);
-    let frame = state.frame.lock().await.clone().expect("captured frame");
-    let value: Value = serde_json::from_str(&frame).expect("normalized JSON");
+    let frames = state.frames.lock().await.clone();
+    assert_eq!(frames.len(), 2);
+    let frame = &frames[0];
+    let value: Value = serde_json::from_str(frame).expect("normalized JSON");
     assert_eq!(value["type"], "response.create");
     assert_eq!(value["generate"], false);
     assert_eq!(value["previous_response_id"], "resp_previous");
     assert_eq!(value["client_metadata"]["custom"], "kept");
+    assert_eq!(
+        value["client_metadata"]["ws_request_header_x_openai_internal_codex_responses_lite"],
+        "true"
+    );
+    assert!(
+        value["client_metadata"]["x-codex-ws-stream-request-start-ms"]
+            .as_str()
+            .and_then(|value| value.parse::<i64>().ok())
+            .is_some_and(|value| value > 0)
+    );
     assert!(
         value["client_metadata"]["x-codex-installation-id"].as_str()
             == Some(expected_device.as_str())
@@ -142,8 +188,40 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     .expect("turn metadata JSON");
     assert!(turn_metadata["installation_id"].as_str() == Some(expected_device.as_str()));
     assert_eq!(turn_metadata["thread_id"], "thread-kept");
+    assert_eq!(turn_metadata["request_kind"], "prewarm");
+    assert_eq!(turn_metadata["agent_name"], "/root");
+    let turn_id = turn_metadata["turn_id"].as_str().expect("turn id");
+    assert_eq!(turn_metadata["root_turn_id"], turn_id);
+    assert_eq!(
+        uuid::Uuid::parse_str(turn_id)
+            .expect("turn UUID")
+            .get_version_num(),
+        7
+    );
+    assert!(
+        turn_metadata["turn_started_at_unix_ms"]
+            .as_i64()
+            .is_some_and(|value| value > 0)
+    );
     assert_eq!(value["input"][0]["type"], "additional_tools");
+    assert!(value["input"][0].get("id").is_none());
+    assert!(
+        value["input"][1]["id"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("msg_"))
+    );
+    assert_eq!(
+        value["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"],
+        turn_id
+    );
     assert!(value.get("max_output_tokens").is_none());
+    let reused: Value = serde_json::from_str(&frames[1]).expect("reused frame JSON");
+    assert_eq!(reused["previous_response_id"], "resp_first");
+    assert_eq!(reused["input"], serde_json::json!([]));
+    assert_eq!(
+        reused["client_metadata"]["x-codex-turn-state"],
+        "provider-turn-state"
+    );
 
     let headers = state
         .headers
@@ -179,9 +257,15 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         header_text(&headers, "sec-websocket-extensions").as_deref(),
         Some("permessage-deflate; client_max_window_bits")
     );
-    assert!(
-        header_text(&headers, "x-codex-installation-id").as_deref()
-            == Some(expected_device.as_str())
+    assert!(!headers.contains_key("x-codex-installation-id"));
+    assert_eq!(
+        header_text(&headers, crate::upstream_request::CODEX_ROUTING_HINT_HEADER).as_deref(),
+        Some("model=gpt-5.6-sol;tier=priority")
+    );
+    assert!(!headers.contains_key("x-openai-internal-codex-responses-lite"));
+    assert_eq!(
+        header_text(&headers, "x-client-request-id"),
+        header_text(&headers, "thread-id")
     );
     let header_turn: Value = serde_json::from_str(
         header_text(&headers, "x-codex-turn-metadata")
@@ -217,18 +301,25 @@ async fn oauth_upstream(
     }
     *state.headers.lock().await = Some(headers);
     let capture = state.clone();
-    upgrade
+    let mut response = upgrade
         .on_upgrade(move |mut socket| async move {
-            let Some(Ok(InternalMessage::Text(frame))) = socket.next().await else {
-                return;
-            };
-            *capture.frame.lock().await = Some(frame.to_string());
-            let _ = socket
-                .send(InternalMessage::Text(
-                    r#"{"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}"#
-                        .into(),
-                ))
-                .await;
+            for _ in 0..2 {
+                let Some(Ok(InternalMessage::Text(frame))) = socket.next().await else {
+                    return;
+                };
+                capture.frames.lock().await.push(frame.to_string());
+                let _ = socket
+                    .send(InternalMessage::Text(
+                        r#"{"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}"#
+                            .into(),
+                    ))
+                    .await;
+            }
         })
-        .into_response()
+        .into_response();
+    response.headers_mut().insert(
+        "x-codex-turn-state",
+        HeaderValue::from_static("provider-turn-state"),
+    );
+    response
 }
