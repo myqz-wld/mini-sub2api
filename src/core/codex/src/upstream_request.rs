@@ -5,6 +5,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use reqwest::Client;
 use reqwest::Request;
+use std::io::Cursor;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::extensions::ExtensionsConfig;
 use tokio_tungstenite::tungstenite::extensions::compression::deflate::DeflateConfig;
@@ -15,6 +16,8 @@ use url::Url;
 pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.149.0";
 pub(crate) const CODEX_VERSION_HEADER: &str = "version";
 pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
+pub(crate) const CODEX_ROUTING_HINT_HEADER: &str = "x-codex-routing-hint";
+pub(crate) const DEFAULT_CODEX_ORIGINATOR: &str = "codex_cli_rs";
 
 const COMMON_ALLOWED: &[&str] = &[
     CODEX_VERSION_HEADER,
@@ -28,6 +31,8 @@ const COMMON_ALLOWED: &[&str] = &[
     "openai-beta",
     "x-client-request-id",
     "x-codex-beta-features",
+    "x-codex-inference-call-id",
+    CODEX_ROUTING_HINT_HEADER,
     "x-codex-turn-state",
     "x-codex-turn-metadata",
     "x-codex-parent-thread-id",
@@ -35,6 +40,10 @@ const COMMON_ALLOWED: &[&str] = &[
     "x-codex-window-id",
     "x-codex-installation-id",
     "x-openai-internal-codex-responses-lite",
+    "x-openai-internal-codex-residency",
+    "x-openai-memgen-request",
+    "x-oai-attestation",
+    "x-responsesapi-include-timing-metrics",
     "session_id",
     "conversation_id",
 ];
@@ -54,14 +63,19 @@ const OPENAI_API_KEY_ALLOWED: &[&str] = &[
 
 const HTTP_HEADER_ORDER: &[&str] = &[
     CODEX_VERSION_HEADER,
+    "x-openai-internal-codex-residency",
     "x-codex-beta-features",
     "x-codex-turn-state",
     "x-codex-window-id",
     "x-codex-turn-metadata",
     "x-codex-parent-thread-id",
     "x-openai-subagent",
+    "x-openai-memgen-request",
+    "x-oai-attestation",
     "x-codex-installation-id",
     "x-openai-internal-codex-responses-lite",
+    CODEX_ROUTING_HINT_HEADER,
+    "x-codex-inference-call-id",
     "x-client-request-id",
     "session-id",
     "thread-id",
@@ -72,6 +86,7 @@ const HTTP_HEADER_ORDER: &[&str] = &[
     "chatgpt-account-id",
     "originator",
     "user-agent",
+    "x-responsesapi-include-timing-metrics",
     "openai-beta",
     "session_id",
     "conversation_id",
@@ -91,6 +106,10 @@ const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
     "authorization",
     "chatgpt-account-id",
     "user-agent",
+    "x-responsesapi-include-timing-metrics",
+    "x-openai-internal-codex-residency",
+    "x-openai-memgen-request",
+    "x-oai-attestation",
     "originator",
     "openai-beta",
     "x-codex-turn-metadata",
@@ -98,6 +117,8 @@ const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
     CODEX_VERSION_HEADER,
     "x-codex-installation-id",
     "x-codex-beta-features",
+    CODEX_ROUTING_HINT_HEADER,
+    "x-codex-inference-call-id",
     "x-client-request-id",
     "session-id",
     "thread-id",
@@ -123,12 +144,18 @@ const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
     "authorization",
     "chatgpt-account-id",
     "user-agent",
+    "x-responsesapi-include-timing-metrics",
+    "x-openai-internal-codex-residency",
+    "x-openai-memgen-request",
+    "x-oai-attestation",
     "originator",
     "openai-beta",
     "x-openai-subagent",
     CODEX_VERSION_HEADER,
     "x-codex-installation-id",
     "x-codex-beta-features",
+    CODEX_ROUTING_HINT_HEADER,
+    "x-codex-inference-call-id",
     "x-client-request-id",
     "session-id",
     "thread-id",
@@ -151,6 +178,59 @@ const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
     "x-stainless-timeout",
 ];
 
+const OAUTH_WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
+    "chatgpt-account-id",
+    "authorization",
+    "user-agent",
+    "x-oai-attestation",
+    "openai-beta",
+    CODEX_ROUTING_HINT_HEADER,
+    CODEX_VERSION_HEADER,
+    "x-openai-internal-codex-residency",
+    "x-codex-beta-features",
+    "originator",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "x-codex-window-id",
+    "x-codex-turn-metadata",
+    "x-codex-parent-thread-id",
+    "x-openai-subagent",
+    "x-openai-memgen-request",
+    "x-codex-turn-state",
+    "x-codex-installation-id",
+    "x-openai-internal-codex-responses-lite",
+    "session_id",
+    "conversation_id",
+];
+
+const OAUTH_WEBSOCKET_TIMING_WIRE_HEADER_ORDER: &[&str] = &[
+    "chatgpt-account-id",
+    "authorization",
+    "user-agent",
+    "x-oai-attestation",
+    "x-responsesapi-include-timing-metrics",
+    "openai-beta",
+    CODEX_VERSION_HEADER,
+    "x-openai-internal-codex-residency",
+    "x-codex-beta-features",
+    "originator",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "x-codex-window-id",
+    "x-codex-turn-metadata",
+    "x-codex-parent-thread-id",
+    "x-openai-subagent",
+    "x-openai-memgen-request",
+    CODEX_ROUTING_HINT_HEADER,
+    "x-codex-turn-state",
+    "x-codex-installation-id",
+    "x-openai-internal-codex-responses-lite",
+    "session_id",
+    "conversation_id",
+];
+
 #[derive(Clone)]
 pub(crate) enum ResolvedAuth {
     CodexOAuth { token: String, account_id: String },
@@ -164,7 +244,21 @@ pub(crate) fn build(
     auth: &ResolvedAuth,
     body: Bytes,
 ) -> Result<Request, CoreFailure> {
-    let headers = ordered_authenticated_headers(inbound_headers, auth, HTTP_HEADER_ORDER)?;
+    let mut headers = authenticated_headers(inbound_headers, auth)?;
+    if matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+        headers.insert(
+            http::header::ACCEPT,
+            HeaderValue::from_static("text/event-stream"),
+        );
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        headers.remove("openai-beta");
+        headers.remove("x-responsesapi-include-timing-metrics");
+    }
+    let body = prepare_http_body(&mut headers, auth, body)?;
+    let headers = ordered_headers(&headers, HTTP_HEADER_ORDER);
     client
         .post(upstream_url)
         .headers(headers)
@@ -183,6 +277,11 @@ pub(crate) fn build_websocket(
     headers.remove(http::header::ACCEPT);
     headers.remove(http::header::CONTENT_ENCODING);
     headers.remove(http::header::CONTENT_TYPE);
+    if matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+        headers.remove("x-codex-turn-state");
+        headers.remove("x-codex-inference-call-id");
+        headers.remove("x-openai-internal-codex-responses-lite");
+    }
     headers.insert(
         "openai-beta",
         HeaderValue::from_static(RESPONSES_WEBSOCKET_BETA),
@@ -203,15 +302,6 @@ pub(crate) fn build_websocket(
     Ok((request, config))
 }
 
-fn ordered_authenticated_headers(
-    inbound_headers: &HeaderMap,
-    auth: &ResolvedAuth,
-    order: &[&'static str],
-) -> Result<HeaderMap, CoreFailure> {
-    let headers = authenticated_headers(inbound_headers, auth)?;
-    Ok(ordered_headers(&headers, order))
-}
-
 fn ordered_headers(source: &HeaderMap, order: &[&'static str]) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for name in order {
@@ -224,7 +314,13 @@ fn ordered_headers(source: &HeaderMap, order: &[&'static str]) -> HeaderMap {
 }
 
 fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
-    let order = if source.contains_key("x-openai-subagent") {
+    let order = if source.contains_key("chatgpt-account-id")
+        && source.contains_key("x-responsesapi-include-timing-metrics")
+    {
+        OAUTH_WEBSOCKET_TIMING_WIRE_HEADER_ORDER
+    } else if source.contains_key("chatgpt-account-id") {
+        OAUTH_WEBSOCKET_WIRE_HEADER_ORDER
+    } else if source.contains_key("x-openai-subagent") {
         WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER
     } else {
         WEBSOCKET_WIRE_HEADER_ORDER
@@ -256,14 +352,15 @@ fn authenticated_headers(
         ResolvedAuth::CodexOAuth { token, account_id } => {
             let value = HeaderValue::from_str(account_id).map_err(|_| CoreFailure::Internal)?;
             headers.insert("chatgpt-account-id", value);
-            if !headers.contains_key("originator") {
-                headers.insert("originator", HeaderValue::from_static("mini_sub2api"));
+            pin_codex_originator(&mut headers);
+            for name in ["x-codex-installation-id", "session_id", "conversation_id"] {
+                headers.remove(name);
             }
             headers.insert(
                 CODEX_VERSION_HEADER,
                 HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
             );
-            pin_codex_user_agent(&mut headers)?;
+            crate::codex_user_agent::pin(&mut headers)?;
             token
         }
         ResolvedAuth::OpenAiApiKey { token } => token,
@@ -288,37 +385,48 @@ pub(crate) fn websocket_url(upstream_url: &str) -> Result<Url, CoreFailure> {
     Ok(url)
 }
 
-fn pin_codex_user_agent(headers: &mut HeaderMap) -> Result<(), CoreFailure> {
-    let anchored = headers
-        .get(http::header::USER_AGENT)
+fn pin_codex_originator(headers: &mut HeaderMap) {
+    let valid = headers
+        .get("originator")
         .and_then(|value| value.to_str().ok())
-        .and_then(anchor_existing_codex_user_agent)
-        .unwrap_or_else(|| format!("codex_cli_rs/{CODEX_COMPATIBILITY_VERSION}"));
-    let value = HeaderValue::from_str(&anchored).map_err(|_| CoreFailure::Internal)?;
-    headers.insert(http::header::USER_AGENT, value);
-    Ok(())
+        .is_some_and(|value| {
+            let value = value.trim();
+            value.starts_with("codex") || value.starts_with("Codex ")
+        });
+    if !valid {
+        headers.insert(
+            "originator",
+            HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR),
+        );
+    }
 }
 
-fn anchor_existing_codex_user_agent(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    let (product_and_version, suffix) = raw
-        .split_once(' ')
-        .map_or((raw, ""), |(token, suffix)| (token, suffix));
-    let (product, version) = product_and_version.split_once('/')?;
-    let normalized_product = product.to_ascii_lowercase();
-    if version.is_empty()
-        || !(normalized_product == "codex"
-            || normalized_product.starts_with("codex_")
-            || normalized_product.starts_with("codex-"))
-    {
-        return None;
+fn prepare_http_body(
+    headers: &mut HeaderMap,
+    auth: &ResolvedAuth,
+    body: Bytes,
+) -> Result<Bytes, CoreFailure> {
+    if !matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+        return Ok(body);
     }
-    let suffix = if suffix.is_empty() {
-        String::new()
-    } else {
-        format!(" {suffix}")
-    };
-    Some(format!("{product}/{CODEX_COMPATIBILITY_VERSION}{suffix}"))
+    let encoding = headers
+        .get(http::header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match encoding {
+        Some(value) if value.eq_ignore_ascii_case("zstd") => Ok(body),
+        Some(value) if !value.eq_ignore_ascii_case("identity") => Err(CoreFailure::InvalidRequest),
+        _ => {
+            let compressed = zstd::stream::encode_all(Cursor::new(body.as_ref()), 3)
+                .map_err(|_| CoreFailure::Internal)?;
+            headers.insert(
+                http::header::CONTENT_ENCODING,
+                HeaderValue::from_static("zstd"),
+            );
+            Ok(Bytes::from(compressed))
+        }
+    }
 }
 
 fn forwarded_headers(source: &HeaderMap, auth: &ResolvedAuth) -> HeaderMap {
@@ -341,3 +449,7 @@ fn copy_allowed(destination: &mut HeaderMap, source: &HeaderMap, allowed: &[&'st
 #[cfg(test)]
 #[path = "upstream_request_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "upstream_request_oauth_wire_tests.rs"]
+mod oauth_wire_tests;

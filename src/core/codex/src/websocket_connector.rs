@@ -6,6 +6,7 @@ use http::Uri;
 use hyper_util::client::proxy::matcher::Intercept;
 use hyper_util::client::proxy::matcher::Matcher;
 use rustls::ClientConfig;
+use rustls::RootCertStore;
 use rustls::pki_types::ServerName;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -65,35 +66,35 @@ impl WebSocketHandshake {
 }
 
 pub(crate) struct WebSocketConnector {
-    tls_config: Arc<ClientConfig>,
+    tls_roots: RootCertStore,
     proxy_matcher: Option<Matcher>,
     connect_timeout: Duration,
 }
 
 impl WebSocketConnector {
-    pub(crate) fn system(tls_config: Arc<ClientConfig>, connect_timeout: Duration) -> Self {
+    pub(crate) fn system(tls_roots: RootCertStore, connect_timeout: Duration) -> Self {
         Self {
-            tls_config,
+            tls_roots,
             proxy_matcher: Some(Matcher::from_system()),
             connect_timeout,
         }
     }
 
-    pub(crate) fn direct(tls_config: Arc<ClientConfig>, connect_timeout: Duration) -> Self {
+    pub(crate) fn direct(tls_roots: RootCertStore, connect_timeout: Duration) -> Self {
         Self {
-            tls_config,
+            tls_roots,
             proxy_matcher: None,
             connect_timeout,
         }
     }
 
     pub(crate) fn with_proxy(
-        tls_config: Arc<ClientConfig>,
+        tls_roots: RootCertStore,
         connect_timeout: Duration,
         proxy_url: &str,
     ) -> Self {
         Self {
-            tls_config,
+            tls_roots,
             proxy_matcher: Some(Matcher::builder().all(proxy_url).build()),
             connect_timeout,
         }
@@ -105,9 +106,10 @@ impl WebSocketConnector {
         config: WebSocketConfig,
     ) -> Result<WebSocketHandshake, WebSocketError> {
         let proxy = self.resolve_proxy(&request)?;
+        let tls_config = self.fresh_tls_config()?;
         let result = tokio::time::timeout(
             self.connect_timeout,
-            connect(request, config, Arc::clone(&self.tls_config), proxy),
+            connect(request, config, tls_config, proxy),
         )
         .await
         .map_err(|_| {
@@ -126,9 +128,10 @@ impl WebSocketConnector {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn shares_tls_state_with(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.tls_config, &other.tls_config)
+    pub(crate) fn fresh_tls_config(&self) -> Result<Arc<ClientConfig>, WebSocketError> {
+        crate::transport_registry::build_websocket_tls_config(self.tls_roots.clone())
+            .map(Arc::new)
+            .map_err(|error| WebSocketError::Io(io::Error::other(error.to_string())))
     }
 
     fn resolve_proxy(&self, request: &Request) -> Result<Option<ProxyEndpoint>, WebSocketError> {

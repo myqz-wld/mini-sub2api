@@ -247,10 +247,18 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
 
     assert_eq!(response.status(), StatusCode::OK);
     let captured_body = capture.body.lock().await.clone().expect("captured body");
+    let captured_body = zstd::stream::decode_all(std::io::Cursor::new(captured_body.as_ref()))
+        .expect("decompress normalized request");
     let normalized: serde_json::Value =
         serde_json::from_slice(&captured_body).expect("normalized request");
     assert_eq!(normalized["input"][0]["type"], "additional_tools");
-    assert_eq!(normalized["input"][0]["tools"], tools);
+    assert_eq!(normalized["input"][0]["tools"][0]["type"], "namespace");
+    assert_eq!(normalized["input"][0]["tools"][0]["name"], "functions");
+    assert_eq!(
+        normalized["input"][0]["tools"][0]["tools"][0]["name"],
+        "lookup"
+    );
+    assert_eq!(normalized["input"][0]["tools"][1], tools[1]);
     assert_eq!(normalized["input"][1]["role"], "developer");
     assert_eq!(normalized["input"][2]["role"], "user");
     assert_eq!(normalized["store"], false);
@@ -280,13 +288,18 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         header_text(&captured_headers, "chatgpt-account-id").as_deref(),
         Some(account_id)
     );
-    assert_eq!(
-        header_text(&captured_headers, http::header::USER_AGENT.as_str()).as_deref(),
-        Some("codex_cli_rs/0.149.0")
-    );
     assert!(
-        header_text(&captured_headers, "x-codex-installation-id").as_deref()
-            == Some(expected_device.as_str())
+        header_text(&captured_headers, http::header::USER_AGENT.as_str())
+            .is_some_and(|value| value.starts_with("codex_exec/0.149.0 ("))
+    );
+    assert!(!captured_headers.contains_key("x-codex-installation-id"));
+    assert_eq!(
+        header_text(&captured_headers, "content-encoding").as_deref(),
+        Some("zstd")
+    );
+    assert_eq!(
+        header_text(&captured_headers, "x-codex-routing-hint").as_deref(),
+        Some("model=gpt-5.6-sol")
     );
     let header_turn: serde_json::Value = serde_json::from_str(
         header_text(&captured_headers, "x-codex-turn-metadata")

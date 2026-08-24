@@ -1,3 +1,4 @@
+use crate::cloudflare_cookies;
 use crate::http_client::has_literal_loopback_host;
 use crate::websocket_connector::WebSocketConnector;
 use anyhow::Context;
@@ -121,9 +122,6 @@ impl TransportFactory {
     }
 
     fn build(&self) -> Result<CredentialTransportContext> {
-        // A fresh config gives each credential an independent TLS resumption cache while retaining
-        // the same provider, roots, versions, and absent-ALPN policy as Codex 0.149.0.
-        let websocket_tls = Arc::new(build_websocket_tls_config(self.websocket_roots.clone())?);
         let http = self
             .http_builder()
             .build()
@@ -135,14 +133,14 @@ impl TransportFactory {
             .context("building direct credential HTTP client")?;
         let websocket = match self.explicit_proxy_url.as_deref() {
             Some(proxy_url) => WebSocketConnector::with_proxy(
-                Arc::clone(&websocket_tls),
+                self.websocket_roots.clone(),
                 CONNECT_TIMEOUT,
                 proxy_url,
             ),
-            None => WebSocketConnector::system(Arc::clone(&websocket_tls), CONNECT_TIMEOUT),
+            None => WebSocketConnector::system(self.websocket_roots.clone(), CONNECT_TIMEOUT),
         };
         let direct_websocket =
-            WebSocketConnector::direct(Arc::clone(&websocket_tls), CONNECT_TIMEOUT);
+            WebSocketConnector::direct(self.websocket_roots.clone(), CONNECT_TIMEOUT);
         Ok(CredentialTransportContext {
             http,
             direct_http,
@@ -153,11 +151,13 @@ impl TransportFactory {
 
     /// Deliberately leaves reqwest on its platform transport-default TLS backend.
     fn http_builder(&self) -> ClientBuilder {
-        self.apply_explicit_test_proxy(
-            Client::builder()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .read_timeout(HTTP_READ_TIMEOUT)
-                .redirect(reqwest::redirect::Policy::none()),
+        cloudflare_cookies::apply(
+            self.apply_explicit_test_proxy(
+                Client::builder()
+                    .connect_timeout(CONNECT_TIMEOUT)
+                    .read_timeout(HTTP_READ_TIMEOUT)
+                    .redirect(reqwest::redirect::Policy::none()),
+            ),
         )
     }
 
@@ -185,7 +185,7 @@ fn load_websocket_roots() -> Result<(RootCertStore, usize)> {
     Ok((roots, accepted))
 }
 
-fn build_websocket_tls_config(roots: RootCertStore) -> Result<ClientConfig> {
+pub(crate) fn build_websocket_tls_config(roots: RootCertStore) -> Result<ClientConfig> {
     ensure_aws_lc_provider()?;
     let config = ClientConfig::builder()
         .with_root_certificates(roots)

@@ -69,6 +69,7 @@ The coordinator may forward only these public-client headers to the core:
 - `openai-project`
 - `x-client-request-id`
 - `x-codex-beta-features`
+- `x-codex-inference-call-id`
 - `x-codex-turn-state`
 - `x-codex-turn-metadata`
 - `x-codex-parent-thread-id`
@@ -76,6 +77,10 @@ The coordinator may forward only these public-client headers to the core:
 - `x-codex-window-id`
 - `x-codex-installation-id`
 - `x-openai-internal-codex-responses-lite`
+- `x-openai-internal-codex-residency`
+- `x-openai-memgen-request`
+- `x-oai-attestation`
+- `x-responsesapi-include-timing-metrics`
 - `x-stainless-arch`
 - `x-stainless-lang`
 - `x-stainless-os`
@@ -101,8 +106,14 @@ endpoint. Regular OpenAI API-key request bodies remain byte-transparent.
 For subscription upstreams, the core anchors both the `version` header and the leading Codex
 `User-Agent` product/version token to the Codex CLI `0.149.0` compatibility baseline. A recognized
 Codex product name and its suffix are preserved; a missing or non-Codex value becomes
-`codex_cli_rs/0.149.0`. Regular OpenAI API-key routes retain the public client's reviewed `version`
-and `User-Agent` values unchanged.
+the full `codex_cli_rs/0.149.0 (<OS>; <arch>) <terminal>` form. OAuth HTTP additionally pins
+`Accept: text/event-stream`, `Content-Type: application/json`, and level-3 zstd. Regular OpenAI
+API-key routes retain the public client's reviewed `version` and `User-Agent` values unchanged.
+
+The reviewed optional Codex request names `x-openai-internal-codex-residency`,
+`x-responsesapi-include-timing-metrics`, `x-codex-inference-call-id`, `x-oai-attestation`, and
+`x-openai-memgen-request` cross both Go filters. The core keeps timing WebSocket-only and inference
+call IDs HTTP-only on OAuth routes, with the conditional raw order captured from `0.149.0`.
 
 ## Credential-scoped device projection
 
@@ -121,7 +132,8 @@ core preserves caller-provided installation carriers under the existing auth-spe
 One credential owns independent HTTP and WebSocket connection pools. HTTP uses transport-default
 TLS; provider WebSocket uses AWS-LC rustls with native roots, a PQ-first key-group list, and an
 HTTP/1 handshake without an ALPN offer. These fixed builders are the Codex `0.149.0` compatibility
-split and do not vary by credential. Provider WebSockets use the same pinned OpenAI
+split and do not vary by credential; TLS session state is fresh for every provider WebSocket.
+Provider WebSockets use the same pinned OpenAI
 `tokio-tungstenite`/`tungstenite` fork revisions and per-message-deflate offer as that release. Pool
 selection and device projection require no coordinator parsing of request bodies or WebSocket
 frames.
@@ -151,9 +163,9 @@ Upgrade: websocket
 
 The coordinator validates the downstream key and dials this route before accepting its public
 socket. The core validates the same loopback, internal-auth, version, account-reference, and
-request-id constraints as the HTTP route, resolves vault-owned auth, and establishes the provider
-WebSocket before returning internal `101 Switching Protocols`. Consequently a non-101 provider
-response remains an HTTP handshake response all the way to the public client.
+request-id constraints as the HTTP route. API-key credentials establish the provider socket before
+returning internal `101`; subscription credentials return the authenticated upgrade first and wait
+for the first `response.create` so its model and service tier can drive the provider handshake.
 
 - One internal socket owns exactly one provider socket. The core does not pool sockets, count
   tenant/key connections, schedule turns, or enforce active-response admission.
@@ -163,9 +175,9 @@ response remains an HTTP handshake response all the way to the public client.
   non-create events without semantic translation.
 - Regular API-key text frames are byte-transparent in `off`, and remain byte-transparent in
   `device` when they have no recognized body carrier. For subscription credentials, the core
-  applies the HTTP compatibility normalizer only to `response.create`, preserving `type`,
-  `generate`, `previous_response_id`, and `client_metadata`; device projection then converges any
-  recognized installation carriers.
+  applies the pinned request normalizer only to `response.create`, preserving `type`, `generate`,
+  `previous_response_id`, and client metadata. It derives the first OAuth routing hint from that
+  frame; later creates reuse the same provider socket.
 - The fingerprint snapshot used for the handshake is retained for that socket. Before each
   `response.create`, the core re-reads the sidecar revision; a changed or unreadable fingerprint
   closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.
@@ -178,6 +190,10 @@ response remains an HTTP handshake response all the way to the public client.
   loopback hop does not request WebSocket compression.
 - Ping, pong, close, cancellation, and backpressure remain connection-scoped. Neither layer
   reconnects or replays an active turn.
+
+A subscription provider rejection after the public upgrade becomes a WebSocket close and cannot be
+surfaced as the original public HTTP handshake. API-key credentials retain pre-upgrade provider
+handshakes and bounded HTTP rejection mapping.
 
 Codex `0.149.0` remote compaction v2 uses this same ordinary Responses path. Its
 `compaction_trigger` input item and `request_kind=compaction` metadata pass through normal

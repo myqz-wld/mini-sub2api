@@ -3,7 +3,8 @@ use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
-use crate::request_normalizer::prepare_subscription_request;
+use crate::request_normalizer::prepare_websocket_subscription_request;
+use crate::responses_websocket_deferred::DeferredOAuthContext;
 use crate::server::AppState;
 use crate::server::account_lock;
 use crate::server::header_text;
@@ -77,6 +78,27 @@ async fn responses_socket_inner(
     let _guard = account_lock.lock().await;
     let resolved = resolve_auth(&state, &identity.account_ref, None).await?;
     drop(_guard);
+    if matches!(resolved.auth, ResolvedAuth::CodexOAuth { .. }) {
+        let mut upstream_headers = headers;
+        if resolved.fingerprint.mode() == FingerprintMode::Device {
+            project_device_headers(&mut upstream_headers, &resolved.fingerprint)
+                .map_err(|_| CoreFailure::InvalidRequest)?;
+        }
+        let context = DeferredOAuthContext {
+            state,
+            headers: upstream_headers,
+            account_ref: identity.account_ref,
+            request_id: identity.request_id,
+            resolved,
+        };
+        return Ok(upgrade
+            .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+            .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+            .on_upgrade(move |internal| async move {
+                crate::responses_websocket_deferred::run(internal, context).await;
+            })
+            .into_response());
+    }
     let fingerprint = resolved.fingerprint.clone();
     let mut upstream_headers = headers;
     if fingerprint.mode() == FingerprintMode::Device {
@@ -85,37 +107,13 @@ async fn responses_socket_inner(
     }
 
     let started = Instant::now();
-    let mut handshake = send_handshake(
+    let handshake = send_handshake(
         &resolved.transport,
         &upstream_headers,
         &resolved.upstream_url,
         &resolved.auth,
     )
     .await?;
-    let mut final_auth = resolved.auth;
-    if handshake.status() == StatusCode::UNAUTHORIZED
-        && matches!(final_auth, ResolvedAuth::CodexOAuth { .. })
-    {
-        let failed_access_token = match &final_auth {
-            ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
-            ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
-        };
-        let _guard = account_lock.lock().await;
-        let retry = resolve_auth(&state, &identity.account_ref, Some(&failed_access_token)).await?;
-        drop(_guard);
-        handshake = send_handshake(
-            &retry.transport,
-            &upstream_headers,
-            &retry.upstream_url,
-            &retry.auth,
-        )
-        .await?;
-        final_auth = retry.auth;
-        if handshake.status() == StatusCode::UNAUTHORIZED {
-            return Err(CoreFailure::UpstreamAuthFailed);
-        }
-    }
-
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Ok(rejection_response(handshake).await);
     }
@@ -125,14 +123,13 @@ async fn responses_socket_inner(
         WebSocketHandshake::Connected { socket, .. } => *socket,
         WebSocketHandshake::Rejected(_) => return Err(CoreFailure::Internal),
     };
-    let normalize_subscription = matches!(final_auth, ResolvedAuth::CodexOAuth { .. });
     let account_ref = identity.account_ref;
     let request_id = identity.request_id;
     let relay_context = RelayContext {
         headers: upstream_headers,
         account_ref,
         request_id,
-        normalize_subscription,
+        normalize_subscription: false,
         vault: state.vault.clone(),
         fingerprint,
     };
@@ -140,7 +137,7 @@ async fn responses_socket_inner(
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .on_upgrade(move |internal| async move {
-            relay(internal, upstream, relay_context).await;
+            relay(internal, upstream, relay_context, None, 0).await;
         })
         .into_response();
     copy_headers(response.headers_mut(), &response_headers);
@@ -150,7 +147,7 @@ async fn responses_socket_inner(
     Ok(response)
 }
 
-async fn send_handshake(
+pub(crate) async fn send_handshake(
     transport: &CredentialTransportContext,
     headers: &HeaderMap,
     upstream_url: &str,
@@ -195,16 +192,22 @@ async fn rejection_response(handshake: WebSocketHandshake) -> Response<Body> {
     response
 }
 
-struct RelayContext {
-    headers: HeaderMap,
-    account_ref: String,
-    request_id: String,
-    normalize_subscription: bool,
-    vault: Vault,
-    fingerprint: FingerprintSnapshot,
+pub(crate) struct RelayContext {
+    pub(crate) headers: HeaderMap,
+    pub(crate) account_ref: String,
+    pub(crate) request_id: String,
+    pub(crate) normalize_subscription: bool,
+    pub(crate) vault: Vault,
+    pub(crate) fingerprint: FingerprintSnapshot,
 }
 
-async fn relay(internal: WebSocket, upstream: UpstreamWebSocket, context: RelayContext) {
+pub(crate) async fn relay(
+    internal: WebSocket,
+    upstream: UpstreamWebSocket,
+    context: RelayContext,
+    initial: Option<UpstreamMessage>,
+    initial_create_sequence: u64,
+) {
     let RelayContext {
         headers,
         account_ref,
@@ -215,9 +218,15 @@ async fn relay(internal: WebSocket, upstream: UpstreamWebSocket, context: RelayC
     } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
+    if let Some(initial) = initial
+        && upstream_write.send(initial).await.is_err()
+    {
+        let _ = internal_write.send(internal_close(1011)).await;
+        return;
+    }
     let exit = {
         let client_to_upstream = async {
-            let mut create_sequence = 0_u64;
+            let mut create_sequence = initial_create_sequence;
             while let Some(message) = internal_read.next().await {
                 let outbound = match message {
                     Ok(InternalMessage::Text(text)) => {
@@ -320,7 +329,7 @@ enum RelayExit {
     StaleFingerprint,
 }
 
-async fn fingerprint_is_current(
+pub(crate) async fn fingerprint_is_current(
     vault: &Vault,
     account_ref: &str,
     captured: &FingerprintSnapshot,
@@ -333,7 +342,7 @@ async fn fingerprint_is_current(
         && current.installation_id() == captured.installation_id()
 }
 
-fn is_response_create(text: &str) -> Result<bool, ()> {
+pub(crate) fn is_response_create(text: &str) -> Result<bool, ()> {
     let value: Value = serde_json::from_str(text).map_err(|_| ())?;
     let message_type = value
         .as_object()
@@ -347,7 +356,7 @@ fn is_response_create(text: &str) -> Result<bool, ()> {
 fn prepare_client_text(
     text: String,
     headers: &HeaderMap,
-    account_ref: &str,
+    _account_ref: &str,
     request_id: &str,
     normalize_subscription: bool,
     fingerprint: &FingerprintSnapshot,
@@ -366,11 +375,11 @@ fn prepare_client_text(
     let prepared = if normalize_subscription {
         *create_sequence = create_sequence.saturating_add(1);
         let frame_request_id = format!("{request_id}-ws-{create_sequence}");
-        let prepared = prepare_subscription_request(
+        let prepared = prepare_websocket_subscription_request(
             headers,
             Bytes::from(text),
             MAX_WEBSOCKET_MESSAGE_BYTES,
-            account_ref,
+            fingerprint.installation_id(),
             &frame_request_id,
         );
         String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?

@@ -1,12 +1,13 @@
+use crate::request_defaults;
+use crate::request_defaults::ModelProfile;
+use crate::request_identity;
+use crate::request_identity::IdentityContext;
+use crate::request_identity::SubscriptionTransport;
+use crate::responses_lite;
 use bytes::Bytes;
 use http::HeaderMap;
-use http::HeaderName;
-use http::HeaderValue;
 use serde_json::Map;
 use serde_json::Value;
-use sha2::Digest;
-use sha2::Sha256;
-use uuid::Uuid;
 
 const UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS: &[&str] = &[
     "max_output_tokens",
@@ -23,28 +24,47 @@ pub struct PreparedSubscriptionRequest {
     pub body: Bytes,
 }
 
-#[derive(Clone, Copy)]
-struct ModelProfile {
-    responses_lite: bool,
-    reasoning_effort: &'static str,
-    verbosity: &'static str,
-}
-
-struct RequestIdentity {
-    session_id: String,
-    thread_id: String,
-    installation_id: String,
-    turn_id: String,
-    window_id: String,
-    turn_metadata: String,
-}
-
 pub fn prepare_subscription_request(
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    account_ref: &str,
+    installation_id: &str,
     request_id: &str,
+) -> PreparedSubscriptionRequest {
+    prepare_subscription_request_for(
+        headers,
+        body,
+        max_bytes,
+        installation_id,
+        request_id,
+        SubscriptionTransport::Http,
+    )
+}
+
+pub fn prepare_websocket_subscription_request(
+    headers: &HeaderMap,
+    body: Bytes,
+    max_bytes: usize,
+    installation_id: &str,
+    request_id: &str,
+) -> PreparedSubscriptionRequest {
+    prepare_subscription_request_for(
+        headers,
+        body,
+        max_bytes,
+        installation_id,
+        request_id,
+        SubscriptionTransport::WebSocket,
+    )
+}
+
+fn prepare_subscription_request_for(
+    headers: &HeaderMap,
+    body: Bytes,
+    max_bytes: usize,
+    installation_id: &str,
+    _request_id: &str,
+    transport: SubscriptionTransport,
 ) -> PreparedSubscriptionRequest {
     let mut prepared_headers = headers.clone();
     if has_non_identity_encoding(headers) {
@@ -56,8 +76,9 @@ pub fn prepare_subscription_request(
     let Some(object) = value.as_object_mut() else {
         return prepared(prepared_headers, body);
     };
-    let removed_unsupported_fields = strip_unsupported_subscription_fields(object);
-    let filtered_body = removed_unsupported_fields
+    let changed = strip_unsupported_subscription_fields(object)
+        | request_defaults::normalize_optional_members(object);
+    let filtered_body = changed
         .then(|| serde_json::to_vec(&value).ok())
         .flatten()
         .filter(|encoded| encoded.len() <= max_bytes)
@@ -65,15 +86,40 @@ pub fn prepare_subscription_request(
     let object = value
         .as_object_mut()
         .expect("the request object was validated above");
-    let profile = object
+    if object
+        .get("instructions")
+        .and_then(Value::as_str)
+        .is_some_and(str::is_empty)
+    {
+        object.remove("instructions");
+    }
+    let mut profile = object
         .get("model")
         .and_then(Value::as_str)
-        .map(model_profile)
-        .unwrap_or_else(|| model_profile(""));
+        .map(request_defaults::model_profile)
+        .unwrap_or_else(|| request_defaults::model_profile(""));
+    profile.responses_lite |= responses_lite_requested(object);
+    request_identity::apply_routing_hint(object, &mut prepared_headers);
     if already_subscription_shaped(object, profile) {
-        let identity = resolve_identity(object, headers, account_ref, request_id);
-        apply_identity_headers(&mut prepared_headers, profile, &identity);
-        return prepared(prepared_headers, filtered_body.unwrap_or(body));
+        request_defaults::merge_request_defaults(object, profile);
+        request_identity::apply(
+            object,
+            &mut prepared_headers,
+            IdentityContext {
+                installation_id,
+                responses_lite: profile.responses_lite,
+                transport,
+                tool_namespaces_info: None,
+            },
+        );
+        responses_lite::canonicalize_request_items(object);
+        canonicalize_request_order(object, transport);
+        return encode_prepared(
+            prepared_headers,
+            &value,
+            max_bytes,
+            filtered_body.unwrap_or(body),
+        );
     }
 
     let Some(input_value) = object.remove("input") else {
@@ -100,6 +146,11 @@ pub fn prepare_subscription_request(
         None => String::new(),
     };
 
+    let tools = if profile.responses_lite {
+        responses_lite::group_tools(tools)
+    } else {
+        responses_lite::canonicalize_tools(tools)
+    };
     if profile.responses_lite {
         let mut prefix = vec![serde_json::json!({
             "type": "additional_tools",
@@ -118,27 +169,20 @@ pub fn prepare_subscription_request(
         if !instructions.is_empty() {
             object.insert("instructions".to_string(), Value::String(instructions));
         }
-        object
-            .entry("parallel_tool_calls".to_string())
-            .or_insert(Value::Bool(true));
     }
-    object.insert("store".to_string(), Value::Bool(false));
-    object
-        .entry("stream".to_string())
-        .or_insert(Value::Bool(true));
-    object
-        .entry("tool_choice".to_string())
-        .or_insert_with(|| Value::String("auto".to_string()));
-    merge_reasoning(object, profile);
-    merge_text(object, profile);
-    merge_include(object);
-    merge_metadata(
+    request_defaults::merge_request_defaults(object, profile);
+    request_identity::apply(
         object,
         &mut prepared_headers,
-        profile,
-        account_ref,
-        request_id,
+        IdentityContext {
+            installation_id,
+            responses_lite: profile.responses_lite,
+            transport,
+            tool_namespaces_info: None,
+        },
     );
+    responses_lite::canonicalize_request_items(object);
+    canonicalize_request_order(object, transport);
 
     let Ok(encoded) = serde_json::to_vec(&value) else {
         return prepared(headers.clone(), filtered_body.unwrap_or(body));
@@ -147,6 +191,69 @@ pub fn prepare_subscription_request(
         return prepared(headers.clone(), filtered_body.unwrap_or(body));
     }
     prepared(prepared_headers, Bytes::from(encoded))
+}
+
+fn encode_prepared(
+    headers: HeaderMap,
+    value: &Value,
+    max_bytes: usize,
+    fallback: Bytes,
+) -> PreparedSubscriptionRequest {
+    match serde_json::to_vec(value) {
+        Ok(encoded) if encoded.len() <= max_bytes => prepared(headers, Bytes::from(encoded)),
+        _ => prepared(headers, fallback),
+    }
+}
+
+fn canonicalize_request_order(object: &mut Map<String, Value>, transport: SubscriptionTransport) {
+    const HTTP_ORDER: &[&str] = &[
+        "model",
+        "instructions",
+        "input",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning",
+        "store",
+        "stream",
+        "stream_options",
+        "include",
+        "service_tier",
+        "prompt_cache_key",
+        "text",
+        "client_metadata",
+    ];
+    const WEBSOCKET_ORDER: &[&str] = &[
+        "type",
+        "model",
+        "instructions",
+        "previous_response_id",
+        "input",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning",
+        "store",
+        "stream",
+        "stream_options",
+        "include",
+        "service_tier",
+        "prompt_cache_key",
+        "text",
+        "generate",
+        "client_metadata",
+    ];
+    let order = if transport == SubscriptionTransport::WebSocket {
+        WEBSOCKET_ORDER
+    } else {
+        HTTP_ORDER
+    };
+    let mut existing = std::mem::take(object);
+    for name in order {
+        if let Some(value) = existing.remove(*name) {
+            object.insert((*name).to_string(), value);
+        }
+    }
 }
 
 fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) -> bool {
@@ -159,31 +266,6 @@ fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) -> boo
 
 fn prepared(headers: HeaderMap, body: Bytes) -> PreparedSubscriptionRequest {
     PreparedSubscriptionRequest { headers, body }
-}
-
-fn model_profile(model: &str) -> ModelProfile {
-    match model {
-        "gpt-5.6-sol" => ModelProfile {
-            responses_lite: true,
-            reasoning_effort: "low",
-            verbosity: "low",
-        },
-        "gpt-5.6-terra" | "gpt-5.6-luna" => ModelProfile {
-            responses_lite: true,
-            reasoning_effort: "medium",
-            verbosity: "low",
-        },
-        "gpt-5.4-mini" => ModelProfile {
-            responses_lite: false,
-            reasoning_effort: "medium",
-            verbosity: "medium",
-        },
-        _ => ModelProfile {
-            responses_lite: false,
-            reasoning_effort: "medium",
-            verbosity: "low",
-        },
-    }
 }
 
 fn has_non_identity_encoding(headers: &HeaderMap) -> bool {
@@ -201,12 +283,16 @@ fn already_subscription_shaped(object: &Map<String, Value>, profile: ModelProfil
     if profile.responses_lite {
         return object.get("tools").is_none()
             && object.get("instructions").is_none()
-            && input
+            && (input
                 .and_then(|items| items.first())
                 .and_then(Value::as_object)
                 .and_then(|item| item.get("type"))
                 .and_then(Value::as_str)
-                == Some("additional_tools");
+                == Some("additional_tools")
+                || object
+                    .get("previous_response_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.is_empty()));
     }
     input.is_some()
         && object.get("tools").is_some_and(Value::is_array)
@@ -234,10 +320,26 @@ fn normalize_input(input: Value) -> Option<Vec<Value>> {
         let Some(message) = item.as_object_mut() else {
             continue;
         };
+        if message.get("type").is_none() && message.get("role").and_then(Value::as_str).is_some() {
+            let existing = std::mem::take(message);
+            message.insert("type".to_string(), Value::String("message".to_string()));
+            message.extend(existing);
+        }
         if message.get("role").and_then(Value::as_str) == Some("system") {
             message.insert("role".to_string(), Value::String("developer".to_string()));
         }
+        if matches!(
+            message.get("type").and_then(Value::as_str),
+            None | Some("message")
+        ) && let Some(text) = message.get("content").and_then(Value::as_str)
+        {
+            message.insert(
+                "content".to_string(),
+                serde_json::json!([{"type": "input_text", "text": text}]),
+            );
+        }
     }
+    responses_lite::assign_missing_item_ids(&mut input);
     Some(input)
 }
 
@@ -249,212 +351,29 @@ fn developer_message(text: String) -> Value {
     })
 }
 
+fn responses_lite_requested(object: &Map<String, Value>) -> bool {
+    object
+        .get("input")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(Value::as_object)
+        .and_then(|item| item.get("type"))
+        .and_then(Value::as_str)
+        == Some("additional_tools")
+}
+
 fn user_message(text: String) -> Value {
     serde_json::json!({
         "type": "message",
+        "id": responses_lite::new_item_id("msg"),
         "role": "user",
         "content": [{"type": "input_text", "text": text}],
     })
 }
 
-fn merge_reasoning(object: &mut Map<String, Value>, profile: ModelProfile) {
-    let reasoning = object
-        .entry("reasoning".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    let Some(reasoning) = reasoning.as_object_mut() else {
-        return;
-    };
-    reasoning
-        .entry("effort".to_string())
-        .or_insert_with(|| Value::String(profile.reasoning_effort.to_string()));
-    if profile.responses_lite {
-        reasoning
-            .entry("context".to_string())
-            .or_insert_with(|| Value::String("all_turns".to_string()));
-    }
-}
-
-fn merge_text(object: &mut Map<String, Value>, profile: ModelProfile) {
-    let text = object
-        .entry("text".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    let Some(text) = text.as_object_mut() else {
-        return;
-    };
-    text.entry("verbosity".to_string())
-        .or_insert_with(|| Value::String(profile.verbosity.to_string()));
-}
-
-fn merge_include(object: &mut Map<String, Value>) {
-    match object.get_mut("include") {
-        Some(Value::Array(include)) => {
-            if !include
-                .iter()
-                .any(|item| item.as_str() == Some("reasoning.encrypted_content"))
-            {
-                include.push(Value::String("reasoning.encrypted_content".to_string()));
-            }
-        }
-        None => {
-            object.insert(
-                "include".to_string(),
-                serde_json::json!(["reasoning.encrypted_content"]),
-            );
-        }
-        Some(_) => {}
-    }
-}
-
-fn merge_metadata(
-    object: &mut Map<String, Value>,
-    headers: &mut HeaderMap,
-    profile: ModelProfile,
-    account_ref: &str,
-    request_id: &str,
-) {
-    let identity = resolve_identity(object, headers, account_ref, request_id);
-    apply_identity_headers(headers, profile, &identity);
-
-    let metadata = object
-        .entry("client_metadata".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if let Some(metadata) = metadata.as_object_mut() {
-        for (name, value) in [
-            ("session_id", identity.session_id.as_str()),
-            ("thread_id", identity.thread_id.as_str()),
-            ("turn_id", identity.turn_id.as_str()),
-            ("x-codex-installation-id", identity.installation_id.as_str()),
-            ("x-codex-turn-metadata", identity.turn_metadata.as_str()),
-            ("x-codex-window-id", identity.window_id.as_str()),
-        ] {
-            metadata
-                .entry(name.to_string())
-                .or_insert_with(|| Value::String(value.to_string()));
-        }
-    }
-    object
-        .entry("prompt_cache_key".to_string())
-        .or_insert_with(|| Value::String(identity.session_id));
-}
-
-fn resolve_identity(
-    object: &Map<String, Value>,
-    headers: &HeaderMap,
-    account_ref: &str,
-    request_id: &str,
-) -> RequestIdentity {
-    let session_id = header_text(headers, "session-id")
-        .or_else(|| client_metadata_text(object, "session_id"))
-        .unwrap_or_else(|| derived_uuid("session", request_id));
-    let thread_id = header_text(headers, "thread-id")
-        .or_else(|| client_metadata_text(object, "thread_id"))
-        .unwrap_or_else(|| session_id.clone());
-    let installation_id = header_text(headers, "x-codex-installation-id")
-        .or_else(|| client_metadata_text(object, "x-codex-installation-id"))
-        .unwrap_or_else(|| derived_uuid("installation", account_ref));
-    let existing_turn_metadata = header_text(headers, "x-codex-turn-metadata")
-        .or_else(|| client_metadata_text(object, "x-codex-turn-metadata"));
-    let turn_id = existing_turn_metadata
-        .as_deref()
-        .and_then(turn_id_from_metadata)
-        .or_else(|| client_metadata_text(object, "turn_id"))
-        .or_else(|| header_text(headers, "x-client-request-id"))
-        .unwrap_or_else(|| derived_uuid("turn", request_id));
-    let window_id = header_text(headers, "x-codex-window-id")
-        .or_else(|| client_metadata_text(object, "x-codex-window-id"))
-        .unwrap_or_else(|| derived_uuid("window", request_id));
-    let turn_metadata = existing_turn_metadata.unwrap_or_else(|| {
-        serde_json::json!({
-            "installation_id": installation_id,
-            "session_id": session_id,
-            "thread_id": thread_id,
-            "turn_id": turn_id,
-            "window_id": window_id,
-            "request_kind": "turn",
-        })
-        .to_string()
-    });
-    RequestIdentity {
-        session_id,
-        thread_id,
-        installation_id,
-        turn_id,
-        window_id,
-        turn_metadata,
-    }
-}
-
-fn apply_identity_headers(
-    headers: &mut HeaderMap,
-    profile: ModelProfile,
-    identity: &RequestIdentity,
-) {
-    for (name, value) in [
-        ("session-id", identity.session_id.as_str()),
-        ("thread-id", identity.thread_id.as_str()),
-        ("x-client-request-id", identity.turn_id.as_str()),
-        ("x-codex-installation-id", identity.installation_id.as_str()),
-        ("x-codex-turn-metadata", identity.turn_metadata.as_str()),
-        ("x-codex-window-id", identity.window_id.as_str()),
-    ] {
-        insert_header_if_missing(headers, name, value);
-    }
-    ensure_lite_header(headers, profile.responses_lite);
-}
-
-fn client_metadata_text(object: &Map<String, Value>, name: &str) -> Option<String> {
-    object
-        .get("client_metadata")
-        .and_then(Value::as_object)
-        .and_then(|metadata| metadata.get(name))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
-fn turn_id_from_metadata(raw: &str) -> Option<String> {
-    serde_json::from_str::<Value>(raw).ok().and_then(|value| {
-        value
-            .get("turn_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    })
-}
-
-fn ensure_lite_header(headers: &mut HeaderMap, responses_lite: bool) {
-    if responses_lite {
-        headers.insert(
-            HeaderName::from_static("x-openai-internal-codex-responses-lite"),
-            HeaderValue::from_static("true"),
-        );
-    } else {
-        headers.remove("x-openai-internal-codex-responses-lite");
-    }
-}
-
-fn insert_header_if_missing(headers: &mut HeaderMap, name: &'static str, value: &str) {
-    let name = HeaderName::from_static(name);
-    if headers.contains_key(&name) {
-        return;
-    }
-    if let Ok(value) = HeaderValue::from_str(value) {
-        headers.insert(name, value);
-    }
-}
-
-fn derived_uuid(scope: &str, seed: &str) -> String {
-    let digest = Sha256::digest(format!("{scope}:{seed}").as_bytes());
-    let mut bytes = [0_u8; 16];
-    bytes.copy_from_slice(&digest[..16]);
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes).to_string()
-}
-
+#[cfg(test)]
 fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
+    headers.get(name)?.to_str().ok().map(str::to_string)
 }
 
 #[cfg(test)]

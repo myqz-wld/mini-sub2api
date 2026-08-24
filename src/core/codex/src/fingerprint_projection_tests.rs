@@ -109,7 +109,7 @@ fn valid_body_without_recognized_carrier_remains_byte_exact() {
 }
 
 #[test]
-fn adds_missing_installation_member_to_existing_turn_metadata() {
+fn preserves_turn_metadata_that_intentionally_omits_installation() {
     let mut headers = HeaderMap::new();
     headers.insert(
         TURN_METADATA_HEADER,
@@ -129,7 +129,7 @@ fn adds_missing_installation_member_to_existing_turn_metadata() {
             .expect("header turn"),
     )
     .expect("header JSON");
-    assert_eq!(header["installation_id"], DEVICE_ID);
+    assert!(header.get("installation_id").is_none());
     assert_eq!(header["future"], 1);
     let body: Value = serde_json::from_slice(&projected.body).expect("body JSON");
     let body_turn: Value = serde_json::from_str(
@@ -138,7 +138,7 @@ fn adds_missing_installation_member_to_existing_turn_metadata() {
             .expect("body turn"),
     )
     .expect("body turn JSON");
-    assert_eq!(body_turn["installation_id"], DEVICE_ID);
+    assert!(body_turn.get("installation_id").is_none());
     assert_eq!(body_turn["future"], 2);
 }
 
@@ -217,4 +217,38 @@ fn websocket_projection_preserves_no_op_bytes_and_rewrites_carriers() {
     .expect("turn JSON");
     assert_eq!(turn["installation_id"], DEVICE_ID);
     assert_eq!(turn["turn_id"], "kept");
+}
+
+#[test]
+fn projection_preserves_codex_field_order_and_ascii_turn_metadata() {
+    let body = Bytes::from_static(
+        r#"{"model":"gpt-5.6-sol","instructions":"follow","input":[{"type":"message","id":"msg_keep","role":"user","content":[{"type":"input_text","text":"hello"}]}],"client_metadata":{"custom":"kept","x-codex-installation-id":"conflict","x-codex-turn-metadata":"{\"installation_id\":\"conflict\",\"workspaces\":{\"/tmp/東京\":{}}}"}}"#.as_bytes(),
+    );
+    let projected =
+        project_http_device(HeaderMap::new(), body, &device(), 4096).expect("projected request");
+    let text = std::str::from_utf8(&projected.body).expect("UTF-8 JSON");
+    let positions = [
+        text.find("\"model\"").expect("model"),
+        text.find("\"instructions\"").expect("instructions"),
+        text.find("\"input\"").expect("input"),
+        text.find("\"client_metadata\"").expect("client metadata"),
+    ];
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+    let item_positions = [
+        text.find("\"type\":\"message\"").expect("type"),
+        text.find("\"id\":\"msg_keep\"").expect("id"),
+        text.find("\"role\":\"user\"").expect("role"),
+        text.find("\"content\"").expect("content"),
+    ];
+    assert!(item_positions.windows(2).all(|pair| pair[0] < pair[1]));
+    assert!(text.contains(r#"\\u6771\\u4eac"#));
+    assert!(!text.contains("東京"));
+    let value: Value = serde_json::from_slice(&projected.body).expect("request JSON");
+    let metadata: Value = serde_json::from_str(
+        value["client_metadata"][TURN_METADATA_HEADER]
+            .as_str()
+            .expect("turn metadata"),
+    )
+    .expect("turn metadata JSON");
+    assert_eq!(metadata["workspaces"]["/tmp/東京"], serde_json::json!({}));
 }

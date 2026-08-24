@@ -12,6 +12,7 @@ type capturedRequest struct {
 	Authorization string
 	AccountID     string
 	Originator    string
+	Encoding      string
 	Organization  string
 	Project       string
 	SDKLanguage   string

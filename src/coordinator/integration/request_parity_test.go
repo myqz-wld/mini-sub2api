@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +46,11 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 
 	captures := make(chan parityCapture, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		body, _ := io.ReadAll(request.Body)
+		body, err := readCapturedUpstreamBody(request)
+		if err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			return
+		}
 		captures <- parityCapture{Headers: request.Header.Clone(), Body: body}
 		writer.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(writer, completedSSE(7))
@@ -120,20 +125,26 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 		capture.Headers.Get("ChatGPT-Account-ID") != accountID {
 		t.Fatal("subscription authorization was not rebuilt")
 	}
-	if capture.Headers.Get("Originator") != "mini_sub2api" ||
+	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
 		capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "true" {
 		t.Fatalf("subscription markers = %#v", capture.Headers)
 	}
-	if capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0" {
+	if !strings.HasPrefix(capture.Headers.Get("User-Agent"), "codex_cli_rs/0.149.0 (") {
 		t.Fatalf("subscription User-Agent = %q", capture.Headers.Get("User-Agent"))
 	}
+	if capture.Headers.Get("Content-Encoding") != "zstd" {
+		t.Fatalf("subscription Content-Encoding = %q", capture.Headers.Get("Content-Encoding"))
+	}
 	for _, name := range []string{
-		"Session-Id", "Thread-Id", "X-Client-Request-Id", "X-Codex-Installation-Id",
-		"X-Codex-Turn-Metadata", "X-Codex-Window-Id",
+		"Session-Id", "Thread-Id", "X-Client-Request-Id", "X-Codex-Turn-Metadata",
+		"X-Codex-Window-Id",
 	} {
 		if capture.Headers.Get(name) == "" {
 			t.Fatalf("missing synthesized %s", name)
 		}
+	}
+	if capture.Headers.Get("X-Codex-Installation-Id") != "" {
+		t.Fatalf("installation id must be body metadata, headers = %#v", capture.Headers)
 	}
 	var normalized map[string]any
 	if err := json.Unmarshal(capture.Body, &normalized); err != nil {
@@ -166,7 +177,9 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	clientMetadata := normalized["client_metadata"].(map[string]any)
 	if clientMetadata["session_id"] != capture.Headers.Get("Session-Id") ||
 		clientMetadata["thread_id"] != capture.Headers.Get("Thread-Id") ||
-		clientMetadata["turn_id"] != capture.Headers.Get("X-Client-Request-Id") ||
+		capture.Headers.Get("X-Client-Request-Id") != capture.Headers.Get("Thread-Id") ||
+		clientMetadata["turn_id"] == "" ||
+		clientMetadata["x-codex-installation-id"] == "" ||
 		normalized["prompt_cache_key"] != capture.Headers.Get("Session-Id") {
 		t.Fatalf("metadata/header mismatch: metadata=%#v headers=%#v", clientMetadata, capture.Headers)
 	}
@@ -178,17 +191,19 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	if additional["type"] != "additional_tools" {
 		t.Fatalf("first input = %#v", additional)
 	}
-	if !jsonEqual(additional["tools"], tools) {
+	if additional["id"] != nil || !jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
 		t.Fatalf("normalized tools = %#v, want %#v", additional["tools"], tools)
 	}
-	developer, ok := input[1].(map[string]any)
-	if !ok || developer["role"] != "developer" || developer["content"] != "Follow system rules" {
-		t.Fatalf("normalized system message = %#v", input[1])
-	}
-	user, ok := input[2].(map[string]any)
-	if !ok || user["role"] != "user" {
-		t.Fatalf("normalized user message = %#v", input[2])
-	}
+	assertNormalizedMessages(t, input[1:], []any{
+		map[string]any{
+			"type": "message", "role": "developer",
+			"content": []any{map[string]any{"type": "input_text", "text": "Follow system rules"}},
+		},
+		map[string]any{
+			"type": "message", "role": "user",
+			"content": []any{map[string]any{"type": "input_text", "text": "hello"}},
+		},
+	})
 	assertExactStats(t, store, key.ID, 7)
 }
 

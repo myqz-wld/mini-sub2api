@@ -48,12 +48,14 @@ func TestWebSocketHandshakeDialsCoreFirstAndTerminatesCompressionPublicly(t *tes
 	_, publicServer := startPublicWebSocketServer(t, store, core)
 
 	connection, response, err := dialPublicWebSocket(t, publicServer.URL, key.Secret, http.Header{
-		"Openai-Beta":        []string{"responses_websockets=2026-02-06"},
-		"User-Agent":         []string{"codex_exec/test"},
-		"Version":            []string{"0.149.0"},
-		"X-Openai-Subagent":  []string{"review"},
-		"X-Forwarded-For":    []string{"203.0.113.40"},
-		"X-Stainless-Secret": []string{"must-not-cross"},
+		"Openai-Beta":                           []string{"responses_websockets=2026-02-06"},
+		"User-Agent":                            []string{"codex_exec/test"},
+		"Version":                               []string{"0.149.0"},
+		"X-Openai-Subagent":                     []string{"review"},
+		"X-Openai-Internal-Codex-Residency":     []string{"us"},
+		"X-Responsesapi-Include-Timing-Metrics": []string{"true"},
+		"X-Forwarded-For":                       []string{"203.0.113.40"},
+		"X-Stainless-Secret":                    []string{"must-not-cross"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +86,9 @@ func TestWebSocketHandshakeDialsCoreFirstAndTerminatesCompressionPublicly(t *tes
 	}
 	if captured.Get("Openai-Beta") != "responses_websockets=2026-02-06" ||
 		captured.Get("User-Agent") != "codex_exec/test" || captured.Get("Version") != "0.149.0" ||
-		captured.Get("X-Openai-Subagent") != "review" {
+		captured.Get("X-Openai-Subagent") != "review" ||
+		captured.Get("X-Openai-Internal-Codex-Residency") != "us" ||
+		captured.Get("X-Responsesapi-Include-Timing-Metrics") != "true" {
 		t.Fatalf("missing internal metadata: %#v", captured)
 	}
 }

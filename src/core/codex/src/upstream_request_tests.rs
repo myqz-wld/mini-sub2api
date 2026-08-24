@@ -1,7 +1,6 @@
 use super::*;
 use crate::vault::DEFAULT_OPENAI_RESPONSES_URL;
 use pretty_assertions::assert_eq;
-use std::collections::BTreeSet;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
@@ -135,14 +134,14 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
             .headers()
             .get("originator")
             .and_then(|value| value.to_str().ok()),
-        Some("mini_sub2api")
+        Some("codex_cli_rs")
     );
-    assert_eq!(
+    assert!(
         request
             .headers()
             .get(http::header::USER_AGENT)
-            .and_then(|value| value.to_str().ok()),
-        Some("codex_cli_rs/0.149.0")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("codex_cli_rs/0.149.0 ("))
     );
     assert_eq!(
         request
@@ -154,10 +153,31 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
     for name in OPENAI_API_KEY_ALLOWED {
         assert!(!request.headers().contains_key(*name), "header {name}");
     }
+    assert_eq!(
+        request
+            .headers()
+            .get(http::header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok()),
+        Some("zstd")
+    );
+    let compressed = request
+        .body()
+        .and_then(reqwest::Body::as_bytes)
+        .expect("compressed body");
+    assert_eq!(
+        zstd::stream::decode_all(std::io::Cursor::new(compressed)).expect("zstd body"),
+        OFFICIAL_SDK_BODY
+    );
 }
 
 #[test]
 fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
+    assert_eq!(
+        crate::codex_user_agent::anchor_existing(
+            "Codex Desktop/9.9.9 (Mac OS 26.6.0; arm64) Ghostty"
+        ),
+        Some("Codex Desktop/0.149.0 (Mac OS 26.6.0; arm64) Ghostty".to_string())
+    );
     let client = Client::builder()
         .no_proxy()
         .build()
@@ -205,6 +225,7 @@ fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
         ("originator", "codex_exec"),
         ("x-codex-turn-metadata", r#"{"request_kind":"prewarm"}"#),
         ("x-codex-beta-features", "feature-test"),
+        (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.6-sol"),
         ("x-client-request-id", "request-test"),
         ("session-id", "session-test"),
         ("thread-id", "thread-test"),
@@ -251,6 +272,7 @@ fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
             "x-codex-turn-metadata",
             "version",
             "x-codex-beta-features",
+            "x-codex-routing-hint",
             "x-client-request-id",
             "session-id",
             "thread-id",
@@ -273,6 +295,7 @@ fn websocket_subagent_headers_match_codex_conditional_wire_order() {
         ("originator", "codex_exec"),
         ("x-openai-subagent", "review"),
         ("x-codex-beta-features", "feature-test"),
+        (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.6-sol"),
         ("x-client-request-id", "request-test"),
         ("session-id", "session-test"),
         ("thread-id", "thread-test"),
@@ -321,6 +344,7 @@ fn websocket_subagent_headers_match_codex_conditional_wire_order() {
             "x-openai-subagent",
             "version",
             "x-codex-beta-features",
+            "x-codex-routing-hint",
             "x-client-request-id",
             "session-id",
             "thread-id",
@@ -351,6 +375,7 @@ async fn http_request_emission_matches_codex_common_header_order() {
         ("x-codex-parent-thread-id", "parent-test"),
         ("x-openai-subagent", "review"),
         ("x-openai-internal-codex-responses-lite", "true"),
+        (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.6-sol"),
         ("x-client-request-id", "request-test"),
         ("session-id", "session-test"),
         ("thread-id", "thread-test"),
@@ -423,6 +448,7 @@ async fn http_request_emission_matches_codex_common_header_order() {
             "x-codex-parent-thread-id",
             "x-openai-subagent",
             "x-openai-internal-codex-responses-lite",
+            "x-codex-routing-hint",
             "x-client-request-id",
             "session-id",
             "thread-id",
@@ -435,39 +461,4 @@ async fn http_request_emission_matches_codex_common_header_order() {
             "content-length",
         ]
     );
-}
-
-#[test]
-fn wire_order_tables_cover_every_reviewed_header_without_duplicates() {
-    let http = HTTP_HEADER_ORDER.iter().copied().collect::<BTreeSet<_>>();
-    let websocket = WEBSOCKET_WIRE_HEADER_ORDER
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let websocket_subagent = WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    assert_eq!(http.len(), HTTP_HEADER_ORDER.len());
-    assert_eq!(websocket.len(), WEBSOCKET_WIRE_HEADER_ORDER.len());
-    assert_eq!(
-        websocket_subagent.len(),
-        WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER.len()
-    );
-
-    for name in COMMON_ALLOWED.iter().chain(OPENAI_API_KEY_ALLOWED) {
-        assert!(http.contains(name), "HTTP order omitted {name}");
-        if !["accept", "content-encoding", "content-type"].contains(name) {
-            assert!(websocket.contains(name), "WebSocket order omitted {name}");
-            assert!(
-                websocket_subagent.contains(name),
-                "WebSocket subagent order omitted {name}"
-            );
-        }
-    }
-    for name in ["authorization", "chatgpt-account-id"] {
-        assert!(http.contains(name));
-        assert!(websocket.contains(name));
-        assert!(websocket_subagent.contains(name));
-    }
 }

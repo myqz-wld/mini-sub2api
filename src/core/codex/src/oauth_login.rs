@@ -24,6 +24,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use url::Url;
 
+const DEFAULT_CALLBACK_PORT: u16 = 1455;
+const FALLBACK_CALLBACK_PORT: u16 = 1457;
+
 #[derive(Deserialize)]
 struct TokenResponse {
     id_token: String,
@@ -146,9 +149,7 @@ async fn device_login(client: &Client, config: &OAuthConfig) -> Result<TokenResp
 }
 
 async fn browser_login(client: &Client, config: &OAuthConfig) -> Result<TokenResponse> {
-    let listener = TcpListener::bind((IpAddr::from([127, 0, 0, 1]), 0))
-        .await
-        .context("binding OAuth callback")?;
+    let listener = bind_browser_listener().await?;
     let redirect_uri = format!(
         "http://localhost:{}/auth/callback",
         listener.local_addr()?.port()
@@ -237,13 +238,17 @@ async fn exchange_code(
             "{}/oauth/token",
             config.issuer.trim_end_matches('/')
         ))
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("client_id", config.client_id.as_str()),
-            ("code_verifier", pkce.verifier.as_str()),
-        ])
+        .header(
+            http::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(format!(
+            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
+            urlencoding::encode(code),
+            urlencoding::encode(redirect_uri),
+            urlencoding::encode(&config.client_id),
+            urlencoding::encode(&pkce.verifier)
+        ))
         .send()
         .await
         .context("exchanging OAuth code")?;
@@ -259,25 +264,46 @@ fn authorize_url(
     pkce: &Pkce,
     state: &str,
 ) -> Result<Url> {
-    let mut url = Url::parse(&format!(
-        "{}/oauth/authorize",
-        config.issuer.trim_end_matches('/')
-    ))?;
-    url.query_pairs_mut()
-        .append_pair("response_type", "code")
-        .append_pair("client_id", &config.client_id)
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair(
+    let query = [
+        ("response_type", "code"),
+        ("client_id", config.client_id.as_str()),
+        ("redirect_uri", redirect_uri),
+        (
             "scope",
             "openid profile email offline_access api.connectors.read api.connectors.invoke",
-        )
-        .append_pair("code_challenge", &pkce.challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("id_token_add_organizations", "true")
-        .append_pair("codex_cli_simplified_flow", "true")
-        .append_pair("state", state)
-        .append_pair("originator", "mini_sub2api");
-    Ok(url)
+        ),
+        ("code_challenge", pkce.challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("id_token_add_organizations", "true"),
+        ("codex_cli_simplified_flow", "true"),
+        ("state", state),
+        (
+            "originator",
+            crate::upstream_request::DEFAULT_CODEX_ORIGINATOR,
+        ),
+    ]
+    .into_iter()
+    .map(|(name, value)| format!("{name}={}", urlencoding::encode(value)))
+    .collect::<Vec<_>>()
+    .join("&");
+    Url::parse(&format!(
+        "{}/oauth/authorize?{query}",
+        config.issuer.trim_end_matches('/')
+    ))
+    .context("building OAuth authorize URL")
+}
+
+async fn bind_browser_listener() -> Result<TcpListener> {
+    let address = IpAddr::from([127, 0, 0, 1]);
+    match TcpListener::bind((address, DEFAULT_CALLBACK_PORT)).await {
+        Ok(listener) => Ok(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            TcpListener::bind((address, FALLBACK_CALLBACK_PORT))
+                .await
+                .context("binding fallback OAuth callback")
+        }
+        Err(error) => Err(error).context("binding OAuth callback"),
+    }
 }
 
 fn validate_auth_url(raw: &str) -> Result<()> {

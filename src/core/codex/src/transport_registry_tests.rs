@@ -29,13 +29,12 @@ fn registry_reuses_one_context_per_account_and_policy_revision() {
     assert!(Arc::ptr_eq(&first, &repeated));
     assert!(!Arc::ptr_eq(&first, &second));
     assert!(!Arc::ptr_eq(&first, &revised));
-    assert!(
-        first
-            .websocket
-            .shares_tls_state_with(&first.direct_websocket)
-    );
-    assert!(!first.websocket.shares_tls_state_with(&second.websocket));
-    assert!(!first.websocket.shares_tls_state_with(&revised.websocket));
+    let first_tls = first
+        .websocket
+        .fresh_tls_config()
+        .expect("first TLS config");
+    let next_tls = first.websocket.fresh_tls_config().expect("next TLS config");
+    assert!(!Arc::ptr_eq(&first_tls, &next_tls));
 }
 
 #[test]

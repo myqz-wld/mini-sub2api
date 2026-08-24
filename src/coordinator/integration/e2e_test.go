@@ -211,11 +211,16 @@ func (m *mockUpstream) tokenHandler(writer http.ResponseWriter, request *http.Re
 }
 
 func (m *mockUpstream) responsesHandler(writer http.ResponseWriter, request *http.Request) {
-	body, _ := io.ReadAll(request.Body)
+	body, err := readCapturedUpstreamBody(request)
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusBadRequest)
+		return
+	}
 	capture := capturedRequest{
 		Authorization: request.Header.Get("Authorization"),
 		AccountID:     request.Header.Get("ChatGPT-Account-ID"),
 		Originator:    request.Header.Get("originator"),
+		Encoding:      request.Header.Get("Content-Encoding"),
 		Organization:  request.Header.Get("OpenAI-Organization"),
 		Project:       request.Header.Get("OpenAI-Project"),
 		SDKLanguage:   request.Header.Get("X-Stainless-Lang"),
@@ -271,14 +276,17 @@ func (m *mockUpstream) assertAuthBoundaries(t *testing.T, downstreamSecrets []st
 				t.Fatalf("downstream secret crossed upstream boundary")
 			}
 		}
-		if capture.Authorization == "Bearer "+m.newAccess {
-			if capture.AccountID != "chatgpt-e2e-account" || capture.Originator != "mini_sub2api" {
+		if capture.Authorization == "Bearer "+m.oldAccess ||
+			capture.Authorization == "Bearer "+m.newAccess {
+			if capture.AccountID != "chatgpt-e2e-account" || capture.Originator != "codex_cli_rs" ||
+				capture.Encoding != "zstd" {
 				t.Fatalf("OAuth headers = %#v", capture)
 			}
 		} else if capture.Authorization == "Bearer "+upstreamAPIKey {
 			if capture.AccountID != "" || capture.Organization != "org-e2e" ||
 				capture.Project != "proj-e2e" || capture.SDKLanguage != "go" ||
-				capture.SDKVersion != "3.52.0" || capture.SDKUnreviewed != "" {
+				capture.SDKVersion != "3.52.0" || capture.SDKUnreviewed != "" ||
+				capture.Encoding != "" {
 				t.Fatalf("API-key headers = %#v", capture)
 			}
 		}
