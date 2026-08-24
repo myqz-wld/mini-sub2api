@@ -63,6 +63,7 @@ The coordinator may forward only these public-client headers to the core:
 - `session-id`
 - `thread-id`
 - `user-agent`
+- `version`
 - `openai-beta`
 - `openai-organization`
 - `openai-project`
@@ -71,6 +72,7 @@ The coordinator may forward only these public-client headers to the core:
 - `x-codex-turn-state`
 - `x-codex-turn-metadata`
 - `x-codex-parent-thread-id`
+- `x-openai-subagent`
 - `x-codex-window-id`
 - `x-codex-installation-id`
 - `x-openai-internal-codex-responses-lite`
@@ -96,10 +98,11 @@ For subscription-backed plain Responses bodies, the core maps input messages wit
 role `developer`, preserving their content and instruction precedence for the internal Codex
 endpoint. Regular OpenAI API-key request bodies remain byte-transparent.
 
-For subscription upstreams, the core anchors the leading Codex `User-Agent` product/version token
-to the Codex CLI `0.149.0` compatibility baseline. A recognized Codex product name and its suffix
-are preserved; a missing or non-Codex value becomes `codex_cli_rs/0.149.0`. Regular OpenAI API-key
-routes retain the public client's reviewed `User-Agent` unchanged.
+For subscription upstreams, the core anchors both the `version` header and the leading Codex
+`User-Agent` product/version token to the Codex CLI `0.149.0` compatibility baseline. A recognized
+Codex product name and its suffix are preserved; a missing or non-Codex value becomes
+`codex_cli_rs/0.149.0`. Regular OpenAI API-key routes retain the public client's reviewed `version`
+and `User-Agent` values unchanged.
 
 ## Credential-scoped device projection
 

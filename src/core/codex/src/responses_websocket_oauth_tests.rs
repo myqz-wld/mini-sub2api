@@ -79,6 +79,8 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
             http::header::USER_AGENT,
             "codex_exec/9.9.9 (Mac OS test; arm64)",
         )
+        .header(crate::upstream_request::CODEX_VERSION_HEADER, "9.9.9")
+        .header("x-openai-subagent", "review")
         .header("openai-organization", "must-not-cross")
         .header("x-stainless-lang", "must-not-cross")
         .header("x-codex-installation-id", "handshake-conflict")
@@ -160,6 +162,14 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert_eq!(
         header_text(&headers, http::header::USER_AGENT.as_str()).as_deref(),
         Some("codex_exec/0.149.0 (Mac OS test; arm64)")
+    );
+    assert_eq!(
+        header_text(&headers, crate::upstream_request::CODEX_VERSION_HEADER).as_deref(),
+        Some(crate::upstream_request::CODEX_COMPATIBILITY_VERSION)
+    );
+    assert_eq!(
+        header_text(&headers, "x-openai-subagent").as_deref(),
+        Some("review")
     );
     assert_eq!(
         header_text(&headers, "openai-beta").as_deref(),

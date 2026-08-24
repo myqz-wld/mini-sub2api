@@ -79,6 +79,8 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	request.Header.Set("OpenAI-Project", "proj-test")
 	request.Header.Set("Session-Id", "session-test")
 	request.Header.Set("Thread-Id", "thread-test")
+	request.Header.Set("Version", "0.149.0")
+	request.Header.Set("X-OpenAI-Subagent", "review")
 	request.Header.Set("X-Codex-Turn-State", "turn-test")
 	request.Header.Set("X-OpenAI-Internal-Codex-Responses-Lite", "true")
 	request.Header.Set("X-Stainless-Arch", "arm64")
@@ -121,6 +123,8 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 		"Content-Type": "application/json", "Originator": "codex_exec",
 		"OpenAI-Organization": "org-test", "OpenAI-Project": "proj-test",
 		"Session-Id": "session-test", "Thread-Id": "thread-test",
+		"Version":                                "0.149.0",
+		"X-OpenAI-Subagent":                      "review",
 		"X-Codex-Turn-State":                     "turn-test",
 		"X-OpenAI-Internal-Codex-Responses-Lite": "true",
 		"X-Stainless-Arch":                       "arm64",

@@ -40,6 +40,11 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
             axum_post(
                 |AxumState(state): AxumState<OAuthMockState>, headers: HeaderMap| async move {
                     state.inference_calls.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(
+                        header_text(&headers, crate::upstream_request::CODEX_VERSION_HEADER)
+                            .as_deref(),
+                        Some(crate::upstream_request::CODEX_COMPATIBILITY_VERSION)
+                    );
                     if let Some(device) = header_text(&headers, "x-codex-installation-id") {
                         state.fingerprint_headers.lock().await.push(device);
                     }

@@ -248,7 +248,10 @@ TLS backend; Responses WebSocket uses AWS-LC rustls with platform-native roots, 
 Codex `0.149.0` transport split, including its absent WebSocket ALPN offer and PQ-first key groups.
 The provider WebSocket handshake and compression path use the same pinned OpenAI
 `tokio-tungstenite`/`tungstenite` fork revisions as that release. These profiles are internal and
-are not user-configurable.
+are not user-configurable. Subscription requests also pin Codex's `version` header to `0.149.0`;
+regular OpenAI API-key routes preserve a reviewed client-supplied value. Reviewed
+`x-openai-subagent` identity crosses both HTTP and WebSocket routes, including Codex's conditional
+subagent handshake order.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.
