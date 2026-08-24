@@ -379,3 +379,7 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "request_normalizer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_native_ws_tests.rs"]
+mod native_ws_tests;

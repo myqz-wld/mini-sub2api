@@ -148,9 +148,14 @@ metadata. Responses Lite uses the official `functions` namespace without inventi
 and the Codex User-Agent. The bundled model defaults, unknown-model fallback, output schema name,
 OAuth authorize/refresh identity, and wire-critical dependency lock all follow `0.149.0`. Explicit
 models, tools, instructions, reasoning controls, and WebSocket `generate`/continuation fields remain
-authoritative. Remote compaction and sparse memory metadata retain their request kinds. OpenAI
-API-key bodies and carrier-free WebSocket frames remain byte-exact; organization/project headers
-are not sent on OAuth routes.
+authoritative. Native canonical WebSocket frames also retain the CLI-supplied
+`x-codex-ws-stream-request-start-ms`; the normalizer generates it only when missing or empty.
+Codex `0.149.0` startup prewarm metadata with `turn_id=""` and no `root_turn_id` or
+`turn_started_at_unix_ms` is treated as complete, so those fields are not added; when no other
+device projection or defaulting is required, the frame remains byte-exact. Incomplete or non-native
+metadata is still filled. Remote compaction and sparse memory metadata retain their request kinds.
+OpenAI API-key bodies and carrier-free WebSocket frames remain byte-exact; organization/project
+headers are not sent on OAuth routes.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
