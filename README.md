@@ -135,9 +135,10 @@ MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 With `supports_websockets = true`, current Codex uses the Responses WebSocket v2 protocol and may
 reuse one connection for sequential turns. API-key credentials establish the upstream socket before
 the public upgrade. Subscription credentials accept the authenticated internal/public upgrade,
-then use the first `response.create` model and service tier to construct the exact OAuth routing
-handshake. A subscription-side rejection after that upgrade is a WebSocket close, not an HTTP
-`426`; set the flag to `false` when client-side HTTP fallback is required.
+then use the first `response.create` model, service tier, and bounded client turn metadata to
+construct the exact OAuth routing handshake. Pre-upgrade turn headers are not merged into that
+first-frame metadata. A subscription-side rejection after the public upgrade is a WebSocket close,
+not an HTTP `426`; set the flag to `false` when client-side HTTP fallback is required.
 
 Subscription routes apply the Codex CLI `0.149.0` request contract: unsupported top-level fields
 are removed, `system` instruction messages become `developer` messages, request/tool/item JSON is
@@ -257,10 +258,11 @@ are not user-configurable, and every new provider WebSocket gets fresh TLS sessi
 Subscription requests also pin Codex's `version` header to `0.149.0`;
 regular OpenAI API-key routes preserve a reviewed client-supplied value. Reviewed
 `x-openai-subagent` identity crosses both HTTP and WebSocket routes, including Codex's conditional
-subagent handshake order. Managed residency and runtime-timing headers retain their captured
-conditional order; reviewed attestation, inference-call, and memory-generation names cross the Go
-filters. OAuth HTTP clients share only the official allowlist of Cloudflare infrastructure cookies;
-account, session, and arbitrary application cookies are never retained.
+subagent handshake order. OAuth WebSocket headers follow the native provider/extra/default/auth
+merge, including default-versus-override `originator`, routing, residency, timing, attestation, and
+memory-generation order. Reviewed attestation, inference-call, and memory-generation names cross
+the Go filters. OAuth HTTP clients share only the official allowlist of Cloudflare infrastructure
+cookies; account, session, and arbitrary application cookies are never retained.
 
 Compatibility is exact for request state that a `0.149.0` client supplies or the gateway can derive.
 The gateway does not fabricate absent caller workspace, sandbox, thread-source, trace, attestation,

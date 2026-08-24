@@ -63,11 +63,10 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
             "chatgpt-account-id",
             "authorization",
             "user-agent",
+            "originator",
             "openai-beta",
-            "x-codex-routing-hint",
             "version",
             "x-codex-beta-features",
-            "originator",
             "x-client-request-id",
             "session-id",
             "thread-id",
@@ -75,6 +74,7 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
             "x-codex-turn-metadata",
             "x-codex-parent-thread-id",
             "x-openai-subagent",
+            "x-codex-routing-hint",
             "sec-websocket-extensions",
         ]
     );
@@ -88,6 +88,54 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
                 .contains(&format!("\r\n{forbidden}:"))
         );
     }
+}
+
+#[test]
+fn oauth_websocket_process_originator_override_keeps_default_merge_position() {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
+        ("user-agent", "codex_exec/0.149.0 (Mac OS test; arm64) dumb"),
+        ("originator", "codex_exec"),
+        ("x-codex-beta-features", "remote_compaction_v2"),
+        (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.4"),
+    ] {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+    let (request, config) = build_websocket(
+        &headers,
+        "https://example.test/v1/responses",
+        &ResolvedAuth::CodexOAuth {
+            token: "oauth-websocket-not-real".to_string(),
+            account_id: "account-test".to_string(),
+        },
+        1024 * 1024,
+    )
+    .expect("WebSocket request");
+    let (raw, _) = tokio_tungstenite::tungstenite::handshake::client::generate_request(
+        request,
+        Some(&config.extensions),
+    )
+    .expect("raw handshake");
+    let raw = String::from_utf8(raw).expect("ASCII handshake");
+    let names = raw
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+        .collect::<Vec<_>>();
+    let user_agent = names
+        .iter()
+        .position(|name| *name == "user-agent")
+        .expect("user-agent header");
+    let extensions = names
+        .iter()
+        .position(|name| *name == "sec-websocket-extensions")
+        .expect("extension header");
+    assert_eq!(names[user_agent + 1], "originator");
+    assert_eq!(names[extensions - 1], "x-codex-routing-hint");
 }
 
 #[test]
@@ -148,11 +196,90 @@ fn oauth_websocket_timing_headers_match_codex_0149_conditional_order() {
             "Sec-WebSocket-Key",
             "chatgpt-account-id",
             "authorization",
+            "x-openai-internal-codex-residency",
+            "user-agent",
+            "originator",
+            "version",
+            "x-codex-beta-features",
+            "x-client-request-id",
+            "session-id",
+            "thread-id",
+            "x-codex-window-id",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-openai-subagent",
+            "x-codex-routing-hint",
+            "openai-beta",
+            "x-responsesapi-include-timing-metrics",
+            "sec-websocket-extensions",
+        ]
+    );
+}
+
+#[test]
+fn oauth_websocket_optional_headers_match_codex_0149_merge_order() {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
+        (
+            "user-agent",
+            "codex_cli_rs/0.149.0 (Mac OS test; arm64) dumb",
+        ),
+        ("originator", "codex_exec"),
+        ("x-codex-beta-features", "remote_compaction_v2"),
+        (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.4"),
+        ("x-client-request-id", "thread-test"),
+        ("session-id", "session-test"),
+        ("thread-id", "thread-test"),
+        ("x-codex-window-id", "thread-test:0"),
+        ("x-codex-turn-metadata", r#"{"request_kind":"prewarm"}"#),
+        ("x-codex-parent-thread-id", "parent-test"),
+        ("x-openai-subagent", "review"),
+        ("x-openai-memgen-request", "true"),
+        ("x-openai-internal-codex-residency", "us"),
+        ("x-oai-attestation", "audit"),
+        ("x-responsesapi-include-timing-metrics", "true"),
+    ] {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+    let (request, config) = build_websocket(
+        &headers,
+        "https://example.test/v1/responses",
+        &ResolvedAuth::CodexOAuth {
+            token: "oauth-websocket-not-real".to_string(),
+            account_id: "account-test".to_string(),
+        },
+        1024 * 1024,
+    )
+    .expect("WebSocket request");
+    let (raw, _) = tokio_tungstenite::tungstenite::handshake::client::generate_request(
+        request,
+        Some(&config.extensions),
+    )
+    .expect("raw handshake");
+    let raw = String::from_utf8(raw).expect("ASCII handshake");
+    let names = raw
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "Host",
+            "Connection",
+            "Upgrade",
+            "Sec-WebSocket-Version",
+            "Sec-WebSocket-Key",
+            "chatgpt-account-id",
+            "authorization",
+            "x-openai-internal-codex-residency",
             "user-agent",
             "x-responsesapi-include-timing-metrics",
-            "openai-beta",
             "version",
-            "x-openai-internal-codex-residency",
             "x-codex-beta-features",
             "originator",
             "x-client-request-id",
@@ -162,7 +289,10 @@ fn oauth_websocket_timing_headers_match_codex_0149_conditional_order() {
             "x-codex-turn-metadata",
             "x-codex-parent-thread-id",
             "x-openai-subagent",
+            "x-openai-memgen-request",
             "x-codex-routing-hint",
+            "x-oai-attestation",
+            "openai-beta",
             "sec-websocket-extensions",
         ]
     );
@@ -321,29 +451,12 @@ fn wire_order_tables_cover_every_reviewed_header_without_duplicates() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    let oauth_websocket = OAUTH_WEBSOCKET_WIRE_HEADER_ORDER
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let oauth_websocket_timing = OAUTH_WEBSOCKET_TIMING_WIRE_HEADER_ORDER
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
     assert_eq!(http.len(), HTTP_HEADER_ORDER.len());
     assert_eq!(websocket.len(), WEBSOCKET_WIRE_HEADER_ORDER.len());
     assert_eq!(
         websocket_subagent.len(),
         WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER.len()
     );
-    assert_eq!(
-        oauth_websocket.len(),
-        OAUTH_WEBSOCKET_WIRE_HEADER_ORDER.len()
-    );
-    assert_eq!(
-        oauth_websocket_timing.len(),
-        OAUTH_WEBSOCKET_TIMING_WIRE_HEADER_ORDER.len()
-    );
-
     for name in COMMON_ALLOWED.iter().chain(OPENAI_API_KEY_ALLOWED) {
         assert!(http.contains(name), "HTTP order omitted {name}");
         if !["accept", "content-encoding", "content-type"].contains(name) {
@@ -358,6 +471,5 @@ fn wire_order_tables_cover_every_reviewed_header_without_duplicates() {
         assert!(http.contains(name));
         assert!(websocket.contains(name));
         assert!(websocket_subagent.contains(name));
-        assert!(oauth_websocket.contains(name));
     }
 }

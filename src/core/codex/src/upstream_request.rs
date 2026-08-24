@@ -178,59 +178,6 @@ const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
     "x-stainless-timeout",
 ];
 
-const OAUTH_WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
-    "chatgpt-account-id",
-    "authorization",
-    "user-agent",
-    "x-oai-attestation",
-    "openai-beta",
-    CODEX_ROUTING_HINT_HEADER,
-    CODEX_VERSION_HEADER,
-    "x-openai-internal-codex-residency",
-    "x-codex-beta-features",
-    "originator",
-    "x-client-request-id",
-    "session-id",
-    "thread-id",
-    "x-codex-window-id",
-    "x-codex-turn-metadata",
-    "x-codex-parent-thread-id",
-    "x-openai-subagent",
-    "x-openai-memgen-request",
-    "x-codex-turn-state",
-    "x-codex-installation-id",
-    "x-openai-internal-codex-responses-lite",
-    "session_id",
-    "conversation_id",
-];
-
-const OAUTH_WEBSOCKET_TIMING_WIRE_HEADER_ORDER: &[&str] = &[
-    "chatgpt-account-id",
-    "authorization",
-    "user-agent",
-    "x-oai-attestation",
-    "x-responsesapi-include-timing-metrics",
-    "openai-beta",
-    CODEX_VERSION_HEADER,
-    "x-openai-internal-codex-residency",
-    "x-codex-beta-features",
-    "originator",
-    "x-client-request-id",
-    "session-id",
-    "thread-id",
-    "x-codex-window-id",
-    "x-codex-turn-metadata",
-    "x-codex-parent-thread-id",
-    "x-openai-subagent",
-    "x-openai-memgen-request",
-    CODEX_ROUTING_HINT_HEADER,
-    "x-codex-turn-state",
-    "x-codex-installation-id",
-    "x-openai-internal-codex-responses-lite",
-    "session_id",
-    "conversation_id",
-];
-
 #[derive(Clone)]
 pub(crate) enum ResolvedAuth {
     CodexOAuth { token: String, account_id: String },
@@ -314,13 +261,11 @@ fn ordered_headers(source: &HeaderMap, order: &[&'static str]) -> HeaderMap {
 }
 
 fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
-    let order = if source.contains_key("chatgpt-account-id")
-        && source.contains_key("x-responsesapi-include-timing-metrics")
-    {
-        OAUTH_WEBSOCKET_TIMING_WIRE_HEADER_ORDER
-    } else if source.contains_key("chatgpt-account-id") {
-        OAUTH_WEBSOCKET_WIRE_HEADER_ORDER
-    } else if source.contains_key("x-openai-subagent") {
+    if source.contains_key("chatgpt-account-id") {
+        insert_oauth_websocket_headers(destination, source);
+        return;
+    }
+    let order = if source.contains_key("x-openai-subagent") {
         WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER
     } else {
         WEBSOCKET_WIRE_HEADER_ORDER
@@ -340,6 +285,84 @@ fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
     let moved = desired.len().min(5);
     for (name, value) in desired[moved..].iter().chain(desired[..moved].iter().rev()) {
         destination.insert(name.clone(), value.clone());
+    }
+}
+
+fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
+    // Codex constructs these as provider, per-request, default, then auth maps. Replaying that
+    // merge matters because tungstenite's mandatory-header removals make HeaderMap layout visible
+    // on the wire, including different layouts for default and thread-overridden originators.
+    let mut provider_headers = HeaderMap::new();
+    copy_header(&mut provider_headers, source, CODEX_VERSION_HEADER);
+
+    let mut extra_headers = HeaderMap::new();
+    copy_header(&mut extra_headers, source, "x-codex-beta-features");
+    let default_originator = oauth_default_originator(source);
+    if source.get("originator") != Some(&default_originator) {
+        copy_header(&mut extra_headers, source, "originator");
+    }
+    copy_header(&mut extra_headers, source, "x-client-request-id");
+
+    let mut session_headers = HeaderMap::new();
+    copy_header(&mut session_headers, source, "session-id");
+    copy_header(&mut session_headers, source, "thread-id");
+    extra_headers.extend(session_headers);
+
+    let mut compatibility_headers = HeaderMap::new();
+    for name in [
+        "x-codex-window-id",
+        "x-codex-turn-metadata",
+        "x-codex-parent-thread-id",
+        "x-openai-subagent",
+        "x-openai-memgen-request",
+    ] {
+        copy_header(&mut compatibility_headers, source, name);
+    }
+    extra_headers.extend(compatibility_headers);
+    for name in [
+        CODEX_ROUTING_HINT_HEADER,
+        "x-oai-attestation",
+        "openai-beta",
+        "x-responsesapi-include-timing-metrics",
+    ] {
+        copy_header(&mut extra_headers, source, name);
+    }
+
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert("originator", default_originator);
+    copy_header(&mut default_headers, source, "user-agent");
+    copy_header(
+        &mut default_headers,
+        source,
+        "x-openai-internal-codex-residency",
+    );
+
+    let mut headers = provider_headers;
+    headers.extend(extra_headers);
+    for (name, value) in &default_headers {
+        if !headers.contains_key(name) {
+            headers.insert(name.clone(), value.clone());
+        }
+    }
+    copy_header(&mut headers, source, "authorization");
+    copy_header(&mut headers, source, "chatgpt-account-id");
+    destination.extend(headers);
+}
+
+fn oauth_default_originator(source: &HeaderMap) -> HeaderValue {
+    // The process default can be overridden internally; its anchored User-Agent keeps the same
+    // product token, while a thread originator override changes only the originator header.
+    source
+        .get(http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split_once('/').map(|(product, _)| product))
+        .and_then(|product| HeaderValue::from_str(product).ok())
+        .unwrap_or_else(|| HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR))
+}
+
+fn copy_header(destination: &mut HeaderMap, source: &HeaderMap, name: &'static str) {
+    if let Some(value) = source.get(name) {
+        destination.insert(HeaderName::from_static(name), value.clone());
     }
 }
 

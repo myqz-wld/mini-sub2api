@@ -177,14 +177,17 @@ for the first `response.create` so its model and service tier can drive the prov
   `device` when they have no recognized body carrier. For subscription credentials, the core
   applies the pinned request normalizer only to `response.create`, preserving `type`, `generate`,
   `previous_response_id`, and client metadata. It derives the first OAuth routing hint from that
-  frame; later creates reuse the same provider socket.
+  frame; later creates reuse the same provider socket. The deferred provider handshake derives its
+  bounded `x-codex-turn-metadata` from the normalized first frame, so pre-upgrade header metadata
+  cannot be combined with a native prewarm snapshot.
 - The fingerprint snapshot used for the handshake is retained for that socket. Before each
   `response.create`, the core re-reads the sidecar revision; a changed or unreadable fingerprint
   closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.
   Other valid application events do not trigger this stale-policy check and remain byte-exact.
 - Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
   `ChatGPT-Account-ID`, supplies `originator` when absent, and keeps the reviewed `0.149.0`
-  User-Agent anchor.
+  User-Agent anchor. OAuth header emission reproduces the native provider/extra/default/auth merge
+  instead of forcing one order across default and overridden originators.
 - The public coordinator and provider hops may negotiate per-message deflate. The provider sends
   the Codex `0.149.0` offer `permessage-deflate; client_max_window_bits`; the authenticated internal
   loopback hop does not request WebSocket compression.

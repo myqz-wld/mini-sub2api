@@ -140,10 +140,14 @@ fn resolve_identity(
         .and_then(|raw| complete_turn_metadata(&raw, &generated))
         .unwrap_or_else(|| generated.clone());
     let bounded_generated = bounded_turn_metadata(&generated).unwrap_or_else(|| generated.clone());
-    let header_turn_metadata = header_turn_metadata
-        .and_then(|raw| complete_turn_metadata(&raw, &bounded_generated))
-        .or_else(|| bounded_turn_metadata(&body_turn_metadata))
-        .unwrap_or(bounded_generated);
+    let header_turn_metadata = if context.transport == SubscriptionTransport::WebSocket {
+        bounded_turn_metadata(&body_turn_metadata).unwrap_or(bounded_generated)
+    } else {
+        header_turn_metadata
+            .and_then(|raw| complete_turn_metadata(&raw, &bounded_generated))
+            .or_else(|| bounded_turn_metadata(&body_turn_metadata))
+            .unwrap_or(bounded_generated)
+    };
     RequestIdentity {
         session_id,
         thread_id,
