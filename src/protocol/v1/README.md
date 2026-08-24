@@ -176,10 +176,14 @@ for the first `response.create` so its model and service tier can drive the prov
 - Regular API-key text frames are byte-transparent in `off`, and remain byte-transparent in
   `device` when they have no recognized body carrier. For subscription credentials, the core
   applies the pinned request normalizer only to `response.create`, preserving `type`, `generate`,
-  `previous_response_id`, and client metadata. It derives the first OAuth routing hint from that
-  frame; later creates reuse the same provider socket. The deferred provider handshake derives its
-  bounded `x-codex-turn-metadata` from the normalized first frame, so pre-upgrade header metadata
-  cannot be combined with a native prewarm snapshot.
+  `previous_response_id`, and client metadata. An existing non-empty
+  `x-codex-ws-stream-request-start-ms` remains the CLI send time; only a missing or empty value is
+  generated. After any required device projection, the complete native `0.149.0` prewarm shape
+  keeps its empty `turn_id` and intentionally absent `root_turn_id` and
+  `turn_started_at_unix_ms`; incomplete or non-native shapes are still normalized. The first OAuth
+  routing hint comes from that frame, and later creates reuse the same provider socket. The deferred
+  provider handshake derives its bounded `x-codex-turn-metadata` from the normalized first frame,
+  so pre-upgrade header metadata cannot be combined with a native prewarm snapshot.
 - The fingerprint snapshot used for the handshake is retained for that socket. Before each
   `response.create`, the core re-reads the sidecar revision; a changed or unreadable fingerprint
   closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.

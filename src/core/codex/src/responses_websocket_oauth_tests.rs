@@ -19,6 +19,87 @@ struct OAuthWebSocketState {
 }
 
 #[tokio::test]
+async fn oauth_preserves_native_prewarm_frame_and_deferred_metadata_bytes() {
+    let account_id = "chatgpt-native-prewarm-test";
+    let state = OAuthWebSocketState {
+        old_access: test_jwt(None, 3600),
+        new_access: test_jwt(None, 7200),
+        new_id: test_jwt(Some(account_id), 7200),
+        handshake_calls: Arc::new(AtomicUsize::new(0)),
+        refresh_calls: Arc::new(AtomicUsize::new(0)),
+        headers: Arc::new(Mutex::new(None)),
+        frames: Arc::new(Mutex::new(Vec::new())),
+    };
+    let app = Router::new()
+        .route("/responses", get(oauth_upstream))
+        .with_state(state.clone());
+    let upstream = spawn_loopback(app).await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: state.new_id.clone(),
+                access_token: state.new_access.clone(),
+                refresh_token: "refresh-native-prewarm-test".to_string(),
+                account_id: account_id.to_string(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                issuer: upstream.base_url.clone(),
+                client_id: "client-native-prewarm-test".to_string(),
+            },
+            format!("{}/responses", upstream.base_url),
+            crate::fingerprint::FingerprintMode::Device,
+        )
+        .await
+        .expect("OAuth record");
+    let installation_id = vault
+        .fingerprint_snapshot(&metadata.account_ref)
+        .await
+        .expect("fingerprint")
+        .installation_id()
+        .to_string();
+    let core = spawn_internal(app_state(vault)).await;
+    let handshake = internal_handshake(&core.base_url, &metadata.account_ref)
+        .upgrade()
+        .send()
+        .await
+        .expect("handshake");
+    let mut socket = handshake.into_websocket().await.expect("socket");
+    let turn_metadata = format!(
+        r#"{{"installation_id":"{installation_id}","session_id":"session-native","thread_id":"thread-native","agent_name":"/root","turn_id":"","window_id":"thread-native:0","request_kind":"prewarm","sandbox":"workspace-write","sandbox_mode":"workspace-write","auto_review_enabled":false,"node_repl_auto_review_required":false,"node_repl_disabled":false}}"#
+    );
+    let encoded_turn_metadata =
+        serde_json::to_string(&turn_metadata).expect("turn metadata string");
+    let frame = format!(
+        r#"{{"type":"response.create","model":"gpt-5.4","input":[],"tools":[],"tool_choice":"auto","parallel_tool_calls":true,"reasoning":{{"effort":"medium"}},"store":false,"stream":true,"include":["reasoning.encrypted_content"],"prompt_cache_key":"session-native","text":{{"verbosity":"low"}},"generate":false,"client_metadata":{{"session_id":"session-native","thread_id":"thread-native","turn_id":"","x-codex-installation-id":"{installation_id}","x-codex-turn-metadata":{encoded_turn_metadata},"x-codex-window-id":"thread-native:0","x-codex-ws-stream-request-start-ms":"1700000000123"}}}}"#
+    );
+    socket
+        .send(DownstreamMessage::Text(frame.clone()))
+        .await
+        .expect("send native prewarm");
+    let completion = socket
+        .next()
+        .await
+        .expect("completion")
+        .expect("valid event");
+    assert!(matches!(completion, DownstreamMessage::Text(_)));
+    let _ = socket.close(DownstreamCloseCode::Normal, None).await;
+
+    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(state.frames.lock().await.as_slice(), [frame]);
+    let headers = state.headers.lock().await;
+    assert_eq!(
+        header_text(
+            headers.as_ref().expect("captured headers"),
+            "x-codex-turn-metadata"
+        )
+        .as_deref(),
+        Some(turn_metadata.as_str())
+    );
+}
+
+#[tokio::test]
 async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     let account_id = "chatgpt-websocket-test";
     let state = OAuthWebSocketState {

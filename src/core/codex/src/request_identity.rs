@@ -8,6 +8,12 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+#[path = "request_identity_turn_metadata.rs"]
+mod turn_metadata;
+
+use turn_metadata::bounded_turn_metadata;
+use turn_metadata::complete_turn_metadata;
+
 const INSTALLATION_HEADER: &str = "x-codex-installation-id";
 const TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
 const WINDOW_HEADER: &str = "x-codex-window-id";
@@ -120,8 +126,11 @@ fn resolve_identity(
     let root_turn_id = body_turn_metadata
         .as_deref()
         .and_then(|raw| metadata_text(raw, "root_turn_id"))
-        .or_else(|| client_metadata_text(object, "root_turn_id"))
-        .or_else(|| turn_id.clone());
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            client_metadata_text(object, "root_turn_id").filter(|value| !value.trim().is_empty())
+        })
+        .or_else(|| turn_id.clone().filter(|value| !value.trim().is_empty()));
     let window_id = header_text(headers, WINDOW_HEADER)
         .or_else(|| client_metadata_text(object, WINDOW_HEADER))
         .unwrap_or_else(|| format!("{thread_id}:0"));
@@ -207,74 +216,6 @@ fn generated_turn_metadata(
     to_ascii_json_string(&Value::Object(metadata)).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn bounded_turn_metadata(raw: &str) -> Option<String> {
-    let mut value = serde_json::from_str::<Value>(raw).ok()?;
-    value.as_object_mut()?.remove("tool_namespaces_info");
-    to_ascii_json_string(&value).ok()
-}
-
-fn complete_turn_metadata(raw: &str, generated: &str) -> Option<String> {
-    let mut existing = serde_json::from_str::<Value>(raw).ok()?;
-    let existing = existing.as_object_mut()?;
-    if existing.get("request_kind").and_then(Value::as_str) == Some("memory") {
-        return Some(raw.to_string());
-    }
-    let generated = serde_json::from_str::<Value>(generated).ok()?;
-    let generated = generated.as_object()?;
-    let complete = [
-        "installation_id",
-        "session_id",
-        "thread_id",
-        "agent_name",
-        "window_id",
-        "request_kind",
-        "auto_review_enabled",
-        "node_repl_auto_review_required",
-        "node_repl_disabled",
-        "turn_started_at_unix_ms",
-    ]
-    .iter()
-    .all(|name| existing.contains_key(*name));
-    if complete {
-        return Some(raw.to_string());
-    }
-    const ORDER: &[&str] = &[
-        "installation_id",
-        "session_id",
-        "thread_id",
-        "agent_name",
-        "turn_id",
-        "window_id",
-        "request_kind",
-        "forked_from_thread_id",
-        "parent_thread_id",
-        "parent_turn_id",
-        "root_turn_id",
-        "subagent_kind",
-        "thread_source",
-        "sandbox",
-        "sandbox_mode",
-        "auto_review_enabled",
-        "node_repl_auto_review_required",
-        "node_repl_disabled",
-        "workspaces",
-        "tool_namespaces_info",
-        "turn_started_at_unix_ms",
-        "compaction",
-    ];
-    let mut remainder = std::mem::take(existing);
-    for name in ORDER {
-        if let Some(value) = remainder
-            .remove(*name)
-            .or_else(|| generated.get(*name).cloned())
-        {
-            existing.insert((*name).to_string(), value);
-        }
-    }
-    existing.extend(remainder);
-    to_ascii_json_string(&Value::Object(std::mem::take(existing))).ok()
-}
-
 fn apply_headers(
     headers: &mut HeaderMap,
     identity: &RequestIdentity,
@@ -342,10 +283,7 @@ fn apply_client_metadata(
         if let Some(value) = header_text(headers, "x-codex-turn-state") {
             insert_string_if_invalid(metadata, "x-codex-turn-state", &value);
         }
-        metadata.insert(
-            WS_STREAM_START_METADATA.to_string(),
-            Value::String(Utc::now().timestamp_millis().to_string()),
-        );
+        ensure_ws_stream_start(metadata);
         if context.responses_lite {
             insert_string_if_invalid(metadata, WS_RESPONSES_LITE_METADATA, "true");
         }
@@ -362,6 +300,19 @@ fn insert_string_if_invalid(metadata: &mut Map<String, Value>, name: &str, value
         .is_none_or(str::is_empty)
     {
         metadata.insert(name.to_string(), Value::String(value.to_string()));
+    }
+}
+
+fn ensure_ws_stream_start(metadata: &mut Map<String, Value>) {
+    if metadata
+        .get(WS_STREAM_START_METADATA)
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        metadata.insert(
+            WS_STREAM_START_METADATA.to_string(),
+            Value::String(Utc::now().timestamp_millis().to_string()),
+        );
     }
 }
 
