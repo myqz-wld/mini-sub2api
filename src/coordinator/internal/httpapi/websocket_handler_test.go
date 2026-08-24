@@ -50,6 +50,8 @@ func TestWebSocketHandshakeDialsCoreFirstAndTerminatesCompressionPublicly(t *tes
 	connection, response, err := dialPublicWebSocket(t, publicServer.URL, key.Secret, http.Header{
 		"Openai-Beta":        []string{"responses_websockets=2026-02-06"},
 		"User-Agent":         []string{"codex_exec/test"},
+		"Version":            []string{"0.149.0"},
+		"X-Openai-Subagent":  []string{"review"},
 		"X-Forwarded-For":    []string{"203.0.113.40"},
 		"X-Stainless-Secret": []string{"must-not-cross"},
 	})
@@ -81,7 +83,8 @@ func TestWebSocketHandshakeDialsCoreFirstAndTerminatesCompressionPublicly(t *tes
 		t.Fatalf("internal headers = %#v", captured)
 	}
 	if captured.Get("Openai-Beta") != "responses_websockets=2026-02-06" ||
-		captured.Get("User-Agent") != "codex_exec/test" {
+		captured.Get("User-Agent") != "codex_exec/test" || captured.Get("Version") != "0.149.0" ||
+		captured.Get("X-Openai-Subagent") != "review" {
 		t.Fatalf("missing internal metadata: %#v", captured)
 	}
 }

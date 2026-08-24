@@ -96,6 +96,7 @@ fn api_key_request_matches_official_sdk_capture_without_network() {
         );
     }
     assert!(!request.headers().contains_key("chatgpt-account-id"));
+    assert!(!request.headers().contains_key(CODEX_VERSION_HEADER));
     assert!(!request.headers().contains_key("x-forwarded-for"));
     assert!(!request.headers().contains_key("x-stainless-unreviewed"));
     assert_eq!(
@@ -143,6 +144,13 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
             .and_then(|value| value.to_str().ok()),
         Some("codex_cli_rs/0.149.0")
     );
+    assert_eq!(
+        request
+            .headers()
+            .get(CODEX_VERSION_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(CODEX_COMPATIBILITY_VERSION)
+    );
     for name in OPENAI_API_KEY_ALLOWED {
         assert!(!request.headers().contains_key(*name), "header {name}");
     }
@@ -159,6 +167,7 @@ fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
         http::header::USER_AGENT,
         HeaderValue::from_static("codex_exec/9.9.9 (Mac OS 15.0.0; arm64) Apple_Terminal"),
     );
+    headers.insert(CODEX_VERSION_HEADER, HeaderValue::from_static("9.9.9"));
     let request = build(
         &client,
         &headers,
@@ -178,12 +187,20 @@ fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
             .and_then(|value| value.to_str().ok()),
         Some("codex_exec/0.149.0 (Mac OS 15.0.0; arm64) Apple_Terminal")
     );
+    assert_eq!(
+        request
+            .headers()
+            .get(CODEX_VERSION_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(CODEX_COMPATIBILITY_VERSION)
+    );
 }
 
 #[test]
 fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
     let mut headers = HeaderMap::new();
     for (name, value) in [
+        (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
         ("user-agent", "codex_exec/0.149.0"),
         ("originator", "codex_exec"),
         ("x-codex-turn-metadata", r#"{"request_kind":"prewarm"}"#),
@@ -232,6 +249,7 @@ fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
             "originator",
             "openai-beta",
             "x-codex-turn-metadata",
+            "version",
             "x-codex-beta-features",
             "x-client-request-id",
             "session-id",
@@ -246,6 +264,74 @@ fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
     assert!(!raw.to_ascii_lowercase().contains("\r\naccept:"));
 }
 
+#[test]
+fn websocket_subagent_headers_match_codex_conditional_wire_order() {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
+        ("user-agent", "codex_exec/0.149.0"),
+        ("originator", "codex_exec"),
+        ("x-openai-subagent", "review"),
+        ("x-codex-beta-features", "feature-test"),
+        ("x-client-request-id", "request-test"),
+        ("session-id", "session-test"),
+        ("thread-id", "thread-test"),
+        ("x-codex-window-id", "window-test"),
+        ("x-codex-turn-metadata", r#"{"request_kind":"turn"}"#),
+        ("x-codex-parent-thread-id", "parent-test"),
+    ] {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static(value),
+        );
+    }
+    let (request, config) = build_websocket(
+        &headers,
+        "https://example.test/v1/responses",
+        &ResolvedAuth::OpenAiApiKey {
+            token: "offline-websocket-key-not-real".to_string(),
+        },
+        1024 * 1024,
+    )
+    .expect("WebSocket request");
+    let (raw, _) = tokio_tungstenite::tungstenite::handshake::client::generate_request(
+        request,
+        Some(&config.extensions),
+    )
+    .expect("raw handshake");
+    let raw = String::from_utf8(raw).expect("ASCII handshake");
+    let names = raw
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        names,
+        [
+            "Host",
+            "Connection",
+            "Upgrade",
+            "Sec-WebSocket-Version",
+            "Sec-WebSocket-Key",
+            "authorization",
+            "user-agent",
+            "originator",
+            "openai-beta",
+            "x-openai-subagent",
+            "version",
+            "x-codex-beta-features",
+            "x-client-request-id",
+            "session-id",
+            "thread-id",
+            "x-codex-window-id",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "sec-websocket-extensions",
+        ]
+    );
+}
+
 #[tokio::test]
 async fn http_request_emission_matches_codex_common_header_order() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -257,9 +343,13 @@ async fn http_request_emission_matches_codex_common_header_order() {
 
     let mut headers = HeaderMap::new();
     for (name, value) in [
+        (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
         ("x-codex-beta-features", "feature-test"),
+        ("x-codex-turn-state", "turn-state-test"),
         ("x-codex-window-id", "window-test"),
         ("x-codex-turn-metadata", r#"{"request_kind":"turn"}"#),
+        ("x-codex-parent-thread-id", "parent-test"),
+        ("x-openai-subagent", "review"),
         ("x-openai-internal-codex-responses-lite", "true"),
         ("x-client-request-id", "request-test"),
         ("session-id", "session-test"),
@@ -325,9 +415,13 @@ async fn http_request_emission_matches_codex_common_header_order() {
     assert_eq!(
         names,
         [
+            "version",
             "x-codex-beta-features",
+            "x-codex-turn-state",
             "x-codex-window-id",
             "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-openai-subagent",
             "x-openai-internal-codex-responses-lite",
             "x-client-request-id",
             "session-id",
@@ -350,17 +444,30 @@ fn wire_order_tables_cover_every_reviewed_header_without_duplicates() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
+    let websocket_subagent = WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
     assert_eq!(http.len(), HTTP_HEADER_ORDER.len());
     assert_eq!(websocket.len(), WEBSOCKET_WIRE_HEADER_ORDER.len());
+    assert_eq!(
+        websocket_subagent.len(),
+        WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER.len()
+    );
 
     for name in COMMON_ALLOWED.iter().chain(OPENAI_API_KEY_ALLOWED) {
         assert!(http.contains(name), "HTTP order omitted {name}");
         if !["accept", "content-encoding", "content-type"].contains(name) {
             assert!(websocket.contains(name), "WebSocket order omitted {name}");
+            assert!(
+                websocket_subagent.contains(name),
+                "WebSocket subagent order omitted {name}"
+            );
         }
     }
     for name in ["authorization", "chatgpt-account-id"] {
         assert!(http.contains(name));
         assert!(websocket.contains(name));
+        assert!(websocket_subagent.contains(name));
     }
 }

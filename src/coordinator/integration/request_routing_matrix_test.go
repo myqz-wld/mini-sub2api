@@ -206,6 +206,8 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				assertAPIKeyCapture(t, capture, codexAPIBody)
 				if capture.Headers.Get("Originator") != "codex_exec" ||
 					capture.Headers.Get("Session-Id") != "api-key-session" ||
+					capture.Headers.Get("Version") != "9.9.9" ||
+					capture.Headers.Get("X-Openai-Subagent") != "review" ||
 					capture.Headers.Get("User-Agent") != "codex_cli_rs/9.9.9 routing-matrix" {
 					t.Fatalf("Codex API headers = %#v", capture.Headers)
 				}
@@ -260,6 +262,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				}
 				if capture.Headers.Get("Originator") != "codex_exec" ||
 					capture.Headers.Get("Session-Id") != "oauth-session" ||
+					capture.Headers.Get("X-Openai-Subagent") != "review" ||
 					capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0 routing-matrix" {
 					t.Fatalf("native subscription headers = %#v", capture.Headers)
 				}
@@ -299,6 +302,8 @@ func codexScenarioHeaders(prefix, userAgent string) http.Header {
 		"X-Codex-Parent-Thread-Id": []string{prefix + "-parent"},
 		"X-Codex-Turn-State":       []string{"active"},
 		"User-Agent":               []string{userAgent},
+		"Version":                  []string{"9.9.9"},
+		"X-Openai-Subagent":        []string{"review"},
 	}
 }
 
@@ -337,6 +342,7 @@ func assertSubscriptionCapture(
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("Originator") == "" ||
+		capture.Headers.Get("Version") != "0.149.0" ||
 		capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0" &&
 			capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0 routing-matrix" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)

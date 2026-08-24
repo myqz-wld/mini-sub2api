@@ -13,9 +13,11 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
 pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.149.0";
+pub(crate) const CODEX_VERSION_HEADER: &str = "version";
 pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
 
 const COMMON_ALLOWED: &[&str] = &[
+    CODEX_VERSION_HEADER,
     "accept",
     "content-encoding",
     "content-type",
@@ -29,6 +31,7 @@ const COMMON_ALLOWED: &[&str] = &[
     "x-codex-turn-state",
     "x-codex-turn-metadata",
     "x-codex-parent-thread-id",
+    "x-openai-subagent",
     "x-codex-window-id",
     "x-codex-installation-id",
     "x-openai-internal-codex-responses-lite",
@@ -50,9 +53,13 @@ const OPENAI_API_KEY_ALLOWED: &[&str] = &[
 ];
 
 const HTTP_HEADER_ORDER: &[&str] = &[
+    CODEX_VERSION_HEADER,
     "x-codex-beta-features",
+    "x-codex-turn-state",
     "x-codex-window-id",
     "x-codex-turn-metadata",
+    "x-codex-parent-thread-id",
+    "x-openai-subagent",
     "x-codex-installation-id",
     "x-openai-internal-codex-responses-lite",
     "x-client-request-id",
@@ -66,8 +73,6 @@ const HTTP_HEADER_ORDER: &[&str] = &[
     "originator",
     "user-agent",
     "openai-beta",
-    "x-codex-turn-state",
-    "x-codex-parent-thread-id",
     "session_id",
     "conversation_id",
     "openai-organization",
@@ -89,6 +94,8 @@ const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
     "originator",
     "openai-beta",
     "x-codex-turn-metadata",
+    "x-openai-subagent",
+    CODEX_VERSION_HEADER,
     "x-codex-installation-id",
     "x-codex-beta-features",
     "x-client-request-id",
@@ -97,6 +104,38 @@ const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
     "x-codex-window-id",
     "x-codex-turn-state",
     "x-codex-parent-thread-id",
+    "x-openai-internal-codex-responses-lite",
+    "session_id",
+    "conversation_id",
+    "openai-organization",
+    "openai-project",
+    "x-stainless-arch",
+    "x-stainless-lang",
+    "x-stainless-os",
+    "x-stainless-package-version",
+    "x-stainless-retry-count",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+    "x-stainless-timeout",
+];
+
+const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
+    "authorization",
+    "chatgpt-account-id",
+    "user-agent",
+    "originator",
+    "openai-beta",
+    "x-openai-subagent",
+    CODEX_VERSION_HEADER,
+    "x-codex-installation-id",
+    "x-codex-beta-features",
+    "x-client-request-id",
+    "session-id",
+    "thread-id",
+    "x-codex-window-id",
+    "x-codex-turn-metadata",
+    "x-codex-parent-thread-id",
+    "x-codex-turn-state",
     "x-openai-internal-codex-responses-lite",
     "session_id",
     "conversation_id",
@@ -185,7 +224,12 @@ fn ordered_headers(source: &HeaderMap, order: &[&'static str]) -> HeaderMap {
 }
 
 fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
-    let desired = WEBSOCKET_WIRE_HEADER_ORDER
+    let order = if source.contains_key("x-openai-subagent") {
+        WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER
+    } else {
+        WEBSOCKET_WIRE_HEADER_ORDER
+    };
+    let desired = order
         .iter()
         .filter_map(|name| {
             source
@@ -215,6 +259,10 @@ fn authenticated_headers(
             if !headers.contains_key("originator") {
                 headers.insert("originator", HeaderValue::from_static("mini_sub2api"));
             }
+            headers.insert(
+                CODEX_VERSION_HEADER,
+                HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
+            );
             pin_codex_user_agent(&mut headers)?;
             token
         }
