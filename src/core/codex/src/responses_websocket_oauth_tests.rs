@@ -274,7 +274,10 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     )
     .expect("handshake turn metadata JSON");
     assert!(header_turn["installation_id"].as_str() == Some(expected_device.as_str()));
-    assert_eq!(header_turn["session_id"], "session-kept");
+    assert_eq!(header_turn, turn_metadata);
+    assert_ne!(header_turn["session_id"], "session-kept");
+    assert_eq!(header_turn["thread_id"], "thread-kept");
+    assert_eq!(header_turn["request_kind"], "prewarm");
     let fingerprint_after_refresh = vault_after_refresh
         .fingerprint_snapshot(&metadata.account_ref)
         .await
