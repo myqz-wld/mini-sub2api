@@ -29,7 +29,7 @@ async fn explicit_off_mode_persists_only_mode_and_revision() {
     .expect("sidecar");
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&sidecar).expect("sidecar JSON"),
-        serde_json::json!({"version": 2, "revision": 1, "mode": "off"})
+        serde_json::json!({"version": 1, "revision": 1, "mode": "off"})
     );
 }
 
@@ -97,18 +97,24 @@ async fn old_corrupt_or_semantically_invalid_sidecar_fails_closed() {
         }))
         .expect("old schema fixture"),
         serde_json::to_vec(&serde_json::json!({
-            "version": 2,
+            "version": 1,
             "revision": 0,
             "mode": "device"
         }))
         .expect("invalid revision fixture"),
         serde_json::to_vec(&serde_json::json!({
-            "version": 2,
+            "version": 1,
             "revision": 1,
             "mode": "device",
             "installationId": "state-must-not-return"
         }))
         .expect("unexpected field fixture"),
+        serde_json::to_vec(&serde_json::json!({
+            "version": 2,
+            "revision": 1,
+            "mode": "device"
+        }))
+        .expect("unsupported version fixture"),
     ] {
         std::fs::write(&sidecar, &invalid).expect("write invalid sidecar");
         assert!(vault.lock_record(&metadata.account_ref).await.is_err());
@@ -162,7 +168,7 @@ async fn revision_overflow_fails_without_changing_sidecar() {
         .expect("create key");
     let sidecar = fingerprint::sidecar_path(&vault.accounts_dir, &metadata.account_ref);
     let exhausted = serde_json::to_vec(&serde_json::json!({
-        "version": 2,
+        "version": 1,
         "revision": u64::MAX,
         "mode": "device"
     }))
