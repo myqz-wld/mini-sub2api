@@ -9,6 +9,7 @@ import (
 
 	"mini-sub2api/src/coordinator/internal/adapter"
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 type websocketCore interface {
@@ -102,7 +103,10 @@ func (h *Handler) writeWebSocketDialError(
 			if coreError.Code == "credential_requires_login" {
 				_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
 			}
-			writeOpenAIError(writer, response.StatusCode, coreError.Code, coreError.Message, connectionID)
+			writeOpenAIErrorWithFailure(
+				writer, response.StatusCode, coreError.Code, coreError.Message, connectionID,
+				coreError.FailureMetadata,
+			)
 			return
 		}
 		writeWebSocketHandshakeRejection(writer, response, connectionID)
@@ -112,5 +116,10 @@ func (h *Handler) writeWebSocketDialError(
 	if errors.Is(err, adapter.ErrUnavailable) {
 		status = http.StatusServiceUnavailable
 	}
-	writeOpenAIError(writer, status, "upstream_unavailable", "The upstream service is unavailable.", connectionID)
+	failure := publicFailure("adapter_unavailable")
+	failure.Phase = protocolv1.PhaseUpstreamConnect
+	writeOpenAIErrorWithFailure(
+		writer, status, "upstream_unavailable", "The upstream service is unavailable.", connectionID,
+		failure,
+	)
 }

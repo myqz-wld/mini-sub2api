@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 func TestWebSocketFirstFrameAndInterTurnTimeoutsAreCoordinatorOwned(t *testing.T) {
@@ -113,13 +114,22 @@ func TestWebSocketShutdownFinalizesActiveTurnAsUpstreamError(t *testing.T) {
 	}
 }
 
-func TestWebSocketCoreCloseAndMalformedEventAreUpstreamErrors(t *testing.T) {
+func TestWebSocketFailureCloseTracksDeliveryState(t *testing.T) {
 	for _, test := range []struct {
-		name      string
-		malformed bool
+		name          string
+		idle          bool
+		malformed     bool
+		invalidClose  bool
+		structured    bool
+		retryAdvice   protocolv1.RetryAdvice
+		phase         protocolv1.FailurePhase
+		deliveryState protocolv1.DeliveryState
 	}{
-		{name: "core close"},
-		{name: "malformed event", malformed: true},
+		{name: "idle core close", idle: true, retryAdvice: protocolv1.RetrySafe, phase: protocolv1.PhaseWebSocketRelay, deliveryState: protocolv1.DeliveryNotDelivered},
+		{name: "core close after dispatch", retryAdvice: protocolv1.RetryAmbiguous, phase: protocolv1.PhaseWebSocketRelay, deliveryState: protocolv1.DeliveryPossiblyDelivered},
+		{name: "structured core failure", structured: true, retryAdvice: protocolv1.RetrySafe, phase: protocolv1.PhaseUpstreamConnect, deliveryState: protocolv1.DeliveryNotDelivered},
+		{name: "invalid core failure payload", invalidClose: true, retryAdvice: protocolv1.RetryAmbiguous, phase: protocolv1.PhaseWebSocketRelay, deliveryState: protocolv1.DeliveryPossiblyDelivered},
+		{name: "malformed upstream event", malformed: true, retryAdvice: protocolv1.RetryNever, phase: protocolv1.PhaseWebSocketRelay, deliveryState: protocolv1.DeliveryDelivered},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			coreServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -128,7 +138,24 @@ func TestWebSocketCoreCloseAndMalformedEventAreUpstreamErrors(t *testing.T) {
 					return
 				}
 				defer connection.CloseNow()
-				if _, _, err := connection.Read(context.Background()); err != nil {
+				if !test.idle {
+					if _, _, err := connection.Read(context.Background()); err != nil {
+						return
+					}
+				}
+				if test.invalidClose {
+					_ = connection.Close(websocket.StatusCode(protocolv1.FailureCloseCode), "not-json")
+					return
+				}
+				if test.structured {
+					reason, ok := failureCloseReason(protocolv1.FailureMetadata{
+						RetryAdvice: protocolv1.RetrySafe, Phase: protocolv1.PhaseUpstreamConnect,
+						DeliveryState: protocolv1.DeliveryNotDelivered,
+					})
+					if !ok {
+						return
+					}
+					_ = connection.Close(websocket.StatusCode(protocolv1.FailureCloseCode), reason)
 					return
 				}
 				if test.malformed {
@@ -144,16 +171,25 @@ func TestWebSocketCoreCloseAndMalformedEventAreUpstreamErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer connection.CloseNow()
-			writeWebSocketText(t, connection, `{"type":"response.create","model":"test"}`)
+			if !test.idle {
+				writeWebSocketText(t, connection, `{"type":"response.create","model":"test"}`)
+			}
 			readContext, cancelRead := context.WithTimeout(context.Background(), 2*time.Second)
 			_, _, readErr := connection.Read(readContext)
 			cancelRead()
-			if websocket.CloseStatus(readErr) != websocket.StatusServiceRestart {
+			if websocket.CloseStatus(readErr) != websocket.StatusCode(protocolv1.FailureCloseCode) {
 				t.Fatalf("public close = %v", readErr)
 			}
-			history := waitForHistory(t, store, key.ID, 1)
-			if history[0].Status != storage.RequestUpstreamErr {
-				t.Fatalf("history = %#v", history)
+			metadata, ok := parseCoreFailureClose(readErr)
+			if !ok || metadata.RetryAdvice != test.retryAdvice || metadata.Phase != test.phase ||
+				metadata.DeliveryState != test.deliveryState {
+				t.Fatalf("failure metadata = %#v, %v", metadata, readErr)
+			}
+			if !test.idle {
+				history := waitForHistory(t, store, key.ID, 1)
+				if history[0].Status != storage.RequestUpstreamErr {
+					t.Fatalf("history = %#v", history)
+				}
 			}
 		})
 	}

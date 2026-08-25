@@ -136,13 +136,21 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 			_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
 		}
 		h.finish(requestID, started, storage.RequestUpstreamErr, response.StatusCode, nil, nil, nil)
-		writeOpenAIError(writer, response.StatusCode, coreError.Code, coreError.Message, requestID)
+		writeOpenAIErrorWithFailure(
+			writer, response.StatusCode, coreError.Code, coreError.Message, requestID,
+			coreError.FailureMetadata,
+		)
 		return
 	}
 	ttfb := copyResponseHeaders(writer.Header(), response.Header)
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
+	declareFailureTrailers(writer.Header())
 	writer.WriteHeader(response.StatusCode)
 	usage, streamResult := streamBody(writer, response.Body, response.Header.Get("Content-Type"), request.Context())
+	if failure, ok := failureFromTrailers(response.Trailer); ok {
+		publishFailureTrailers(writer.Header(), failure)
+		streamResult = streamUpstreamError
+	}
 	terminal := storage.RequestCompleted
 	if response.StatusCode >= 400 || streamResult == streamUpstreamError {
 		terminal = storage.RequestUpstreamErr

@@ -123,6 +123,41 @@ fn unknown_model_uses_codex_fallback_reasoning_without_verbosity() {
 }
 
 #[test]
+fn derived_and_namespaced_models_use_catalog_profile_shape() {
+    for (model, expected_verbosity, expected_lite) in [
+        ("gpt-5.4-mini-preview", "medium", false),
+        ("vendor/gpt-5.6-sol-snapshot", "low", true),
+    ] {
+        let body = Bytes::from(
+            serde_json::to_vec(&serde_json::json!({
+                "model": model,
+                "input": "hello",
+                "tools": []
+            }))
+            .expect("request"),
+        );
+        let prepared = prepare_subscription_request(
+            &HeaderMap::new(),
+            body,
+            64 * 1024,
+            "installation-test",
+            PSEUDONYM_SCOPE,
+            "request-test",
+        )
+        .expect("normalized request");
+        let value: Value = serde_json::from_slice(&prepared.body).expect("normalized request");
+
+        assert_eq!(value["text"]["verbosity"], expected_verbosity);
+        assert_eq!(value["parallel_tool_calls"], !expected_lite);
+        assert_eq!(
+            value["input"][0]["type"] == "additional_tools",
+            expected_lite
+        );
+        assert_eq!(value["reasoning"].get("context").is_some(), expected_lite);
+    }
+}
+
+#[test]
 fn reused_lite_websocket_frame_keeps_incremental_input_without_prefix() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({

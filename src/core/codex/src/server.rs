@@ -10,6 +10,8 @@ use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
 use crate::request_normalizer::prepare_subscription_request;
 use crate::request_pseudonym::RequestPseudonymizer;
+use crate::response_stream::build_streaming_response;
+use crate::response_stream::request_expects_sse;
 use crate::responses_websocket::responses_socket;
 use crate::transport_registry::CredentialTransportContext;
 use crate::transport_registry::CredentialTransportPolicy;
@@ -27,15 +29,12 @@ use axum::body::to_bytes;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::http::HeaderName;
 use axum::http::Request;
 use axum::http::Response;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::routing::post;
-use futures_util::StreamExt;
 use mini_sub2api_protocol_v1::BuildIdentity;
-use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
 use mini_sub2api_protocol_v1::Capabilities;
 use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
 use mini_sub2api_protocol_v1::Readiness;
@@ -45,7 +44,6 @@ use mini_sub2api_protocol_v1::{ACCOUNT_REF_HEADER, PSEUDONYM_SCOPE_HEADER, VERSI
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::io::BufRead;
 use std::io::Read;
 use std::io::Write;
@@ -295,55 +293,13 @@ async fn send_upstream(
 ) -> std::result::Result<reqwest::Response, CoreFailure> {
     let client = transport.http_client_for_url(upstream_url);
     let request = build_upstream_request(client, inbound_headers, upstream_url, auth, body)?;
-    client
-        .execute(request)
-        .await
-        .map_err(|_| CoreFailure::UpstreamConnectFailed)
-}
-
-fn build_streaming_response(
-    upstream: reqwest::Response,
-    ttfb_ms: u128,
-    expects_sse: bool,
-) -> std::result::Result<Response<Body>, CoreFailure> {
-    let status = upstream.status();
-    let mut builder = Response::builder().status(status);
-    let connection_headers = nominated_connection_headers(upstream.headers());
-    let has_content_type = upstream.headers().contains_key(http::header::CONTENT_TYPE);
-    for (name, value) in upstream.headers() {
-        if is_safe_response_header(name) && !connection_headers.contains(name.as_str()) {
-            builder = builder.header(name, value);
+    client.execute(request).await.map_err(|error| {
+        if error.is_connect() {
+            CoreFailure::UpstreamConnectFailed
+        } else {
+            CoreFailure::UpstreamDeliveryUnknown
         }
-    }
-    if expects_sse && status.is_success() && !has_content_type {
-        builder = builder.header(http::header::CONTENT_TYPE, "text/event-stream");
-    }
-    builder = builder.header(CORE_TTFB_HEADER, ttfb_ms.to_string());
-    let stream = upstream
-        .bytes_stream()
-        .map(|result| result.map_err(std::io::Error::other));
-    builder
-        .body(Body::from_stream(stream))
-        .map_err(|_| CoreFailure::Internal)
-}
-
-fn request_expects_sse(body: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(body)
-        .ok()
-        .and_then(|value| value.get("stream").and_then(serde_json::Value::as_bool))
-        .unwrap_or(false)
-}
-
-fn nominated_connection_headers(headers: &HeaderMap) -> HashSet<String> {
-    headers
-        .get_all(http::header::CONNECTION)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect()
+    })
 }
 
 pub(crate) async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mutex<()>> {
@@ -352,25 +308,6 @@ pub(crate) async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mut
         locks
             .entry(account_ref.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(()))),
-    )
-}
-
-fn is_safe_response_header(name: &HeaderName) -> bool {
-    if name.as_str().starts_with("x-mini-sub2api-") {
-        return false;
-    }
-    !matches!(
-        name.as_str(),
-        "connection"
-            | "content-length"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "set-cookie"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
     )
 }
 

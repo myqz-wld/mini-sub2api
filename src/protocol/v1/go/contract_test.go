@@ -43,10 +43,28 @@ func TestErrorFixture(t *testing.T) {
 	want := ErrorEnvelope{Error: CoreError{
 		Code:      "credential_requires_login",
 		Message:   "The selected credential requires sign-in.",
-		Retryable: false,
 		RequestID: "req_01JEXAMPLE",
+		FailureMetadata: FailureMetadata{
+			RetryAdvice: RetryNever, Phase: PhaseCredential,
+			DeliveryState: DeliveryNotDelivered,
+		},
 	}}
 	if got != want {
 		t.Fatalf("error mismatch: got %#v want %#v", got, want)
+	}
+	if !got.Error.FailureMetadata.Valid() {
+		t.Fatal("fixture failure metadata is invalid")
+	}
+}
+
+func TestRetryAdviceRequiresCoherentDeliveryState(t *testing.T) {
+	for _, metadata := range []FailureMetadata{
+		{RetryAdvice: RetrySafe, Phase: PhaseUpstreamRequest, DeliveryState: DeliveryPossiblyDelivered},
+		{RetryAdvice: RetryAmbiguous, Phase: PhaseUpstreamRequest, DeliveryState: DeliveryDelivered},
+		{RetryAdvice: RetryNever, Phase: PhaseUpstreamRequest, DeliveryState: DeliveryPossiblyDelivered},
+	} {
+		if metadata.Valid() {
+			t.Fatalf("accepted inconsistent metadata: %#v", metadata)
+		}
 	}
 }
