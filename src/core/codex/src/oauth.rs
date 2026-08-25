@@ -282,11 +282,15 @@ fn jwt_claims(token: &str) -> Result<Value> {
 }
 
 fn codex_auth_request(request: RequestBuilder) -> RequestBuilder {
-    let originator = crate::upstream_request::DEFAULT_CODEX_ORIGINATOR;
-    request.header("originator", originator).header(
-        http::header::USER_AGENT,
-        crate::codex_user_agent::for_originator(originator),
-    )
+    request
+        .header(
+            "originator",
+            crate::upstream_request::DEFAULT_CODEX_ORIGINATOR,
+        )
+        .header(
+            http::header::USER_AGENT,
+            crate::codex_user_agent::canonical_value(),
+        )
 }
 
 fn is_permanent_refresh_error(status: StatusCode, body: &str) -> bool {

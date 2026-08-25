@@ -4,6 +4,7 @@ use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
 use crate::request_normalizer::prepare_websocket_subscription_request;
+use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket_deferred::DeferredOAuthContext;
 use crate::server::AppState;
 use crate::server::account_lock;
@@ -78,16 +79,20 @@ async fn responses_socket_inner(
     let _guard = account_lock.lock().await;
     let resolved = resolve_auth(&state, &identity.account_ref, None).await?;
     drop(_guard);
-    if matches!(resolved.auth, ResolvedAuth::CodexOAuth { .. }) {
+    if let ResolvedAuth::CodexOAuth { account_id, .. } = &resolved.auth {
+        let account_namespace = account_id.clone();
+        let installation_id = RequestPseudonymizer::converged_installation_id(&account_namespace);
         let mut upstream_headers = headers;
         if resolved.fingerprint.mode() == FingerprintMode::Device {
-            project_device_headers(&mut upstream_headers, &resolved.fingerprint)
+            project_device_headers(&mut upstream_headers, &installation_id)
                 .map_err(|_| CoreFailure::InvalidRequest)?;
         }
         let context = DeferredOAuthContext {
             state,
             headers: upstream_headers,
             account_ref: identity.account_ref,
+            account_namespace,
+            pseudonym_scope: identity.pseudonym_scope,
             request_id: identity.request_id,
             resolved,
         };
@@ -100,11 +105,7 @@ async fn responses_socket_inner(
             .into_response());
     }
     let fingerprint = resolved.fingerprint.clone();
-    let mut upstream_headers = headers;
-    if fingerprint.mode() == FingerprintMode::Device {
-        project_device_headers(&mut upstream_headers, &fingerprint)
-            .map_err(|_| CoreFailure::InvalidRequest)?;
-    }
+    let upstream_headers = headers;
 
     let started = Instant::now();
     let handshake = send_handshake(
@@ -128,6 +129,8 @@ async fn responses_socket_inner(
     let relay_context = RelayContext {
         headers: upstream_headers,
         account_ref,
+        account_namespace: None,
+        pseudonym_scope: identity.pseudonym_scope,
         request_id,
         normalize_subscription: false,
         vault: state.vault.clone(),
@@ -195,6 +198,8 @@ async fn rejection_response(handshake: WebSocketHandshake) -> Response<Body> {
 pub(crate) struct RelayContext {
     pub(crate) headers: HeaderMap,
     pub(crate) account_ref: String,
+    pub(crate) account_namespace: Option<String>,
+    pub(crate) pseudonym_scope: String,
     pub(crate) request_id: String,
     pub(crate) normalize_subscription: bool,
     pub(crate) vault: Vault,
@@ -211,6 +216,8 @@ pub(crate) async fn relay(
     let RelayContext {
         headers,
         account_ref,
+        account_namespace,
+        pseudonym_scope,
         request_id,
         normalize_subscription,
         vault,
@@ -247,9 +254,13 @@ pub(crate) async fn relay(
                         match prepare_client_text(
                             text,
                             &headers,
-                            &account_ref,
+                            if normalize_subscription {
+                                account_namespace.as_deref()
+                            } else {
+                                None
+                            },
+                            &pseudonym_scope,
                             &request_id,
-                            normalize_subscription,
                             &fingerprint,
                             &mut create_sequence,
                         ) {
@@ -337,9 +348,7 @@ pub(crate) async fn fingerprint_is_current(
     let Ok(current) = vault.fingerprint_snapshot(account_ref).await else {
         return false;
     };
-    current.revision() == captured.revision()
-        && current.mode() == captured.mode()
-        && current.installation_id() == captured.installation_id()
+    current.revision() == captured.revision() && current.mode() == captured.mode()
 }
 
 pub(crate) fn is_response_create(text: &str) -> Result<bool, ()> {
@@ -356,9 +365,9 @@ pub(crate) fn is_response_create(text: &str) -> Result<bool, ()> {
 fn prepare_client_text(
     text: String,
     headers: &HeaderMap,
-    _account_ref: &str,
+    account_namespace: Option<&str>,
+    pseudonym_scope: &str,
     request_id: &str,
-    normalize_subscription: bool,
     fingerprint: &FingerprintSnapshot,
     create_sequence: &mut u64,
 ) -> Result<String, ()> {
@@ -372,22 +381,32 @@ fn prepare_client_text(
     if message_type != "response.create" {
         return Ok(text);
     }
-    let prepared = if normalize_subscription {
+    let prepared = if let Some(account_namespace) = account_namespace {
         *create_sequence = create_sequence.saturating_add(1);
         let frame_request_id = format!("{request_id}-ws-{create_sequence}");
         let prepared = prepare_websocket_subscription_request(
             headers,
             Bytes::from(text),
             MAX_WEBSOCKET_MESSAGE_BYTES,
-            fingerprint.installation_id(),
+            account_namespace,
+            pseudonym_scope,
             &frame_request_id,
-        );
+        )?;
         String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?
     } else {
         text
     };
-    if fingerprint.mode() == FingerprintMode::Device {
-        project_websocket_device(prepared, fingerprint, MAX_WEBSOCKET_MESSAGE_BYTES).map_err(|_| ())
+    if fingerprint.mode() == FingerprintMode::Device
+        && let Some(account_namespace) = account_namespace
+    {
+        let installation_id = RequestPseudonymizer::converged_installation_id(account_namespace);
+        project_websocket_device(
+            prepared,
+            fingerprint,
+            &installation_id,
+            MAX_WEBSOCKET_MESSAGE_BYTES,
+        )
+        .map_err(|_| ())
     } else {
         Ok(prepared)
     }

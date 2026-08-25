@@ -113,13 +113,8 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
         .await
         .expect("OAuth record");
     let state = app_state(vault);
-    let expected_device = state
-        .vault
-        .fingerprint_snapshot(&metadata.account_ref)
-        .await
-        .expect("fingerprint")
-        .installation_id()
-        .to_string();
+    let expected_device =
+        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let mut request_headers = HeaderMap::new();
     request_headers.insert(
         "x-codex-inference-call-id",

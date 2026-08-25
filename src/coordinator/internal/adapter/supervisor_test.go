@@ -49,7 +49,8 @@ func TestSupervisorStartsAndForwardsWithoutSecretInProcessMetadata(t *testing.T)
 		"X-Forwarded-For":    []string{"203.0.113.1"},
 	}
 	response, err := supervisor.Forward(
-		context.Background(), "acct_test", "req_test", headers, []byte(`{"stream":true}`),
+		context.Background(), "acct_test", "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+		"req_test", headers, []byte(`{"stream":true}`),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +78,8 @@ func TestSupervisorDialsAuthenticatedUncompressedWebSocket(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = supervisor.Close() })
 	connection, response, err := supervisor.DialWebSocket(
-		context.Background(), "acct_ws_test", "req_ws_test",
+		context.Background(), "acct_ws_test",
+		"psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "req_ws_test",
 		http.Header{
 			"User-Agent":      []string{"codex_exec/test"},
 			"X-Forwarded-For": []string{"203.0.113.30"},
@@ -120,7 +122,8 @@ func TestSupervisorRestartsAfterCoreExit(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		response, err := supervisor.Forward(
-			context.Background(), "acct_restart", "req_restart", nil, []byte(`{}`),
+			context.Background(), "acct_restart",
+			"psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "req_restart", nil, []byte(`{}`),
 		)
 		if err == nil {
 			response.Body.Close()

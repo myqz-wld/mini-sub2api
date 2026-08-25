@@ -96,13 +96,13 @@ func TestWebSocketHandshakeDialsCoreFirstAndTerminatesCompressionPublicly(t *tes
 type rejectingWebSocketCore struct{}
 
 func (*rejectingWebSocketCore) Forward(
-	context.Context, string, string, http.Header, []byte,
+	context.Context, string, string, string, http.Header, []byte,
 ) (*http.Response, error) {
 	return nil, errors.New("HTTP forwarding is not expected")
 }
 
 func (*rejectingWebSocketCore) DialWebSocket(
-	context.Context, string, string, http.Header,
+	context.Context, string, string, string, http.Header,
 ) (*websocket.Conn, *http.Response, error) {
 	return nil, &http.Response{
 		StatusCode: http.StatusUpgradeRequired,

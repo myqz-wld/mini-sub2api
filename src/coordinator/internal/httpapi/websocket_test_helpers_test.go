@@ -26,6 +26,7 @@ func (*loopbackWebSocketCore) Forward(
 	context.Context,
 	string,
 	string,
+	string,
 	http.Header,
 	[]byte,
 ) (*http.Response, error) {
@@ -34,7 +35,7 @@ func (*loopbackWebSocketCore) Forward(
 
 func (c *loopbackWebSocketCore) DialWebSocket(
 	ctx context.Context,
-	_, _ string,
+	_, _, _ string,
 	headers http.Header,
 ) (*websocket.Conn, *http.Response, error) {
 	c.mu.Lock()
@@ -55,6 +56,7 @@ func (*countingWebSocketCore) Forward(
 	context.Context,
 	string,
 	string,
+	string,
 	http.Header,
 	[]byte,
 ) (*http.Response, error) {
@@ -63,6 +65,7 @@ func (*countingWebSocketCore) Forward(
 
 func (c *countingWebSocketCore) DialWebSocket(
 	context.Context,
+	string,
 	string,
 	string,
 	http.Header,

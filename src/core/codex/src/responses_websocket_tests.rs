@@ -22,10 +22,11 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 const INTERNAL_TOKEN: &str = "internal-websocket-test-token-at-least-32-bytes";
-const TEST_DEVICE_ID: &str = "11111111-1111-4111-8111-111111111111";
+const ACCOUNT_NAMESPACE: &str = "chatgpt-account-test";
+const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 fn device_fingerprint() -> FingerprintSnapshot {
-    FingerprintSnapshot::for_test(FingerprintMode::Device, 1, TEST_DEVICE_ID)
+    FingerprintSnapshot::for_test(FingerprintMode::Device, 1)
 }
 
 #[test]
@@ -52,9 +53,9 @@ fn api_key_create_frame_is_byte_exact() {
     let got = prepare_client_text(
         original.clone(),
         &HeaderMap::new(),
-        "acct_test",
+        None,
+        PSEUDONYM_SCOPE,
         "req_test",
-        false,
         &device_fingerprint(),
         &mut sequence,
     )
@@ -79,9 +80,9 @@ fn subscription_create_normalization_preserves_websocket_fields() {
     let got = prepare_client_text(
         original,
         &HeaderMap::new(),
-        "acct_test",
+        Some(ACCOUNT_NAMESPACE),
+        PSEUDONYM_SCOPE,
         "req_test",
-        true,
         &device_fingerprint(),
         &mut sequence,
     )
@@ -104,9 +105,9 @@ fn valid_non_create_application_event_is_byte_exact() {
     let got = prepare_client_text(
         original.clone(),
         &HeaderMap::new(),
-        "acct_test",
+        Some(ACCOUNT_NAMESPACE),
+        PSEUDONYM_SCOPE,
         "req_test",
-        true,
         &device_fingerprint(),
         &mut sequence,
     )
@@ -122,9 +123,9 @@ fn malformed_or_untyped_application_frames_are_rejected() {
             prepare_client_text(
                 frame.to_string(),
                 &HeaderMap::new(),
-                "acct_test",
+                None,
+                PSEUDONYM_SCOPE,
                 "req_test",
-                false,
                 &device_fingerprint(),
                 &mut 0,
             )
@@ -440,6 +441,10 @@ fn internal_handshake(base_url: &str, account_ref: &str) -> reqwest::RequestBuil
             mini_sub2api_protocol_v1::VERSION,
         )
         .header(mini_sub2api_protocol_v1::ACCOUNT_REF_HEADER, account_ref)
+        .header(
+            mini_sub2api_protocol_v1::PSEUDONYM_SCOPE_HEADER,
+            PSEUDONYM_SCOPE,
+        )
         .header(mini_sub2api_protocol_v1::REQUEST_ID_HEADER, "req_ws_test")
 }
 

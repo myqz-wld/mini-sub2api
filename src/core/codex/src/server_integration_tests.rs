@@ -143,6 +143,7 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
         assert_eq!(header_text(&headers, name).as_deref(), Some(expected));
     }
     assert!(!headers.contains_key(ACCOUNT_REF_HEADER));
+    assert!(!headers.contains_key(PSEUDONYM_SCOPE_HEADER));
     assert!(!headers.contains_key("x-forwarded-for"));
     assert!(!headers.contains_key("x-stainless-unreviewed"));
 }
@@ -234,13 +235,8 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     }
 
     let state = app_state(vault);
-    let expected_device = state
-        .vault
-        .fingerprint_snapshot(&metadata.account_ref)
-        .await
-        .expect("fingerprint")
-        .installation_id()
-        .to_string();
+    let expected_device =
+        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let response = call_core_with_headers(&state, &metadata.account_ref, body, extra_headers)
         .await
         .expect("core response");
@@ -274,10 +270,21 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     )
     .expect("body turn JSON");
     assert!(body_turn["installation_id"].as_str() == Some(expected_device.as_str()));
-    assert_eq!(body_turn["session_id"], "body-session-kept");
-    assert_eq!(body_turn["thread_id"], "body-thread-kept");
-    assert_eq!(body_turn["turn_id"], "body-turn-kept");
-    assert_eq!(body_turn["window_id"], "body-window-kept");
+    for (name, raw) in [
+        ("session_id", "body-session-kept"),
+        ("thread_id", "body-thread-kept"),
+        ("turn_id", "body-turn-kept"),
+        ("window_id", "body-window-kept"),
+    ] {
+        let pseudonym = body_turn[name].as_str().expect("pseudonym");
+        assert_ne!(pseudonym, raw);
+        assert_eq!(
+            uuid::Uuid::parse_str(pseudonym)
+                .expect("pseudonym UUID")
+                .get_version_num(),
+            8
+        );
+    }
     assert_eq!(body_turn["future"]["kept"], true);
     let captured_headers = capture.headers.lock().await.clone().expect("headers");
     assert_eq!(
@@ -288,9 +295,9 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         header_text(&captured_headers, "chatgpt-account-id").as_deref(),
         Some(account_id)
     );
-    assert!(
-        header_text(&captured_headers, http::header::USER_AGENT.as_str())
-            .is_some_and(|value| value.starts_with("codex_exec/0.149.0 ("))
+    assert_eq!(
+        header_text(&captured_headers, http::header::USER_AGENT.as_str()).as_deref(),
+        Some(crate::codex_user_agent::canonical_value().as_str())
     );
     assert!(!captured_headers.contains_key("x-codex-installation-id"));
     assert_eq!(
@@ -308,12 +315,10 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     )
     .expect("header turn JSON");
     assert!(header_turn["installation_id"].as_str() == Some(expected_device.as_str()));
-    assert_eq!(header_turn["session_id"], "header-session-kept");
+    assert_ne!(header_turn["session_id"], "header-session-kept");
     assert_eq!(header_turn["future"], 1);
     for (name, expected) in [
-        ("originator", "codex_exec"),
-        ("session-id", "session-test"),
-        ("thread-id", "thread-test"),
+        ("originator", "codex_cli_rs"),
         ("x-openai-internal-codex-responses-lite", "true"),
     ] {
         assert_eq!(
@@ -321,7 +326,18 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
             Some(expected)
         );
     }
+    for (name, raw) in [("session-id", "session-test"), ("thread-id", "thread-test")] {
+        let pseudonym = header_text(&captured_headers, name).expect("identity header");
+        assert_ne!(pseudonym, raw);
+        assert_eq!(
+            uuid::Uuid::parse_str(&pseudonym)
+                .expect("pseudonym UUID")
+                .get_version_num(),
+            8
+        );
+    }
     for name in ["openai-organization", "openai-project", "x-stainless-lang"] {
         assert!(!captured_headers.contains_key(name), "header {name}");
     }
+    assert!(!captured_headers.contains_key(PSEUDONYM_SCOPE_HEADER));
 }

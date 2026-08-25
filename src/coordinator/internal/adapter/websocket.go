@@ -26,7 +26,7 @@ var internalWebSocketHTTPClient = &http.Client{
 
 func (s *Supervisor) DialWebSocket(
 	ctx context.Context,
-	accountRef, requestID string,
+	accountRef, pseudonymScope, requestID string,
 	headers http.Header,
 ) (*websocket.Conn, *http.Response, error) {
 	core, err := s.snapshot()
@@ -41,6 +41,7 @@ func (s *Supervisor) DialWebSocket(
 	requestHeaders.Set("Authorization", "Bearer "+core.token)
 	requestHeaders.Set(protocolv1.VersionHeader, protocolv1.Version)
 	requestHeaders.Set(protocolv1.AccountRefHeader, accountRef)
+	requestHeaders.Set(protocolv1.PseudonymScopeHeader, pseudonymScope)
 	requestHeaders.Set(protocolv1.RequestIDHeader, requestID)
 	connection, response, err := websocket.Dial(
 		ctx,

@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +15,8 @@ import (
 	"mini-sub2api/src/coordinator/internal/httpapi"
 	"mini-sub2api/src/coordinator/internal/storage"
 )
+
+const canonicalSubscriptionUserAgent = "codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color"
 
 type routingMatrixCapture struct {
 	Headers http.Header
@@ -258,10 +259,10 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertSubscriptionCapture(t, capture, oauthAccessToken, accountID)
 				assertNativeSubscriptionBody(t, capture.Body, messages)
-				if capture.Headers.Get("Originator") != "codex_exec" ||
-					capture.Headers.Get("Session-Id") != "oauth-session" ||
+				if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+					!isUUIDv8(capture.Headers.Get("Session-Id")) ||
 					capture.Headers.Get("X-Openai-Subagent") != "review" ||
-					capture.Headers.Get("User-Agent") != "codex_cli_rs/0.149.0 routing-matrix" {
+					capture.Headers.Get("User-Agent") != canonicalSubscriptionUserAgent {
 					t.Fatalf("native subscription headers = %#v", capture.Headers)
 				}
 			},
@@ -339,10 +340,9 @@ func assertSubscriptionCapture(
 		capture.Headers.Get("ChatGPT-Account-ID") != wantAccountID {
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
-	userAgent := capture.Headers.Get("User-Agent")
-	if capture.Headers.Get("Originator") == "" || capture.Headers.Get("Version") != "0.149.0" ||
-		userAgent != "codex_cli_rs/0.149.0 routing-matrix" &&
-			!strings.HasPrefix(userAgent, "codex_cli_rs/0.149.0 (") {
+	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+		capture.Headers.Get("Version") != "0.149.0" ||
+		capture.Headers.Get("User-Agent") != canonicalSubscriptionUserAgent {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("OpenAI-Organization") != "" ||
@@ -417,15 +417,32 @@ func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	assertMessageSemantics(t, input, messages)
 	if value["model"] != "gpt-5.4" || value["instructions"] != "Continue the existing turn." ||
 		value["store"] != false || value["stream"] != true || value["tool_choice"] != "auto" ||
-		value["parallel_tool_calls"] != true || value["prompt_cache_key"] != "oauth-codex-session" {
+		value["parallel_tool_calls"] != true || !isUUIDv8(value["prompt_cache_key"]) {
 		t.Fatalf("native subscription controls = %#v", value)
 	}
 	metadata, ok := value["client_metadata"].(map[string]any)
-	if !ok || metadata["session_id"] != "oauth-codex-session" ||
-		metadata["thread_id"] != "oauth-codex-thread" || metadata["turn_id"] != "oauth-codex-turn" ||
-		metadata["x-codex-installation-id"] == "" || metadata["x-codex-turn-metadata"] == "" {
+	if !ok || !isUUIDv8(metadata["session_id"]) || !isUUIDv8(metadata["thread_id"]) ||
+		!isUUIDv8(metadata["turn_id"]) || !isUUIDv8(metadata["x-codex-installation-id"]) ||
+		metadata["x-codex-turn-metadata"] == "" {
 		t.Fatalf("native subscription metadata = %#v", value["client_metadata"])
 	}
+}
+
+func isUUIDv8(value any) bool {
+	text, ok := value.(string)
+	if !ok || len(text) != 36 || text[8] != '-' || text[13] != '-' || text[14] != '8' ||
+		text[18] != '-' || text[23] != '-' {
+		return false
+	}
+	for index, character := range text {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			continue
+		}
+		if !(character >= '0' && character <= '9') && !(character >= 'a' && character <= 'f') {
+			return false
+		}
+	}
+	return text[19] == '8' || text[19] == '9' || text[19] == 'a' || text[19] == 'b'
 }
 
 func assertNormalizedMessages(t *testing.T, got, want []any) {

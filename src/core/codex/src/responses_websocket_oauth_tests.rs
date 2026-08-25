@@ -19,7 +19,7 @@ struct OAuthWebSocketState {
 }
 
 #[tokio::test]
-async fn oauth_preserves_native_prewarm_frame_and_deferred_metadata_bytes() {
+async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
     let account_id = "chatgpt-native-prewarm-test";
     let state = OAuthWebSocketState {
         old_access: test_jwt(None, 3600),
@@ -52,12 +52,8 @@ async fn oauth_preserves_native_prewarm_frame_and_deferred_metadata_bytes() {
         )
         .await
         .expect("OAuth record");
-    let installation_id = vault
-        .fingerprint_snapshot(&metadata.account_ref)
-        .await
-        .expect("fingerprint")
-        .installation_id()
-        .to_string();
+    let installation_id =
+        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let core = spawn_internal(app_state(vault)).await;
     let handshake = internal_handshake(&core.base_url, &metadata.account_ref)
         .upgrade()
@@ -87,7 +83,29 @@ async fn oauth_preserves_native_prewarm_frame_and_deferred_metadata_bytes() {
 
     assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 1);
     assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 0);
-    assert_eq!(state.frames.lock().await.as_slice(), [frame]);
+    let frames = state.frames.lock().await;
+    assert_eq!(frames.len(), 1);
+    assert_ne!(frames[0], frame);
+    let projected: Value = serde_json::from_str(&frames[0]).expect("projected frame");
+    let metadata = &projected["client_metadata"];
+    assert_ne!(metadata["session_id"], "session-native");
+    assert_ne!(metadata["thread_id"], "thread-native");
+    assert_eq!(metadata["turn_id"], "");
+    assert_eq!(metadata["x-codex-installation-id"], installation_id);
+    assert_eq!(
+        metadata["x-codex-ws-stream-request-start-ms"],
+        "1700000000123"
+    );
+    let projected_turn: Value = serde_json::from_str(
+        metadata["x-codex-turn-metadata"]
+            .as_str()
+            .expect("projected turn metadata"),
+    )
+    .expect("projected turn metadata JSON");
+    assert_eq!(projected_turn["session_id"], metadata["session_id"]);
+    assert_eq!(projected_turn["thread_id"], metadata["thread_id"]);
+    assert_eq!(projected_turn["turn_id"], "");
+    drop(frames);
     let headers = state.headers.lock().await;
     assert_eq!(
         header_text(
@@ -95,7 +113,7 @@ async fn oauth_preserves_native_prewarm_frame_and_deferred_metadata_bytes() {
             "x-codex-turn-metadata"
         )
         .as_deref(),
-        Some(turn_metadata.as_str())
+        metadata["x-codex-turn-metadata"].as_str()
     );
 }
 
@@ -146,12 +164,8 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         )
         .await
         .expect("OAuth record");
-    let expected_device = vault
-        .fingerprint_snapshot(&metadata.account_ref)
-        .await
-        .expect("fingerprint")
-        .installation_id()
-        .to_string();
+    let expected_device =
+        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let vault_after_refresh = vault.clone();
     let core = spawn_internal(app_state(vault)).await;
 
@@ -268,7 +282,14 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     )
     .expect("turn metadata JSON");
     assert!(turn_metadata["installation_id"].as_str() == Some(expected_device.as_str()));
-    assert_eq!(turn_metadata["thread_id"], "thread-kept");
+    let thread_id = turn_metadata["thread_id"].as_str().expect("thread id");
+    assert_ne!(thread_id, "thread-kept");
+    assert_eq!(
+        uuid::Uuid::parse_str(thread_id)
+            .expect("thread pseudonym")
+            .get_version_num(),
+        8
+    );
     assert_eq!(turn_metadata["request_kind"], "prewarm");
     assert_eq!(turn_metadata["agent_name"], "/root");
     let turn_id = turn_metadata["turn_id"].as_str().expect("turn id");
@@ -320,7 +341,11 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     );
     assert_eq!(
         header_text(&headers, http::header::USER_AGENT.as_str()).as_deref(),
-        Some("codex_exec/0.149.0 (Mac OS test; arm64)")
+        Some(crate::codex_user_agent::canonical_value().as_str())
+    );
+    assert_eq!(
+        header_text(&headers, "originator").as_deref(),
+        Some(crate::upstream_request::DEFAULT_CODEX_ORIGINATOR)
     );
     assert_eq!(
         header_text(&headers, crate::upstream_request::CODEX_VERSION_HEADER).as_deref(),
@@ -344,6 +369,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         Some("model=gpt-5.6-sol;tier=priority")
     );
     assert!(!headers.contains_key("x-openai-internal-codex-responses-lite"));
+    assert!(!headers.contains_key(mini_sub2api_protocol_v1::PSEUDONYM_SCOPE_HEADER));
     assert_eq!(
         header_text(&headers, "x-client-request-id"),
         header_text(&headers, "thread-id")
@@ -357,13 +383,14 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert!(header_turn["installation_id"].as_str() == Some(expected_device.as_str()));
     assert_eq!(header_turn, turn_metadata);
     assert_ne!(header_turn["session_id"], "session-kept");
-    assert_eq!(header_turn["thread_id"], "thread-kept");
+    assert_eq!(header_turn["thread_id"], thread_id);
     assert_eq!(header_turn["request_kind"], "prewarm");
     let fingerprint_after_refresh = vault_after_refresh
         .fingerprint_snapshot(&metadata.account_ref)
         .await
         .expect("fingerprint after refresh");
-    assert!(fingerprint_after_refresh.installation_id() == expected_device.as_str());
+    assert_eq!(fingerprint_after_refresh.mode(), FingerprintMode::Device);
+    assert_eq!(fingerprint_after_refresh.revision(), 1);
     for forbidden in ["openai-organization", "x-stainless-lang"] {
         assert!(!headers.contains_key(forbidden), "header {forbidden}");
     }

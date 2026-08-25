@@ -14,10 +14,10 @@ clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
 flate2 = { version = "=1.1.8", default-features = false, features = ["zlib-rs"] }
 futures-util = "=0.3.32"
+hmac = "=0.12.1"
 http = "=1.4.0"
 hyper-util = { version = "=0.1.20", features = ["client-proxy", "client-proxy-system"] }
 mini-sub2api-protocol-v1 = { path = "../../protocol/v1/rust" }
-os_info = "=3.14.0"
 rand = "=0.9.3"
 reqwest = { version = "=0.12.28", features = ["cookies", "json", "rustls-tls-native-roots-no-provider", "stream"] }
 rustls = { version = "=0.23.36", default-features = false, features = ["aws_lc_rs", "prefer-post-quantum", "std", "tls12"] }

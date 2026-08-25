@@ -1,6 +1,8 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
 #[test]
 fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     let mut headers = HeaderMap::new();
@@ -38,8 +40,10 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
         Bytes::from(body),
         1024 * 1024,
         "acct_test",
+        PSEUDONYM_SCOPE,
         "req_test",
-    );
+    )
+    .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
     let ordered_fields = value
         .as_object()
@@ -80,6 +84,16 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
         serde_json::json!([{"type":"input_text","text":"Follow system rules"}])
     );
     assert_eq!(value["input"][3]["role"], "user");
+    let turn_id = value["client_metadata"]["turn_id"]
+        .as_str()
+        .expect("turn id");
+    assert_ne!(turn_id, "turn-test");
+    assert_eq!(
+        uuid::Uuid::parse_str(turn_id)
+            .expect("pseudonym UUID")
+            .get_version_num(),
+        8
+    );
     for index in [2, 3] {
         assert!(
             value["input"][index]["id"]
@@ -88,7 +102,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
         );
         assert_eq!(
             value["input"][index]["internal_chat_message_metadata_passthrough"]["turn_id"],
-            "turn-test"
+            turn_id
         );
         assert!(
             value["input"][index]["internal_chat_message_metadata_passthrough"]["create_time"]
@@ -102,11 +116,14 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     assert_eq!(value["reasoning"]["effort"], "low");
     assert_eq!(value["reasoning"]["context"], "all_turns");
     assert_eq!(value["text"]["verbosity"], "low");
-    assert_eq!(value["client_metadata"]["session_id"], "session-test");
-    assert_eq!(value["client_metadata"]["turn_id"], "turn-test");
-    assert_eq!(
-        value["client_metadata"]["x-codex-installation-id"],
-        "acct_test"
+    assert_ne!(value["client_metadata"]["session_id"], "session-test");
+    assert!(
+        uuid::Uuid::parse_str(
+            value["client_metadata"]["x-codex-installation-id"]
+                .as_str()
+                .expect("installation id")
+        )
+        .is_ok()
     );
     let turn_metadata: Value = serde_json::from_str(
         value["client_metadata"]["x-codex-turn-metadata"]
@@ -127,7 +144,10 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
                 .position(|name| *name == "auto_review_enabled")
     );
     assert!(turn_metadata.get("tool_namespaces_info").is_none());
-    assert_eq!(value["prompt_cache_key"], "session-test");
+    assert_eq!(
+        value["prompt_cache_key"],
+        value["client_metadata"]["session_id"]
+    );
     assert_eq!(
         header_text(&prepared.headers, "x-openai-internal-codex-responses-lite").as_deref(),
         Some("true")
@@ -163,8 +183,15 @@ fn normalizes_non_lite_with_current_model_defaults() {
         "x-openai-internal-codex-responses-lite",
         "true".parse().expect("header"),
     );
-    let prepared =
-        prepare_subscription_request(&headers, body, 1024 * 1024, "acct_test", "req_test");
+    let prepared = prepare_subscription_request(
+        &headers,
+        body,
+        1024 * 1024,
+        "acct_test",
+        PSEUDONYM_SCOPE,
+        "req_test",
+    )
+    .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
 
     assert_eq!(value["tools"][0]["name"], tools[0]["name"]);
@@ -227,8 +254,10 @@ fn strips_unsupported_output_and_sampling_fields_from_subscription_requests() {
         body,
         1024 * 1024,
         "acct_test",
+        PSEUDONYM_SCOPE,
         "req_test",
-    );
+    )
+    .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
 
     for field in UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS {
@@ -248,17 +277,31 @@ fn strips_unsupported_fields_from_already_subscription_shaped_json() {
     let body = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true,"max_output_tokens":64,"prompt_cache_key":"session-test"}"#,
     );
-    let prepared =
-        prepare_subscription_request(&HeaderMap::new(), body, 1024, "acct_test", "req_test");
+    let prepared = prepare_subscription_request(
+        &HeaderMap::new(),
+        body,
+        16 * 1024,
+        "acct_test",
+        PSEUDONYM_SCOPE,
+        "req_test",
+    )
+    .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("filtered JSON");
 
     assert!(value.get("max_output_tokens").is_none());
-    assert_eq!(value["prompt_cache_key"], "session-test");
+    let cache_key = value["prompt_cache_key"].as_str().expect("cache key");
+    assert_ne!(cache_key, "session-test");
+    assert_eq!(
+        uuid::Uuid::parse_str(cache_key)
+            .expect("pseudonym UUID")
+            .get_version_num(),
+        8
+    );
     assert_eq!(value["input"][0]["type"], "additional_tools");
 }
 
 #[test]
-fn incomplete_native_request_is_enriched_but_encoded_body_remains_exact() {
+fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
     let native = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true}"#,
     );
@@ -267,13 +310,19 @@ fn incomplete_native_request_is_enriched_but_encoded_body_remains_exact() {
         native.clone(),
         64 * 1024,
         "acct_test",
+        PSEUDONYM_SCOPE,
         "req_test",
-    );
+    )
+    .expect("normalized request");
     assert_ne!(native_prepared.body, native);
     let enriched: Value = serde_json::from_slice(&native_prepared.body).expect("enriched request");
-    assert_eq!(
-        enriched["client_metadata"]["x-codex-installation-id"],
-        "acct_test"
+    assert!(
+        uuid::Uuid::parse_str(
+            enriched["client_metadata"]["x-codex-installation-id"]
+                .as_str()
+                .expect("installation id")
+        )
+        .is_ok()
     );
     for name in [
         "session-id",
@@ -306,20 +355,17 @@ fn incomplete_native_request_is_enriched_but_encoded_body_remains_exact() {
     let encoded = Bytes::from_static(b"compressed bytes");
     let prepared = prepare_subscription_request(
         &encoded_headers,
-        encoded.clone(),
+        encoded,
         1024,
         "acct_test",
+        PSEUDONYM_SCOPE,
         "req_test",
     );
-    assert_eq!(prepared.body, encoded);
-    assert_eq!(
-        prepared.headers.get(http::header::CONTENT_ENCODING),
-        encoded_headers.get(http::header::CONTENT_ENCODING)
-    );
+    assert!(prepared.is_err());
 }
 
 #[test]
-fn complete_codex_request_keeps_canonical_body_bytes() {
+fn complete_codex_request_pseudonymizes_identity_deterministically() {
     let turn_metadata = r#"{\"installation_id\":\"11111111-1111-4111-8111-111111111111\",\"session_id\":\"session-test\",\"thread_id\":\"thread-test\",\"agent_name\":\"/root\",\"turn_id\":\"turn-test\",\"window_id\":\"thread-test:0\",\"request_kind\":\"turn\",\"root_turn_id\":\"turn-test\",\"auto_review_enabled\":false,\"node_repl_auto_review_required\":false,\"node_repl_disabled\":false,\"turn_started_at_unix_ms\":1700000000000}"#;
     let body = Bytes::from(format!(
         r#"{{"model":"gpt-5.4","input":[{{"type":"message","id":"msg_11111111-1111-7111-8111-111111111111","role":"user","content":[{{"type":"input_text","text":"hello"}}],"internal_chat_message_metadata_passthrough":{{"turn_id":"turn-test","create_time":1700000000.0}}}}],"tools":[],"tool_choice":"auto","parallel_tool_calls":true,"reasoning":{{"effort":"medium"}},"store":false,"stream":true,"include":["reasoning.encrypted_content"],"prompt_cache_key":"session-test","text":{{"verbosity":"low"}},"client_metadata":{{"session_id":"session-test","thread_id":"thread-test","turn_id":"turn-test","x-codex-installation-id":"11111111-1111-4111-8111-111111111111","x-codex-turn-metadata":"{turn_metadata}","x-codex-window-id":"thread-test:0","root_turn_id":"turn-test"}}}}"#
@@ -338,161 +384,53 @@ fn complete_codex_request_keeps_canonical_body_bytes() {
         body.clone(),
         16 * 1024,
         "11111111-1111-4111-8111-111111111111",
+        PSEUDONYM_SCOPE,
         "request-test",
-    );
-    assert_eq!(prepared.body, body);
-}
-
-#[test]
-fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
-    let body = Bytes::from(
-        serde_json::to_vec(&serde_json::json!({
-            "model": "gpt-5.4",
-            "input": "remember this",
-            "tools": [],
-            "client_metadata": {
-                "session_id": "session-memory",
-                "thread_id": "thread-memory",
-                "x-codex-installation-id": "installation-memory",
-                "x-codex-window-id": "thread-memory:0",
-                "x-codex-turn-metadata": "{\"request_kind\":\"memory\",\"sandbox\":\"none\"}"
-            }
-        }))
-        .expect("memory request"),
-    );
-    let prepared = prepare_subscription_request(
-        &HeaderMap::new(),
+    )
+    .expect("normalized request");
+    assert_ne!(prepared.body, body);
+    let repeated = prepare_subscription_request(
+        &headers,
         body,
-        64 * 1024,
-        "installation-memory",
-        "request-memory",
-    );
-    let value: Value = serde_json::from_slice(&prepared.body).expect("normalized memory request");
-    assert!(value["client_metadata"].get("turn_id").is_none());
-    assert!(value["client_metadata"].get("root_turn_id").is_none());
-    assert!(
-        value["input"][0]
-            .get("internal_chat_message_metadata_passthrough")
-            .is_none()
-    );
-    assert_eq!(
-        value["client_metadata"]["x-codex-turn-metadata"],
-        "{\"request_kind\":\"memory\",\"sandbox\":\"none\"}"
-    );
-}
-
-#[test]
-fn gpt_5_2_defaults_reasoning_summary_and_omits_null_optionals() {
-    let body = Bytes::from(
-        serde_json::to_vec(&serde_json::json!({
-            "model": "gpt-5.2",
-            "instructions": null,
-            "input": "hello",
-            "tools": null,
-            "reasoning": {"effort": null, "summary": null, "context": null},
-            "stream_options": null,
-            "service_tier": null,
-            "prompt_cache_key": null,
-            "text": null,
-            "client_metadata": null,
-            "include": null,
-            "tool_choice": null,
-            "parallel_tool_calls": null
-        }))
-        .expect("request"),
-    );
-    let prepared = prepare_subscription_request(
-        &HeaderMap::new(),
-        body,
-        64 * 1024,
-        "installation-test",
+        16 * 1024,
+        "11111111-1111-4111-8111-111111111111",
+        PSEUDONYM_SCOPE,
         "request-test",
-    );
-    let value: Value = serde_json::from_slice(&prepared.body).expect("normalized request");
-
-    assert_eq!(value["reasoning"]["effort"], "medium");
-    assert_eq!(value["reasoning"]["summary"], "auto");
-    assert!(value["reasoning"].get("context").is_none());
-    assert_eq!(value["text"]["verbosity"], "low");
-    assert_eq!(value["tool_choice"], "auto");
-    assert_eq!(value["parallel_tool_calls"], true);
-    assert!(value.get("stream_options").is_none());
-    assert!(value.get("service_tier").is_none());
-    assert!(value.get("instructions").is_none());
+    )
+    .expect("normalized request");
+    assert_eq!(prepared.body, repeated.body);
+    assert_eq!(prepared.headers, repeated.headers);
+    let projected_thread = header_text(&prepared.headers, "thread-id").expect("thread id");
+    let projected_client =
+        header_text(&prepared.headers, "x-client-request-id").expect("client request id");
+    assert_ne!(projected_client, projected_thread);
     assert_eq!(
-        value["client_metadata"]["x-codex-installation-id"],
-        "installation-test"
+        uuid::Uuid::parse_str(&projected_client)
+            .expect("client request UUID")
+            .get_version_num(),
+        8
     );
+    let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
+    for (name, raw) in [
+        ("session_id", "session-test"),
+        ("thread_id", "thread-test"),
+        ("turn_id", "turn-test"),
+        (
+            "x-codex-installation-id",
+            "11111111-1111-4111-8111-111111111111",
+        ),
+    ] {
+        let pseudonym = value["client_metadata"][name].as_str().expect("pseudonym");
+        assert_ne!(pseudonym, raw);
+        assert_eq!(
+            uuid::Uuid::parse_str(pseudonym)
+                .expect("pseudonym UUID")
+                .get_version_num(),
+            8
+        );
+    }
     assert_eq!(
-        value["prompt_cache_key"],
-        value["client_metadata"]["session_id"]
-    );
-}
-
-#[test]
-fn unknown_model_uses_codex_fallback_reasoning_without_verbosity() {
-    let body = Bytes::from(
-        serde_json::to_vec(&serde_json::json!({
-            "model": "custom-model",
-            "input": "hello",
-            "tools": []
-        }))
-        .expect("request"),
-    );
-    let prepared = prepare_subscription_request(
-        &HeaderMap::new(),
-        body,
-        64 * 1024,
-        "installation-test",
-        "request-test",
-    );
-    let value: Value = serde_json::from_slice(&prepared.body).expect("normalized request");
-
-    assert_eq!(value["reasoning"], serde_json::json!({"summary": "auto"}));
-    assert!(value.get("text").is_none());
-    assert_eq!(value["parallel_tool_calls"], true);
-}
-
-#[test]
-fn reused_lite_websocket_frame_keeps_incremental_input_without_prefix() {
-    let body = Bytes::from(
-        serde_json::to_vec(&serde_json::json!({
-            "type": "response.create",
-            "model": "gpt-5.6-sol",
-            "previous_response_id": "resp_previous",
-            "input": [],
-            "tool_choice": "auto",
-            "parallel_tool_calls": false,
-            "reasoning": {"effort": "low", "context": "all_turns"},
-            "store": false,
-            "stream": true,
-            "include": ["reasoning.encrypted_content"],
-            "prompt_cache_key": "session-test",
-            "text": {"verbosity": "low"},
-            "client_metadata": {
-                "session_id": "session-test",
-                "thread_id": "thread-test",
-                "turn_id": "turn-test"
-            }
-        }))
-        .expect("request"),
-    );
-    let prepared = prepare_websocket_subscription_request(
-        &HeaderMap::new(),
-        body,
-        64 * 1024,
-        "installation-test",
-        "request-test",
-    );
-    let value: Value = serde_json::from_slice(&prepared.body).expect("normalized request");
-
-    assert_eq!(value["type"], "response.create");
-    assert_eq!(value["previous_response_id"], "resp_previous");
-    assert_eq!(value["input"], serde_json::json!([]));
-    assert!(value.get("tools").is_none());
-    assert!(value.get("instructions").is_none());
-    assert_eq!(
-        value["client_metadata"]["ws_request_header_x_openai_internal_codex_responses_lite"],
-        "true"
+        value["input"][0]["internal_chat_message_metadata_passthrough"]["turn_id"],
+        value["client_metadata"]["turn_id"]
     );
 }

@@ -91,7 +91,7 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
 }
 
 #[test]
-fn oauth_websocket_process_originator_override_keeps_default_merge_position() {
+fn oauth_websocket_replaces_process_identity_and_keeps_canonical_merge_position() {
     let mut headers = HeaderMap::new();
     for (name, value) in [
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
@@ -136,6 +136,12 @@ fn oauth_websocket_process_originator_override_keeps_default_merge_position() {
         .expect("extension header");
     assert_eq!(names[user_agent + 1], "originator");
     assert_eq!(names[extensions - 1], "x-codex-routing-hint");
+    assert!(raw.contains(&format!(
+        "\r\nuser-agent: {}\r\n",
+        crate::codex_user_agent::canonical_value()
+    )));
+    assert!(raw.contains("\r\noriginator: codex_cli_rs\r\n"));
+    assert!(!raw.contains("codex_exec"));
 }
 
 #[test]
@@ -278,10 +284,9 @@ fn oauth_websocket_optional_headers_match_codex_0149_merge_order() {
             "authorization",
             "x-openai-internal-codex-residency",
             "user-agent",
-            "x-responsesapi-include-timing-metrics",
+            "originator",
             "version",
             "x-codex-beta-features",
-            "originator",
             "x-client-request-id",
             "session-id",
             "thread-id",
@@ -293,6 +298,7 @@ fn oauth_websocket_optional_headers_match_codex_0149_merge_order() {
             "x-codex-routing-hint",
             "x-oai-attestation",
             "openai-beta",
+            "x-responsesapi-include-timing-metrics",
             "sec-websocket-extensions",
         ]
     );

@@ -16,6 +16,7 @@ type websocketCore interface {
 		context.Context,
 		string,
 		string,
+		string,
 		http.Header,
 	) (*websocket.Conn, *http.Response, error)
 }
@@ -57,7 +58,8 @@ func (h *Handler) serveWebSocket(
 	defer h.websockets.release(route.APIKeyID)
 
 	coreSocket, coreResponse, err := core.DialWebSocket(
-		request.Context(), route.AccountRef, connectionID, allowedRequestHeaders(request.Header),
+		request.Context(), route.AccountRef, route.PseudonymScope, connectionID,
+		allowedRequestHeaders(request.Header),
 	)
 	if err != nil {
 		h.writeWebSocketDialError(writer, route, connectionID, coreResponse, err)
