@@ -16,7 +16,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-const FINGERPRINT_VERSION: u32 = 2;
+const FINGERPRINT_VERSION: u32 = 1;
 const INITIAL_REVISION: u64 = 1;
 const MAX_FINGERPRINT_BYTES: u64 = 64 * 1024;
 const FINGERPRINT_SUFFIX: &str = ".fingerprint.json";
