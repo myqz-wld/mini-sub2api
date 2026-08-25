@@ -69,11 +69,11 @@ build/bin/mini-sub2api --state-dir ./state \
 Paste the key and finish with EOF. The secret is not placed in arguments, environment variables,
 or SQLite.
 
-Every new OAuth or upstream API-key credential defaults to `--fingerprint-mode device`. In this
-mode, one credential represents one persistent Codex installation identity across HTTP and
-WebSocket requests. Use `--fingerprint-mode off` on any of the three creation commands only when
-caller-supplied installation identity must pass through unchanged. Existing credentials receive
-the same `device` default when first opened by this version.
+Every new credential defaults to `--fingerprint-mode device`. For subscription credentials this
+mode derives one account-level Codex installation identity across HTTP, WebSocket, and machines;
+`off` retains per-source installation cardinality through one-to-one pseudonyms. Both modes always
+pseudonymize the remaining request identifiers. OpenAI API-key payloads remain transparent in both
+modes.
 
 ### 2. Create a downstream API key
 
@@ -141,19 +141,32 @@ first-frame metadata. A subscription-side rejection after the public upgrade is 
 not an HTTP `426`; set the flag to `false` when client-side HTTP fallback is required.
 
 Subscription routes apply the Codex CLI `0.149.0` request contract: unsupported top-level fields
-are removed, `system` instruction messages become `developer` messages, request/tool/item JSON is
-serialized in the pinned CLI order, and synthesized conversation items use UUIDv7 plus turn/create
-metadata. Responses Lite uses the official `functions` namespace without inventing the opt-in
+are removed, `system` instruction messages become `developer` messages, easy assistant strings
+become `output_text` while input roles use `input_text`, request/tool/item JSON is serialized in the
+pinned CLI order, and synthesized conversation items use UUIDv7 plus turn/create metadata.
+Responses Lite uses the official `functions` namespace without inventing the opt-in
 `tool_namespaces_info` field. OAuth HTTP pins streaming, JSON media types, level-3 zstd, `version`,
-and the Codex User-Agent. The bundled model defaults, unknown-model fallback, output schema name,
-OAuth authorize/refresh identity, and wire-critical dependency lock all follow `0.149.0`. Explicit
+and one complete Codex identity. Every subscription request uses
+`codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`, `originator: codex_cli_rs`, and
+`version: 0.149.0`; inbound identity values cannot override that triplet. The bundled model
+defaults, unknown-model fallback, output schema name, OAuth authorize/refresh identity, and
+wire-critical dependency lock all follow `0.149.0`. Explicit
 models, tools, instructions, reasoning controls, and WebSocket `generate`/continuation fields remain
 authoritative. Native canonical WebSocket frames also retain the CLI-supplied
 `x-codex-ws-stream-request-start-ms`; the normalizer generates it only when missing or empty.
 Codex `0.149.0` startup prewarm metadata with `turn_id=""` and no `root_turn_id` or
 `turn_started_at_unix_ms` is treated as complete, so those fields are not added; when no other
-device projection or defaulting is required, the frame remains byte-exact. Incomplete or non-native
+defaulting is required, its non-identity fields retain their shape. Incomplete or non-native
 metadata is still filled. Remote compaction and sparse memory metadata retain their request kinds.
+
+Subscription identifiers are statelessly pseudonymized before optional device convergence. The
+coordinator derives an internal scope from the authenticated downstream-key verifier; the core
+combines it with the stable ChatGPT account namespace, a field domain, and the source ID through
+HMAC-SHA256, emitting UUIDv8 values. The mapping covers installation, session, thread, turn,
+root/parent identities, window, client-request, item turn metadata, and prompt-cache carriers.
+Identical account/key/source inputs produce identical pseudonyms on different machines, while a
+different account or downstream key produces a different namespace. `device` additionally replaces
+installation with an account-level stateless UUIDv8; `off` keeps its one-to-one pseudonym.
 OpenAI API-key bodies and carrier-free WebSocket frames remain byte-exact; organization/project
 headers are not sent on OAuth routes.
 
@@ -193,7 +206,7 @@ build/bin/mini-sub2api --state-dir ./state credential remove cred_EXAMPLE --yes
 - `credential fingerprint ID` reports only the safe mode and revision. Changing the mode requires
   the credential to be disabled; the command waits for active HTTP/WebSocket operations, performs
   a fenced core update, and leaves it disabled for an explicit later `enable`. Switching modes does
-  not rotate the saved device identity.
+  not rotate or create identity state; outputs are derived from account/request namespaces.
 - `revoke` is for OAuth credentials. It requires no active downstream keys, waits for in-flight
   requests, revokes upstream first, and removes local material only after success.
 - `remove` deletes service-side material. OpenAI API-key deletion at the provider remains the
@@ -243,10 +256,10 @@ Operational boundaries:
 - Run only one coordinator/core pair per state directory.
 - Stop the service before backing up or restoring the complete state directory.
 - Provider secrets live in a private `0600` vault and are not encrypted at rest.
-- Credential fingerprint sidecars are also private `0600` core-vault state. Their installation IDs
-  are not copied into SQLite, the coordinator/core runtime protocol, usage records, logs, or CLI
-  output. OAuth refresh and complete state-directory backup/restore preserve the ID; deleting and
-  newly creating/importing a credential creates a new one.
+- Credential fingerprint sidecars are private `0600` core-vault state containing only mode and
+  revision. Installation IDs and pseudonym seeds are not persisted. The coordinator/core protocol
+  carries a stateless downstream pseudonym scope that is removed before upstream send and is never
+  written to usage records or logs.
 - SQLite stores credential metadata, downstream-key hashes, timing, status, and token counts. It
   does not store prompts, request bodies, response bodies, tool arguments, or generated content.
 - Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or
@@ -260,12 +273,12 @@ Codex `0.149.0` transport split, including its absent WebSocket ALPN offer and P
 The provider WebSocket handshake and compression path use the same pinned OpenAI
 `tokio-tungstenite`/`tungstenite` fork revisions as that release. These profiles are internal and
 are not user-configurable, and every new provider WebSocket gets fresh TLS session state.
-Subscription requests also pin Codex's `version` header to `0.149.0`;
+Subscription requests also pin the complete Codex identity triplet;
 regular OpenAI API-key routes preserve a reviewed client-supplied value. Reviewed
 `x-openai-subagent` identity crosses both HTTP and WebSocket routes, including Codex's conditional
-subagent handshake order. OAuth WebSocket headers follow the native provider/extra/default/auth
-merge, including default-versus-override `originator`, routing, residency, timing, attestation, and
-memory-generation order. Reviewed attestation, inference-call, and memory-generation names cross
+subagent handshake order. OAuth WebSocket headers follow the reviewed provider/extra/default/auth
+merge with the canonical originator, routing, residency, timing, attestation, and memory-generation
+order. Reviewed attestation, inference-call, and memory-generation names cross
 the Go filters. OAuth HTTP clients share only the official allowlist of Cloudflare infrastructure
 cookies; account, session, and arbitrary application cookies are never retained.
 

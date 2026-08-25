@@ -15,9 +15,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 use uuid::Uuid;
-use uuid::Version;
 
-const FINGERPRINT_VERSION: u32 = 1;
+const FINGERPRINT_VERSION: u32 = 2;
 const INITIAL_REVISION: u64 = 1;
 const MAX_FINGERPRINT_BYTES: u64 = 64 * 1024;
 const FINGERPRINT_SUFFIX: &str = ".fingerprint.json";
@@ -35,7 +34,6 @@ pub struct FingerprintSnapshot {
     version: u32,
     revision: u64,
     mode: FingerprintMode,
-    installation_id: String,
 }
 
 impl fmt::Debug for FingerprintSnapshot {
@@ -45,7 +43,6 @@ impl fmt::Debug for FingerprintSnapshot {
             .field("version", &self.version)
             .field("revision", &self.revision)
             .field("mode", &self.mode)
-            .field("installation_id", &"<redacted>")
             .finish()
     }
 }
@@ -56,7 +53,6 @@ struct PersistedFingerprint {
     version: u32,
     revision: u64,
     mode: FingerprintMode,
-    installation_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -73,7 +69,6 @@ impl FingerprintSnapshot {
             version: FINGERPRINT_VERSION,
             revision: INITIAL_REVISION,
             mode,
-            installation_id: Uuid::new_v4().to_string(),
         }
     }
 
@@ -83,10 +78,6 @@ impl FingerprintSnapshot {
 
     pub fn revision(&self) -> u64 {
         self.revision
-    }
-
-    pub fn installation_id(&self) -> &str {
-        &self.installation_id
     }
 
     pub fn metadata(&self, account_ref: &str) -> FingerprintMetadata {
@@ -102,17 +93,15 @@ impl FingerprintSnapshot {
             version: self.version,
             revision: self.revision,
             mode: self.mode,
-            installation_id: self.installation_id.clone(),
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn for_test(mode: FingerprintMode, revision: u64, installation_id: &str) -> Self {
+    pub(crate) fn for_test(mode: FingerprintMode, revision: u64) -> Self {
         Self {
             version: FINGERPRINT_VERSION,
             revision,
             mode,
-            installation_id: installation_id.to_string(),
         }
     }
 }
@@ -170,7 +159,6 @@ pub(crate) fn update_mode(
         version: snapshot.version,
         revision,
         mode,
-        installation_id: snapshot.installation_id.clone(),
     };
     write_atomically(
         accounts_dir,
@@ -226,21 +214,10 @@ fn validate(persisted: PersistedFingerprint) -> Result<FingerprintSnapshot> {
         persisted.revision >= INITIAL_REVISION,
         "invalid credential fingerprint revision"
     );
-    let installation_id = Uuid::parse_str(&persisted.installation_id)
-        .context("invalid credential fingerprint installation id")?;
-    anyhow::ensure!(
-        installation_id.get_version() == Some(Version::Random),
-        "credential fingerprint installation id is not UUIDv4"
-    );
-    anyhow::ensure!(
-        installation_id.to_string() == persisted.installation_id,
-        "credential fingerprint installation id is not normalized"
-    );
     Ok(FingerprintSnapshot {
         version: persisted.version,
         revision: persisted.revision,
         mode: persisted.mode,
-        installation_id: persisted.installation_id,
     })
 }
 

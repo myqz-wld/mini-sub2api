@@ -48,11 +48,12 @@ type CreatedAPIKey struct {
 }
 
 type Route struct {
-	APIKeyID     string
-	CredentialID string
-	Adapter      string
-	AuthKind     string
-	AccountRef   string
+	APIKeyID       string
+	CredentialID   string
+	Adapter        string
+	AuthKind       string
+	AccountRef     string
+	PseudonymScope string
 }
 
 type TokenUsage struct {

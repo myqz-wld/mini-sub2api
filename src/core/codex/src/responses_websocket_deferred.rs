@@ -3,6 +3,7 @@ use crate::fingerprint::FingerprintMode;
 use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
 use crate::request_normalizer::prepare_websocket_subscription_request;
+use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket::RelayContext;
 use crate::responses_websocket::fingerprint_is_current;
@@ -28,6 +29,8 @@ pub(crate) struct DeferredOAuthContext {
     pub(crate) state: AppState,
     pub(crate) headers: HeaderMap,
     pub(crate) account_ref: String,
+    pub(crate) account_namespace: String,
+    pub(crate) pseudonym_scope: String,
     pub(crate) request_id: String,
     pub(crate) resolved: ResolvedCredential,
 }
@@ -51,16 +54,24 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         return;
     }
     let frame_request_id = format!("{}-ws-1", context.request_id);
-    let prepared = prepare_websocket_subscription_request(
+    let Ok(prepared) = prepare_websocket_subscription_request(
         &context.headers,
         Bytes::from(first),
         MAX_WEBSOCKET_MESSAGE_BYTES,
-        context.resolved.fingerprint.installation_id(),
+        &context.account_namespace,
+        &context.pseudonym_scope,
         &frame_request_id,
-    );
+    ) else {
+        let _ = internal.send(close(1002)).await;
+        return;
+    };
     let mut upstream_headers = prepared.headers;
     if context.resolved.fingerprint.mode() == FingerprintMode::Device
-        && project_device_headers(&mut upstream_headers, &context.resolved.fingerprint).is_err()
+        && project_device_headers(
+            &mut upstream_headers,
+            &RequestPseudonymizer::converged_installation_id(&context.account_namespace),
+        )
+        .is_err()
     {
         let _ = internal.send(close(1002)).await;
         return;
@@ -73,6 +84,7 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         match project_websocket_device(
             text,
             &context.resolved.fingerprint,
+            &RequestPseudonymizer::converged_installation_id(&context.account_namespace),
             MAX_WEBSOCKET_MESSAGE_BYTES,
         ) {
             Ok(text) => text,
@@ -103,6 +115,8 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
     let relay_context = RelayContext {
         headers: relay_headers,
         account_ref: context.account_ref,
+        account_namespace: Some(context.account_namespace),
+        pseudonym_scope: context.pseudonym_scope,
         request_id: context.request_id,
         normalize_subscription: true,
         vault: context.state.vault,

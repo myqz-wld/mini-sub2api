@@ -23,6 +23,7 @@ type Core interface {
 		context.Context,
 		string,
 		string,
+		string,
 		http.Header,
 		[]byte,
 	) (*http.Response, error)
@@ -112,7 +113,8 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		return
 	}
 	response, err := h.core.Forward(
-		request.Context(), route.AccountRef, requestID, allowedRequestHeaders(request.Header), body,
+		request.Context(), route.AccountRef, route.PseudonymScope, requestID,
+		allowedRequestHeaders(request.Header), body,
 	)
 	body = nil
 	if err != nil {

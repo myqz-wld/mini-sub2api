@@ -42,6 +42,7 @@ POST /internal/v1/responses HTTP/1.1
 Authorization: Bearer <internal-token>
 X-Mini-Sub2Api-Protocol-Version: 1
 X-Mini-Sub2Api-Account-Ref: acct_<opaque-id>
+X-Mini-Sub2Api-Pseudonym-Scope: psn_<sha256-derived-scope>
 X-Mini-Sub2Api-Request-Id: req_<opaque-id>
 Content-Type: application/json
 ```
@@ -49,6 +50,9 @@ Content-Type: application/json
 - The TCP peer must be loopback.
 - `Authorization` must match the startup token.
 - Account references and request ids are opaque ASCII values, 1-128 characters after their prefix.
+- The pseudonym scope is a 32-byte base64url digest derived from the authenticated downstream key
+  verifier. It is stable across machines that share the same downstream key, is never accepted
+  from the public caller, and never crosses the provider boundary.
 - The request body is the public Responses body and is never persisted or logged.
 - Raw provider credentials never appear in protocol headers or bodies.
 
@@ -93,7 +97,8 @@ The coordinator may forward only these public-client headers to the core:
 - `conversation_id`
 
 The core constructs authoritative `Authorization` and `Host` headers. For subscription routes it
-also constructs `ChatGPT-Account-ID` and supplies `originator` when missing. `OpenAI-Organization`,
+also constructs `ChatGPT-Account-ID` and replaces `User-Agent`, `originator`, and `version` with one
+canonical identity. `OpenAI-Organization`,
 `OpenAI-Project`, and the explicitly reviewed `X-Stainless-*` headers reach only regular OpenAI
 API-key upstreams. Both layers remove cookies, proxy authentication, forwarding headers, content
 length, transfer encoding, connection-specific headers, unknown `X-Stainless-*` headers, and any
@@ -101,12 +106,14 @@ unreviewed `X-Mini-Sub2Api-*` header.
 
 For subscription-backed plain Responses bodies, the core maps input messages with role `system` to
 role `developer`, preserving their content and instruction precedence for the internal Codex
-endpoint. Regular OpenAI API-key request bodies remain byte-transparent.
+endpoint. Easy string content becomes `input_text` for input roles and `output_text` for historical
+`assistant` messages. Regular OpenAI API-key request bodies remain byte-transparent.
 
-For subscription upstreams, the core anchors both the `version` header and the leading Codex
-`User-Agent` product/version token to the Codex CLI `0.149.0` compatibility baseline. A recognized
-Codex product name and its suffix are preserved; a missing or non-Codex value becomes
-the full `codex_cli_rs/0.149.0 (<OS>; <arch>) <terminal>` form. OAuth HTTP additionally pins
+For subscription upstreams, the core replaces the complete client identity with
+`User-Agent: codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
+`originator: codex_cli_rs`, and `version: 0.149.0`. The same normalization function feeds HTTP and
+WebSocket construction; no inbound product, platform suffix, originator, or version survives.
+OAuth HTTP additionally pins
 `Accept: text/event-stream`, `Content-Type: application/json`, and level-3 zstd. Regular OpenAI
 API-key routes retain the public client's reviewed `version` and `User-Agent` values unchanged.
 
@@ -115,19 +122,22 @@ The reviewed optional Codex request names `x-openai-internal-codex-residency`,
 `x-openai-memgen-request` cross both Go filters. The core keeps timing WebSocket-only and inference
 call IDs HTTP-only on OAuth routes, with the conditional raw order captured from `0.149.0`.
 
-## Credential-scoped device projection
+## Stateless pseudonymization and optional device convergence
 
-The runtime protocol still carries only the opaque `X-Mini-Sub2Api-Account-Ref`; fingerprint mode
-and installation identity never become v1 fields. The core resolves them from a private,
-versioned sidecar for that credential. Both new and legacy credentials default to `device` unless
-the operator explicitly selected `off`.
+Subscription identity is projected in two independent layers. First, every parseable OAuth request
+uses HMAC-SHA256 over the stable ChatGPT account namespace, downstream pseudonym scope, field domain,
+and original identifier. The first 128 bits are emitted as UUIDv8. This rewrites installation,
+session, thread, turn/root/parent-turn, window/parent-thread, client-request, item turn metadata, and
+prompt-cache carriers consistently across headers, `client_metadata`, and serialized turn metadata.
+The same account, downstream key, field, and source ID therefore produce the same result on every
+machine; changing the account or downstream key produces a different namespace. Unknown metadata,
+compaction state, subagent state, timestamps, and upstream response/item IDs are preserved.
 
-In `device`, the core sets `x-codex-installation-id` and converges recognized installation values
-inside `client_metadata` and serialized `x-codex-turn-metadata`. It changes only the
-`installation_id` member of turn metadata, preserving session, thread, turn, window, compaction,
-subagent, and unknown future members. Carrier-free API-key bodies stay byte-exact. Unsafe encoded,
-malformed, non-object, or oversized device projections fail before an upstream send. In `off`, the
-core preserves caller-provided installation carriers under the existing auth-specific behavior.
+Second, `device` replaces only the already-pseudonymized installation carrier with an account-level
+UUIDv8 derived solely from the ChatGPT account namespace. `off` keeps the one-to-one installation
+pseudonym instead. The fingerprint sidecar stores only mode and revision; no installation ID or
+random pseudonym seed is persisted. New sidecars default to `device`. Regular OpenAI API-key HTTP
+bodies and WebSocket application frames remain byte-exact in both modes.
 
 One credential owns independent HTTP and WebSocket connection pools. HTTP uses transport-default
 TLS; provider WebSocket uses AWS-LC rustls with native roots, a PQ-first key-group list, and an
@@ -135,7 +145,7 @@ HTTP/1 handshake without an ALPN offer. These fixed builders are the Codex `0.14
 split and do not vary by credential; TLS session state is fresh for every provider WebSocket.
 Provider WebSockets use the same pinned OpenAI
 `tokio-tungstenite`/`tungstenite` fork revisions and per-message-deflate offer as that release. Pool
-selection and device projection require no coordinator parsing of request bodies or WebSocket
+selection and identity projection require no coordinator parsing of request bodies or WebSocket
 frames.
 
 ## Inference response
@@ -156,6 +166,7 @@ GET /internal/v1/responses/ws HTTP/1.1
 Authorization: Bearer <internal-token>
 X-Mini-Sub2Api-Protocol-Version: 1
 X-Mini-Sub2Api-Account-Ref: acct_<opaque-id>
+X-Mini-Sub2Api-Pseudonym-Scope: psn_<sha256-derived-scope>
 X-Mini-Sub2Api-Request-Id: req_<opaque-connection-id>
 Connection: Upgrade
 Upgrade: websocket
@@ -178,7 +189,8 @@ for the first `response.create` so its model and service tier can drive the prov
   applies the pinned request normalizer only to `response.create`, preserving `type`, `generate`,
   `previous_response_id`, and client metadata. An existing non-empty
   `x-codex-ws-stream-request-start-ms` remains the CLI send time; only a missing or empty value is
-  generated. After any required device projection, the complete native `0.149.0` prewarm shape
+  generated. After pseudonymization and any required device convergence, the complete native
+  `0.149.0` prewarm shape
   keeps its empty `turn_id` and intentionally absent `root_turn_id` and
   `turn_started_at_unix_ms`; incomplete or non-native shapes are still normalized. The first OAuth
   routing hint comes from that frame, and later creates reuse the same provider socket. The deferred
@@ -189,9 +201,8 @@ for the first `response.create` so its model and service tier can drive the prov
   closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.
   Other valid application events do not trigger this stale-policy check and remain byte-exact.
 - Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
-  `ChatGPT-Account-ID`, supplies `originator` when absent, and keeps the reviewed `0.149.0`
-  User-Agent anchor. OAuth header emission reproduces the native provider/extra/default/auth merge
-  instead of forcing one order across default and overridden originators.
+  `ChatGPT-Account-ID` and the canonical fixed identity triplet. OAuth header emission retains the
+  reviewed provider/extra/default/auth construction with one default-originator layout.
 - The public coordinator and provider hops may negotiate per-message deflate. The provider sends
   the Codex `0.149.0` offer `permessage-deflate; client_max_window_bits`; the authenticated internal
   loopback hop does not request WebSocket compression.
@@ -204,7 +215,7 @@ handshakes and bounded HTTP rejection mapping.
 
 Codex `0.149.0` remote compaction v2 uses this same ordinary Responses path. Its
 `compaction_trigger` input item and `request_kind=compaction` metadata pass through normal
-subscription normalization and device projection; no additional public or internal route is
+subscription normalization, pseudonymization, and device convergence; no additional public or internal route is
 required.
 
 Successful internal upgrades may expose only `openai-model`, `x-codex-turn-state`,

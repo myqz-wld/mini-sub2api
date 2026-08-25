@@ -3,10 +3,13 @@ use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_http_device;
 use crate::inference_fingerprint::headers_for_retry;
+#[path = "server_internal_request.rs"]
+mod internal_request;
 use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
 use crate::request_normalizer::prepare_subscription_request;
+use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket::responses_socket;
 use crate::transport_registry::CredentialTransportContext;
 use crate::transport_registry::CredentialTransportPolicy;
@@ -31,14 +34,14 @@ use axum::http::StatusCode;
 use axum::routing::get;
 use axum::routing::post;
 use futures_util::StreamExt;
-use mini_sub2api_protocol_v1::ACCOUNT_REF_HEADER;
 use mini_sub2api_protocol_v1::BuildIdentity;
 use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
 use mini_sub2api_protocol_v1::Capabilities;
 use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
 use mini_sub2api_protocol_v1::Readiness;
 use mini_sub2api_protocol_v1::VERSION;
-use mini_sub2api_protocol_v1::VERSION_HEADER;
+#[cfg(test)]
+use mini_sub2api_protocol_v1::{ACCOUNT_REF_HEADER, PSEUDONYM_SCOPE_HEADER, VERSION_HEADER};
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
@@ -50,8 +53,11 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
+
+#[cfg(test)]
+pub(crate) use internal_request::validate_internal_auth;
+pub(crate) use internal_request::validate_internal_request;
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
@@ -130,6 +136,7 @@ async fn responses_inner(
 ) -> std::result::Result<Response<Body>, CoreFailure> {
     let identity = validate_internal_request(peer, state, &headers)?;
     let account_ref = identity.account_ref;
+    let pseudonym_scope = identity.pseudonym_scope;
     let request_id = identity.request_id;
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
@@ -139,23 +146,33 @@ async fn responses_inner(
     let _guard = account_lock.lock().await;
     let resolved = resolve_auth(state, &account_ref, None).await?;
     drop(_guard);
-    let (forward_headers, body) = if matches!(resolved.auth, ResolvedAuth::CodexOAuth { .. }) {
+    let account_namespace = match &resolved.auth {
+        ResolvedAuth::CodexOAuth { account_id, .. } => Some(account_id.clone()),
+        ResolvedAuth::OpenAiApiKey { .. } => None,
+    };
+    let (forward_headers, body) = if let Some(account_namespace) = account_namespace.as_deref() {
         let prepared = prepare_subscription_request(
             &headers,
             body,
             MAX_REQUEST_BYTES,
-            resolved.fingerprint.installation_id(),
+            account_namespace,
+            &pseudonym_scope,
             &request_id,
-        );
+        )
+        .map_err(|()| CoreFailure::InvalidRequest)?;
         (prepared.headers, prepared.body)
     } else {
         (headers, body)
     };
-    let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device {
+    let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device
+        && let Some(account_namespace) = account_namespace.as_deref()
+    {
+        let installation_id = RequestPseudonymizer::converged_installation_id(account_namespace);
         let projected = project_http_device(
             forward_headers,
             body,
             &resolved.fingerprint,
+            &installation_id,
             MAX_REQUEST_BYTES,
         )
         .map_err(|_| CoreFailure::InvalidRequest)?;
@@ -327,52 +344,6 @@ fn nominated_connection_headers(headers: &HeaderMap) -> HashSet<String> {
         .filter(|name| !name.is_empty())
         .map(str::to_ascii_lowercase)
         .collect()
-}
-
-fn validate_internal_auth(
-    headers: &HeaderMap,
-    expected_hash: &[u8; 32],
-) -> std::result::Result<(), CoreFailure> {
-    let token = headers
-        .get(http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or(CoreFailure::InvalidInternalAuth)?;
-    let actual: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-    if actual.ct_eq(expected_hash).into() {
-        Ok(())
-    } else {
-        Err(CoreFailure::InvalidInternalAuth)
-    }
-}
-
-pub(crate) struct InternalRequestIdentity {
-    pub account_ref: String,
-    pub request_id: String,
-}
-
-pub(crate) fn validate_internal_request(
-    peer: SocketAddr,
-    state: &AppState,
-    headers: &HeaderMap,
-) -> std::result::Result<InternalRequestIdentity, CoreFailure> {
-    if !peer.ip().is_loopback() {
-        return Err(CoreFailure::InvalidInternalAuth);
-    }
-    if header_text(headers, VERSION_HEADER).as_deref() != Some(VERSION) {
-        return Err(CoreFailure::UnsupportedProtocol);
-    }
-    validate_internal_auth(headers, &state.internal_token_hash)?;
-    let account_ref = header_text(headers, ACCOUNT_REF_HEADER)
-        .filter(|value| value.starts_with("acct_") && value.len() <= 133)
-        .ok_or(CoreFailure::InvalidRequest)?;
-    let request_id = header_text(headers, REQUEST_ID_HEADER)
-        .filter(|value| value.starts_with("req_") && value.len() <= 132)
-        .ok_or(CoreFailure::InvalidRequest)?;
-    Ok(InternalRequestIdentity {
-        account_ref,
-        request_id,
-    })
 }
 
 pub(crate) async fn account_lock(state: &AppState, account_ref: &str) -> Arc<Mutex<()>> {

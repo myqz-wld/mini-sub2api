@@ -21,6 +21,7 @@ pub(crate) fn project_http_device(
     mut headers: HeaderMap,
     body: Bytes,
     fingerprint: &FingerprintSnapshot,
+    installation_id: &str,
     maximum: usize,
 ) -> Result<ProjectedRequest> {
     anyhow::ensure!(
@@ -29,14 +30,15 @@ pub(crate) fn project_http_device(
     );
     ensure_identity_encoding(&headers)?;
     anyhow::ensure!(body.len() <= maximum, "request body is too large");
-    project_device_headers(&mut headers, fingerprint)?;
-    let body = project_json_body(body, fingerprint.installation_id(), maximum)?;
+    project_device_headers(&mut headers, installation_id)?;
+    let body = project_json_body(body, installation_id, maximum)?;
     Ok(ProjectedRequest { headers, body })
 }
 
 pub(crate) fn project_websocket_device(
     text: String,
     fingerprint: &FingerprintSnapshot,
+    installation_id: &str,
     maximum: usize,
 ) -> Result<String> {
     anyhow::ensure!(
@@ -44,18 +46,11 @@ pub(crate) fn project_websocket_device(
         "device projection requires device mode"
     );
     anyhow::ensure!(text.len() <= maximum, "WebSocket request is too large");
-    let body = project_json_body(
-        Bytes::from(text.into_bytes()),
-        fingerprint.installation_id(),
-        maximum,
-    )?;
+    let body = project_json_body(Bytes::from(text.into_bytes()), installation_id, maximum)?;
     String::from_utf8(body.to_vec()).context("projected WebSocket request is not UTF-8")
 }
 
-pub(crate) fn project_device_headers(
-    headers: &mut HeaderMap,
-    fingerprint: &FingerprintSnapshot,
-) -> Result<()> {
+pub(crate) fn project_device_headers(headers: &mut HeaderMap, installation_id: &str) -> Result<()> {
     let turn_metadata = headers
         .get_all(TURN_METADATA_HEADER)
         .iter()
@@ -63,7 +58,7 @@ pub(crate) fn project_device_headers(
             let raw = value
                 .to_str()
                 .context("invalid credential turn metadata header")?;
-            rewrite_serialized_turn_metadata(raw, fingerprint.installation_id())
+            rewrite_serialized_turn_metadata(raw, installation_id)
         })
         .collect::<Result<Vec<_>>>()?;
     if let Some(first) = turn_metadata.first() {
@@ -75,7 +70,7 @@ pub(crate) fn project_device_headers(
     }
     headers.insert(
         HeaderName::from_static(INSTALLATION_HEADER),
-        HeaderValue::from_str(fingerprint.installation_id())
+        HeaderValue::from_str(installation_id)
             .context("credential installation id is not a valid header")?,
     );
     Ok(())

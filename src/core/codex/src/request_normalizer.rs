@@ -3,6 +3,7 @@ use crate::request_defaults::ModelProfile;
 use crate::request_identity;
 use crate::request_identity::IdentityContext;
 use crate::request_identity::SubscriptionTransport;
+use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_lite;
 use bytes::Bytes;
 use http::HeaderMap;
@@ -28,14 +29,16 @@ pub fn prepare_subscription_request(
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    installation_id: &str,
+    account_namespace: &str,
+    downstream_scope: &str,
     request_id: &str,
-) -> PreparedSubscriptionRequest {
+) -> Result<PreparedSubscriptionRequest, ()> {
     prepare_subscription_request_for(
         headers,
         body,
         max_bytes,
-        installation_id,
+        account_namespace,
+        downstream_scope,
         request_id,
         SubscriptionTransport::Http,
     )
@@ -45,14 +48,16 @@ pub fn prepare_websocket_subscription_request(
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    installation_id: &str,
+    account_namespace: &str,
+    downstream_scope: &str,
     request_id: &str,
-) -> PreparedSubscriptionRequest {
+) -> Result<PreparedSubscriptionRequest, ()> {
     prepare_subscription_request_for(
         headers,
         body,
         max_bytes,
-        installation_id,
+        account_namespace,
+        downstream_scope,
         request_id,
         SubscriptionTransport::WebSocket,
     )
@@ -62,37 +67,34 @@ fn prepare_subscription_request_for(
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    installation_id: &str,
+    account_namespace: &str,
+    downstream_scope: &str,
     _request_id: &str,
     transport: SubscriptionTransport,
-) -> PreparedSubscriptionRequest {
+) -> Result<PreparedSubscriptionRequest, ()> {
     let mut prepared_headers = headers.clone();
     if has_non_identity_encoding(headers) {
-        return prepared(prepared_headers, body);
+        return Err(());
     }
-    let Ok(mut value) = serde_json::from_slice::<Value>(&body) else {
-        return prepared(prepared_headers, body);
-    };
-    let Some(object) = value.as_object_mut() else {
-        return prepared(prepared_headers, body);
-    };
-    let changed = strip_unsupported_subscription_fields(object)
-        | request_defaults::normalize_optional_members(object);
-    let filtered_body = changed
-        .then(|| serde_json::to_vec(&value).ok())
-        .flatten()
-        .filter(|encoded| encoded.len() <= max_bytes)
-        .map(Bytes::from);
+    let mut value = serde_json::from_slice::<Value>(&body).map_err(|_| ())?;
+    {
+        let object = value.as_object_mut().ok_or(())?;
+        RequestPseudonymizer::new(account_namespace, downstream_scope)
+            .apply(&mut prepared_headers, object)?;
+        strip_unsupported_subscription_fields(object);
+        request_defaults::normalize_optional_members(object);
+        if object
+            .get("instructions")
+            .and_then(Value::as_str)
+            .is_some_and(str::is_empty)
+        {
+            object.remove("instructions");
+        }
+    }
+    let fallback_body = encode_body(&value, max_bytes)?;
     let object = value
         .as_object_mut()
         .expect("the request object was validated above");
-    if object
-        .get("instructions")
-        .and_then(Value::as_str)
-        .is_some_and(str::is_empty)
-    {
-        object.remove("instructions");
-    }
     let mut profile = object
         .get("model")
         .and_then(Value::as_str)
@@ -106,7 +108,6 @@ fn prepare_subscription_request_for(
             object,
             &mut prepared_headers,
             IdentityContext {
-                installation_id,
                 responses_lite: profile.responses_lite,
                 transport,
                 tool_namespaces_info: None,
@@ -114,26 +115,21 @@ fn prepare_subscription_request_for(
         );
         responses_lite::canonicalize_request_items(object);
         canonicalize_request_order(object, transport);
-        return encode_prepared(
-            prepared_headers,
-            &value,
-            max_bytes,
-            filtered_body.unwrap_or(body),
-        );
+        return encode_prepared(prepared_headers, &value, max_bytes);
     }
 
     let Some(input_value) = object.remove("input") else {
-        return prepared(prepared_headers, filtered_body.unwrap_or(body));
+        return Ok(prepared(prepared_headers, fallback_body));
     };
     let mut input = match normalize_input(input_value) {
         Some(input) => input,
-        None => return prepared(prepared_headers, filtered_body.unwrap_or(body)),
+        None => return Ok(prepared(prepared_headers, fallback_body)),
     };
     let tools = match object.remove("tools") {
         Some(Value::Array(tools)) => tools,
         Some(other) => {
             object.insert("tools".to_string(), other);
-            return prepared(prepared_headers, filtered_body.unwrap_or(body));
+            return Ok(prepared(prepared_headers, fallback_body));
         }
         None => Vec::new(),
     };
@@ -141,7 +137,7 @@ fn prepare_subscription_request_for(
         Some(Value::String(instructions)) => instructions,
         Some(other) => {
             object.insert("instructions".to_string(), other);
-            return prepared(prepared_headers, filtered_body.unwrap_or(body));
+            return Ok(prepared(prepared_headers, fallback_body));
         }
         None => String::new(),
     };
@@ -175,7 +171,6 @@ fn prepare_subscription_request_for(
         object,
         &mut prepared_headers,
         IdentityContext {
-            installation_id,
             responses_lite: profile.responses_lite,
             transport,
             tool_namespaces_info: None,
@@ -184,25 +179,22 @@ fn prepare_subscription_request_for(
     responses_lite::canonicalize_request_items(object);
     canonicalize_request_order(object, transport);
 
-    let Ok(encoded) = serde_json::to_vec(&value) else {
-        return prepared(headers.clone(), filtered_body.unwrap_or(body));
-    };
-    if encoded.len() > max_bytes {
-        return prepared(headers.clone(), filtered_body.unwrap_or(body));
-    }
-    prepared(prepared_headers, Bytes::from(encoded))
+    Ok(prepared(prepared_headers, encode_body(&value, max_bytes)?))
 }
 
 fn encode_prepared(
     headers: HeaderMap,
     value: &Value,
     max_bytes: usize,
-    fallback: Bytes,
-) -> PreparedSubscriptionRequest {
-    match serde_json::to_vec(value) {
-        Ok(encoded) if encoded.len() <= max_bytes => prepared(headers, Bytes::from(encoded)),
-        _ => prepared(headers, fallback),
-    }
+) -> Result<PreparedSubscriptionRequest, ()> {
+    Ok(prepared(headers, encode_body(value, max_bytes)?))
+}
+
+fn encode_body(value: &Value, max_bytes: usize) -> Result<Bytes, ()> {
+    let encoded = serde_json::to_vec(value).map_err(|_| ())?;
+    (encoded.len() <= max_bytes)
+        .then(|| Bytes::from(encoded))
+        .ok_or(())
 }
 
 fn canonicalize_request_order(object: &mut Map<String, Value>, transport: SubscriptionTransport) {
@@ -333,9 +325,14 @@ fn normalize_input(input: Value) -> Option<Vec<Value>> {
             None | Some("message")
         ) && let Some(text) = message.get("content").and_then(Value::as_str)
         {
+            let content_type = if message.get("role").and_then(Value::as_str) == Some("assistant") {
+                "output_text"
+            } else {
+                "input_text"
+            };
             message.insert(
                 "content".to_string(),
-                serde_json::json!([{"type": "input_text", "text": text}]),
+                serde_json::json!([{"type": content_type, "text": text}]),
             );
         }
     }
@@ -379,6 +376,14 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "request_normalizer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_message_tests.rs"]
+mod message_tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_defaults_tests.rs"]
+mod defaults_tests;
 
 #[cfg(test)]
 #[path = "request_normalizer_native_ws_tests.rs"]

@@ -30,8 +30,7 @@ pub(crate) enum SubscriptionTransport {
     WebSocket,
 }
 
-pub(crate) struct IdentityContext<'a> {
-    pub(crate) installation_id: &'a str,
+pub(crate) struct IdentityContext {
     pub(crate) responses_lite: bool,
     pub(crate) transport: SubscriptionTransport,
     pub(crate) tool_namespaces_info: Option<Value>,
@@ -51,7 +50,7 @@ struct RequestIdentity {
 pub(crate) fn apply(
     object: &mut Map<String, Value>,
     headers: &mut HeaderMap,
-    context: IdentityContext<'_>,
+    context: IdentityContext,
 ) {
     let identity = resolve_identity(object, headers, &context);
     apply_headers(headers, &identity, &context);
@@ -91,7 +90,7 @@ pub(crate) fn apply_routing_hint(object: &Map<String, Value>, headers: &mut Head
 fn resolve_identity(
     object: &Map<String, Value>,
     headers: &HeaderMap,
-    context: &IdentityContext<'_>,
+    context: &IdentityContext,
 ) -> RequestIdentity {
     let session_id = header_text(headers, "session-id")
         .or_else(|| client_metadata_text(object, "session_id"))
@@ -101,7 +100,7 @@ fn resolve_identity(
         .unwrap_or_else(|| session_id.clone());
     let installation_id = client_metadata_text(object, INSTALLATION_HEADER)
         .or_else(|| header_text(headers, INSTALLATION_HEADER))
-        .unwrap_or_else(|| context.installation_id.to_string());
+        .unwrap_or_else(new_uuid_v7);
     let body_turn_metadata = client_metadata_text(object, TURN_METADATA_HEADER);
     let header_turn_metadata = header_text(headers, TURN_METADATA_HEADER);
     let request_header_turn_metadata = (context.transport == SubscriptionTransport::Http)
@@ -216,14 +215,12 @@ fn generated_turn_metadata(
     to_ascii_json_string(&Value::Object(metadata)).unwrap_or_else(|_| "{}".to_string())
 }
 
-fn apply_headers(
-    headers: &mut HeaderMap,
-    identity: &RequestIdentity,
-    context: &IdentityContext<'_>,
-) {
+fn apply_headers(headers: &mut HeaderMap, identity: &RequestIdentity, context: &IdentityContext) {
     insert_header(headers, "session-id", &identity.session_id);
     insert_header(headers, "thread-id", &identity.thread_id);
-    insert_header(headers, "x-client-request-id", &identity.thread_id);
+    if header_text(headers, "x-client-request-id").is_none_or(|value| value.is_empty()) {
+        insert_header(headers, "x-client-request-id", &identity.thread_id);
+    }
     insert_header(
         headers,
         TURN_METADATA_HEADER,
@@ -246,7 +243,7 @@ fn apply_client_metadata(
     object: &mut Map<String, Value>,
     headers: &HeaderMap,
     identity: &RequestIdentity,
-    context: &IdentityContext<'_>,
+    context: &IdentityContext,
 ) {
     let preserve_native_order = object
         .get("client_metadata")

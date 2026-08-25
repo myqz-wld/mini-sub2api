@@ -1,11 +1,12 @@
 package protocolv1
 
 const (
-	VersionHeader    = "X-Mini-Sub2Api-Protocol-Version"
-	AccountRefHeader = "X-Mini-Sub2Api-Account-Ref"
-	RequestIDHeader  = "X-Mini-Sub2Api-Request-Id"
-	CoreTTFBHeader   = "X-Mini-Sub2Api-Core-TTFB-Ms"
-	Version          = "1"
+	VersionHeader        = "X-Mini-Sub2Api-Protocol-Version"
+	AccountRefHeader     = "X-Mini-Sub2Api-Account-Ref"
+	PseudonymScopeHeader = "X-Mini-Sub2Api-Pseudonym-Scope"
+	RequestIDHeader      = "X-Mini-Sub2Api-Request-Id"
+	CoreTTFBHeader       = "X-Mini-Sub2Api-Core-TTFB-Ms"
+	Version              = "1"
 )
 
 type BuildIdentity struct {

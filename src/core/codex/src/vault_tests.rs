@@ -2,7 +2,6 @@ use super::*;
 use pretty_assertions::assert_eq;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use uuid::Version;
 
 #[tokio::test]
 async fn api_key_record_is_private_and_round_trips() {
@@ -24,11 +23,7 @@ async fn api_key_record_is_private_and_round_trips() {
     assert_eq!(locked.record.metadata(), metadata);
     assert_eq!(locked.fingerprint().mode(), FingerprintMode::Device);
     assert_eq!(locked.fingerprint().revision(), 1);
-    let installation_id =
-        Uuid::parse_str(locked.fingerprint().installation_id()).expect("valid installation id");
-    assert_eq!(installation_id.get_version(), Some(Version::Random));
-    assert!(format!("{:?}", locked.fingerprint()).contains("<redacted>"));
-    assert!(!format!("{:?}", locked.fingerprint()).contains(&installation_id.to_string()));
+    assert!(!format!("{:?}", locked.fingerprint()).contains("installation"));
     match &locked.record.material {
         CredentialMaterial::OpenAiApiKey { api_key } => {
             assert_eq!(api_key, "upstream-secret")

@@ -18,16 +18,18 @@ import (
 )
 
 type fakeCore struct {
-	mu       sync.Mutex
-	calls    int
-	headers  http.Header
-	body     []byte
-	response func(context.Context, string) (*http.Response, error)
+	mu             sync.Mutex
+	calls          int
+	headers        http.Header
+	body           []byte
+	pseudonymScope string
+	response       func(context.Context, string) (*http.Response, error)
 }
 
 func (c *fakeCore) Forward(
 	ctx context.Context,
 	_ string,
+	pseudonymScope string,
 	requestID string,
 	headers http.Header,
 	body []byte,
@@ -36,6 +38,7 @@ func (c *fakeCore) Forward(
 	c.calls++
 	c.headers = headers.Clone()
 	c.body = append([]byte(nil), body...)
+	c.pseudonymScope = pseudonymScope
 	c.mu.Unlock()
 	return c.response(ctx, requestID)
 }
@@ -113,6 +116,9 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	core.mu.Lock()
 	if core.calls != 1 || !bytes.Equal(core.body, requestBody) {
 		t.Fatalf("core calls/body = %d/%q", core.calls, core.body)
+	}
+	if !strings.HasPrefix(core.pseudonymScope, "psn_") || len(core.pseudonymScope) != 47 {
+		t.Fatalf("pseudonym scope = %q", core.pseudonymScope)
 	}
 	if core.headers.Get("Authorization") != "" || core.headers.Get("X-Forwarded-For") != "" ||
 		core.headers.Get("X-Stainless-Unreviewed") != "" {

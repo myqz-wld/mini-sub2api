@@ -291,16 +291,12 @@ fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
 fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
     // Codex constructs these as provider, per-request, default, then auth maps. Replaying that
     // merge matters because tungstenite's mandatory-header removals make HeaderMap layout visible
-    // on the wire, including different layouts for default and thread-overridden originators.
+    // on the wire. Subscription identity itself is canonical and never caller-overridden.
     let mut provider_headers = HeaderMap::new();
     copy_header(&mut provider_headers, source, CODEX_VERSION_HEADER);
 
     let mut extra_headers = HeaderMap::new();
     copy_header(&mut extra_headers, source, "x-codex-beta-features");
-    let default_originator = oauth_default_originator(source);
-    if source.get("originator") != Some(&default_originator) {
-        copy_header(&mut extra_headers, source, "originator");
-    }
     copy_header(&mut extra_headers, source, "x-client-request-id");
 
     let mut session_headers = HeaderMap::new();
@@ -329,7 +325,10 @@ fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMa
     }
 
     let mut default_headers = HeaderMap::new();
-    default_headers.insert("originator", default_originator);
+    default_headers.insert(
+        "originator",
+        HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR),
+    );
     copy_header(&mut default_headers, source, "user-agent");
     copy_header(
         &mut default_headers,
@@ -349,17 +348,6 @@ fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMa
     destination.extend(headers);
 }
 
-fn oauth_default_originator(source: &HeaderMap) -> HeaderValue {
-    // The process default can be overridden internally; its anchored User-Agent keeps the same
-    // product token, while a thread originator override changes only the originator header.
-    source
-        .get(http::header::USER_AGENT)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split_once('/').map(|(product, _)| product))
-        .and_then(|product| HeaderValue::from_str(product).ok())
-        .unwrap_or_else(|| HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR))
-}
-
 fn copy_header(destination: &mut HeaderMap, source: &HeaderMap, name: &'static str) {
     if let Some(value) = source.get(name) {
         destination.insert(HeaderName::from_static(name), value.clone());
@@ -375,15 +363,10 @@ fn authenticated_headers(
         ResolvedAuth::CodexOAuth { token, account_id } => {
             let value = HeaderValue::from_str(account_id).map_err(|_| CoreFailure::Internal)?;
             headers.insert("chatgpt-account-id", value);
-            pin_codex_originator(&mut headers);
             for name in ["x-codex-installation-id", "session_id", "conversation_id"] {
                 headers.remove(name);
             }
-            headers.insert(
-                CODEX_VERSION_HEADER,
-                HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
-            );
-            crate::codex_user_agent::pin(&mut headers)?;
+            crate::codex_user_agent::pin_subscription(&mut headers)?;
             token
         }
         ResolvedAuth::OpenAiApiKey { token } => token,
@@ -406,22 +389,6 @@ pub(crate) fn websocket_url(upstream_url: &str) -> Result<Url, CoreFailure> {
     url.set_scheme(websocket_scheme)
         .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
     Ok(url)
-}
-
-fn pin_codex_originator(headers: &mut HeaderMap) {
-    let valid = headers
-        .get("originator")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            let value = value.trim();
-            value.starts_with("codex") || value.starts_with("Codex ")
-        });
-    if !valid {
-        headers.insert(
-            "originator",
-            HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR),
-        );
-    }
 }
 
 fn prepare_http_body(

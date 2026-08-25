@@ -125,6 +125,7 @@ func (s *Store) AuthenticateAndStart(
 	if err != nil {
 		return Route{}, fmt.Errorf("authenticate API key: %w", err)
 	}
+	route.PseudonymScope = pseudonymScope(hash)
 	_, err = tx.ExecContext(ctx, `
         INSERT INTO requests(
             request_id, api_key_id, credential_id_snapshot, started_at, terminal_status,
@@ -159,7 +160,16 @@ func (s *Store) AuthenticateConnection(ctx context.Context, secret string) (Rout
 	if err != nil {
 		return Route{}, fmt.Errorf("authenticate WebSocket API key: %w", err)
 	}
+	route.PseudonymScope = pseudonymScope(hash)
 	return route, nil
+}
+
+func pseudonymScope(keyHash [sha256.Size]byte) string {
+	digest := sha256.New()
+	_, _ = digest.Write([]byte("mini-sub2api/downstream-pseudonym-scope/v1"))
+	_, _ = digest.Write([]byte{0})
+	_, _ = digest.Write(keyHash[:])
+	return "psn_" + base64.RawURLEncoding.EncodeToString(digest.Sum(nil))
 }
 
 func (s *Store) StartWebSocketOperation(

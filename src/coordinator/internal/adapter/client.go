@@ -66,7 +66,7 @@ var internalHTTPClient = &http.Client{
 
 func (s *Supervisor) Forward(
 	ctx context.Context,
-	accountRef, requestID string,
+	accountRef, pseudonymScope, requestID string,
 	headers http.Header,
 	body []byte,
 ) (*http.Response, error) {
@@ -84,6 +84,7 @@ func (s *Supervisor) Forward(
 	request.Header.Set("Authorization", "Bearer "+core.token)
 	request.Header.Set(protocolv1.VersionHeader, protocolv1.Version)
 	request.Header.Set(protocolv1.AccountRefHeader, accountRef)
+	request.Header.Set(protocolv1.PseudonymScopeHeader, pseudonymScope)
 	request.Header.Set(protocolv1.RequestIDHeader, requestID)
 	response, err := internalHTTPClient.Do(request)
 	if err != nil {

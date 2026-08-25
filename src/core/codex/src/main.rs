@@ -15,12 +15,12 @@ mod oauth_login;
 mod request_defaults;
 mod request_identity;
 mod request_normalizer;
+mod request_pseudonym;
 mod response_item_metadata;
 mod responses_lite;
 mod responses_websocket;
 mod responses_websocket_deferred;
 mod server;
-mod terminal_detection;
 #[cfg(test)]
 mod test_support;
 mod transport_registry;

@@ -43,7 +43,7 @@ impl Drop for RunningInternalServer {
 }
 
 #[tokio::test]
-async fn device_projects_handshake_and_create_frames_but_not_control_frames() {
+async fn api_key_device_preserves_handshake_and_all_application_frames() {
     let capture = FingerprintCapture::default();
     let upstream = spawn_loopback(
         Router::new()
@@ -53,13 +53,6 @@ async fn device_projects_handshake_and_create_frames_but_not_control_frames() {
     .await;
     let (state, account_ref, _temp) =
         api_key_state(&upstream.base_url, FingerprintMode::Device).await;
-    let expected_device = state
-        .vault
-        .fingerprint_snapshot(&account_ref)
-        .await
-        .expect("fingerprint")
-        .installation_id()
-        .to_string();
     let core = spawn_internal(state).await;
     let handshake = internal_handshake(&core.base_url, &account_ref)
         .header("x-codex-installation-id", "header-conflict")
@@ -99,43 +92,25 @@ async fn device_projects_handshake_and_create_frames_but_not_control_frames() {
 
     let handshakes = capture.handshakes.lock().await;
     let upstream_headers = &handshakes[0];
-    assert!(
+    assert_eq!(
         upstream_headers
             .get("x-codex-installation-id")
-            .and_then(|value| value.to_str().ok())
-            == Some(expected_device.as_str())
+            .and_then(|value| value.to_str().ok()),
+        Some("header-conflict")
     );
-    let header_turn: Value = serde_json::from_str(
+    assert_eq!(
         upstream_headers
             .get("x-codex-turn-metadata")
-            .and_then(|value| value.to_str().ok())
-            .expect("header turn metadata"),
-    )
-    .expect("header turn JSON");
-    assert!(header_turn["installation_id"].as_str() == Some(expected_device.as_str()));
-    assert_eq!(header_turn["session_id"], "header-session");
-    assert_eq!(header_turn["future"], 1);
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            r#"{"installation_id":"header-turn-conflict","session_id":"header-session","future":1}"#
+        )
+    );
     drop(handshakes);
 
     let frames = capture.frames.lock().await;
     assert_eq!(frames.len(), 3);
-    let create: Value = serde_json::from_str(&frames[0]).expect("create JSON");
-    assert!(
-        create["client_metadata"]["x-codex-installation-id"].as_str()
-            == Some(expected_device.as_str())
-    );
-    let turn: Value = serde_json::from_str(
-        create["client_metadata"]["x-codex-turn-metadata"]
-            .as_str()
-            .expect("turn metadata"),
-    )
-    .expect("turn JSON");
-    assert!(turn["installation_id"].as_str() == Some(expected_device.as_str()));
-    assert_eq!(turn["session_id"], "session-kept");
-    assert_eq!(turn["thread_id"], "thread-kept");
-    assert_eq!(turn["turn_id"], "turn-kept");
-    assert_eq!(turn["window_id"], "window-kept");
-    assert_eq!(turn["future"]["kept"], true);
+    assert_eq!(frames[0], conflicting);
     assert_eq!(frames[1], prewarm);
     assert_eq!(frames[2], control);
 }
@@ -239,57 +214,7 @@ async fn stale_socket_forwards_zero_post_change_frames_and_reconnects() {
 }
 
 #[tokio::test]
-async fn two_credentials_use_distinct_websocket_devices() {
-    let capture = FingerprintCapture::default();
-    let upstream = spawn_loopback(
-        Router::new()
-            .route("/responses", get(accepting_upstream))
-            .with_state(capture.clone()),
-    )
-    .await;
-    let temp = tempfile::tempdir().expect("tempdir");
-    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
-    let first = create_api_key(&vault, &upstream.base_url, "first").await;
-    let second = create_api_key(&vault, &upstream.base_url, "second").await;
-    let first_device = vault
-        .fingerprint_snapshot(&first)
-        .await
-        .expect("first fingerprint")
-        .installation_id()
-        .to_string();
-    let second_device = vault
-        .fingerprint_snapshot(&second)
-        .await
-        .expect("second fingerprint")
-        .installation_id()
-        .to_string();
-    let core = spawn_internal(app_state(vault)).await;
-
-    for account_ref in [&first, &second] {
-        let handshake = internal_handshake(&core.base_url, account_ref)
-            .upgrade()
-            .send()
-            .await
-            .expect("handshake");
-        drop(handshake.into_websocket().await.expect("socket"));
-    }
-    let handshakes = capture.handshakes.lock().await;
-    let observed = handshakes
-        .iter()
-        .map(|headers| {
-            headers
-                .get("x-codex-installation-id")
-                .and_then(|value| value.to_str().ok())
-                .expect("device header")
-        })
-        .collect::<Vec<_>>();
-    assert!(observed[0] == first_device);
-    assert!(observed[1] == second_device);
-    assert!(observed[0] != observed[1]);
-}
-
-#[tokio::test]
-async fn malformed_device_handshake_metadata_never_reaches_upstream() {
+async fn api_key_device_preserves_malformed_identity_metadata_for_upstream() {
     let capture = FingerprintCapture::default();
     let upstream = spawn_loopback(
         Router::new()
@@ -305,9 +230,15 @@ async fn malformed_device_handshake_metadata_never_reaches_upstream() {
         .upgrade()
         .send()
         .await
-        .expect("rejected handshake");
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(capture.calls.load(Ordering::SeqCst), 0);
+        .expect("handshake");
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        capture.handshakes.lock().await[0]
+            .get("x-codex-turn-metadata")
+            .and_then(|value| value.to_str().ok()),
+        Some("not-json")
+    );
 }
 
 async fn accepting_upstream(
@@ -410,6 +341,10 @@ fn internal_handshake(base_url: &str, account_ref: &str) -> reqwest::RequestBuil
             mini_sub2api_protocol_v1::VERSION,
         )
         .header(mini_sub2api_protocol_v1::ACCOUNT_REF_HEADER, account_ref)
+        .header(
+            mini_sub2api_protocol_v1::PSEUDONYM_SCOPE_HEADER,
+            "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        )
         .header(mini_sub2api_protocol_v1::REQUEST_ID_HEADER, "req_ws_fp")
 }
 

@@ -48,12 +48,10 @@ async fn concurrent_expiry_refresh_rotates_once_and_persists() {
         )
         .await
         .expect("create OAuth record");
-    let initial_device = vault
+    let initial_fingerprint = vault
         .fingerprint_snapshot(&metadata.account_ref)
         .await
-        .expect("initial fingerprint")
-        .installation_id()
-        .to_string();
+        .expect("initial fingerprint");
     let client = Client::builder().build().expect("client");
 
     let mut tasks = Vec::new();
@@ -77,7 +75,11 @@ async fn concurrent_expiry_refresh_rotates_once_and_persists() {
         .lock_record(&metadata.account_ref)
         .await
         .expect("final record");
-    assert!(initial_device == locked.fingerprint().installation_id());
+    assert_eq!(initial_fingerprint.mode(), locked.fingerprint().mode());
+    assert_eq!(
+        initial_fingerprint.revision(),
+        locked.fingerprint().revision()
+    );
     match &locked.record.material {
         CredentialMaterial::CodexOAuth {
             access_token,

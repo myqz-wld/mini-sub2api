@@ -4,6 +4,7 @@ use serde::Serialize;
 pub const VERSION: &str = "1";
 pub const VERSION_HEADER: &str = "X-Mini-Sub2Api-Protocol-Version";
 pub const ACCOUNT_REF_HEADER: &str = "X-Mini-Sub2Api-Account-Ref";
+pub const PSEUDONYM_SCOPE_HEADER: &str = "X-Mini-Sub2Api-Pseudonym-Scope";
 pub const REQUEST_ID_HEADER: &str = "X-Mini-Sub2Api-Request-Id";
 pub const CORE_TTFB_HEADER: &str = "X-Mini-Sub2Api-Core-TTFB-Ms";
 

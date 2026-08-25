@@ -53,12 +53,8 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
         )
         .await
         .expect("OAuth record");
-    let expected_device = vault
-        .fingerprint_snapshot(&metadata.account_ref)
-        .await
-        .expect("fingerprint")
-        .installation_id()
-        .to_string();
+    let expected_device =
+        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let state = app_state(vault);
     let turn_metadata = serde_json::json!({
         "installation_id": "compaction-conflict",
@@ -160,10 +156,21 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
 fn assert_compaction_metadata(raw: &str, expected_device: &str) {
     let metadata: Value = serde_json::from_str(raw).expect("compaction metadata JSON");
     assert!(metadata["installation_id"].as_str() == Some(expected_device));
-    assert_eq!(metadata["session_id"], "session-kept");
-    assert_eq!(metadata["thread_id"], "thread-kept");
-    assert_eq!(metadata["turn_id"], "turn-kept");
-    assert_eq!(metadata["window_id"], "window-kept");
+    for (name, raw) in [
+        ("session_id", "session-kept"),
+        ("thread_id", "thread-kept"),
+        ("turn_id", "turn-kept"),
+        ("window_id", "window-kept"),
+    ] {
+        let pseudonym = metadata[name].as_str().expect("pseudonym");
+        assert_ne!(pseudonym, raw);
+        assert_eq!(
+            uuid::Uuid::parse_str(pseudonym)
+                .expect("pseudonym UUID")
+                .get_version_num(),
+            8
+        );
+    }
     assert_eq!(metadata["request_kind"], "compaction");
     assert_eq!(metadata["compaction"]["trigger"], "manual");
     assert_eq!(

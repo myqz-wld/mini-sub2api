@@ -58,6 +58,10 @@ pub(super) async fn call_core_with_headers(
         ACCOUNT_REF_HEADER,
         HeaderValue::from_str(account_ref).expect("account ref"),
     );
+    headers.insert(
+        PSEUDONYM_SCOPE_HEADER,
+        HeaderValue::from_static("psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+    );
     headers.insert(REQUEST_ID_HEADER, HeaderValue::from_static("req_test"));
     headers.insert(
         http::header::CONTENT_TYPE,

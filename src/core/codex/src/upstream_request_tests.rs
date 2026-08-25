@@ -171,13 +171,7 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
 }
 
 #[test]
-fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
-    assert_eq!(
-        crate::codex_user_agent::anchor_existing(
-            "Codex Desktop/9.9.9 (Mac OS 26.6.0; arm64) Ghostty"
-        ),
-        Some("Codex Desktop/0.149.0 (Mac OS 26.6.0; arm64) Ghostty".to_string())
-    );
+fn oauth_request_replaces_client_identity_with_canonical_subscription_profile() {
     let client = Client::builder()
         .no_proxy()
         .build()
@@ -205,7 +199,14 @@ fn oauth_request_pins_existing_codex_user_agent_and_preserves_suffix() {
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok()),
-        Some("codex_exec/0.149.0 (Mac OS 15.0.0; arm64) Apple_Terminal")
+        Some(crate::codex_user_agent::canonical_value().as_str())
+    );
+    assert_eq!(
+        request
+            .headers()
+            .get("originator")
+            .and_then(|value| value.to_str().ok()),
+        Some(DEFAULT_CODEX_ORIGINATOR)
     );
     assert_eq!(
         request

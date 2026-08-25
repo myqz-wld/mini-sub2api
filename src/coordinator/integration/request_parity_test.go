@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -129,7 +128,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 		capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "true" {
 		t.Fatalf("subscription markers = %#v", capture.Headers)
 	}
-	if !strings.HasPrefix(capture.Headers.Get("User-Agent"), "codex_cli_rs/0.149.0 (") {
+	if capture.Headers.Get("User-Agent") != canonicalSubscriptionUserAgent {
 		t.Fatalf("subscription User-Agent = %q", capture.Headers.Get("User-Agent"))
 	}
 	if capture.Headers.Get("Content-Encoding") != "zstd" {
