@@ -69,11 +69,9 @@ build/bin/mini-sub2api --state-dir ./state \
 Paste the key and finish with EOF. The secret is not placed in arguments, environment variables,
 or SQLite.
 
-Every new credential defaults to `--fingerprint-mode device`. For subscription credentials this
-mode derives one account-level Codex installation identity across HTTP, WebSocket, and machines;
-`off` retains per-source installation cardinality through one-to-one pseudonyms. Both modes always
-pseudonymize the remaining request identifiers. OpenAI API-key payloads remain transparent in both
-modes.
+Every credential defaults to `--fingerprint-mode device`: subscription installation identity
+converges per ChatGPT account, while `off` keeps one-to-one pseudonyms. Other subscription IDs are
+pseudonymized in both modes; OpenAI API-key payloads remain transparent.
 
 ### 2. Create a downstream API key
 
@@ -132,60 +130,35 @@ Then select the profile and supply only the downstream key:
 MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
 
-With `supports_websockets = true`, current Codex uses the Responses WebSocket v2 protocol and may
-reuse one connection for sequential turns. API-key credentials establish the upstream socket before
-the public upgrade. Subscription credentials accept the authenticated internal/public upgrade,
-then use the first `response.create` model, service tier, and bounded client turn metadata to
-construct the exact OAuth routing handshake. Pre-upgrade turn headers are not merged into that
-first-frame metadata. A subscription-side rejection after the public upgrade is a WebSocket close,
-not an HTTP `426`; set the flag to `false` when client-side HTTP fallback is required.
+With `supports_websockets = true`, Codex may reuse one Responses v2 socket for sequential turns.
+Subscription routing waits for the first `response.create`; a later rejection is therefore a
+WebSocket close rather than HTTP `426`. Set the flag to `false` if HTTP fallback is required.
 
-Subscription routes apply the Codex CLI `0.149.0` request contract: unsupported top-level fields
-are removed, `system` instruction messages become `developer` messages, easy assistant strings
-become `output_text` while input roles use `input_text`, request/tool/item JSON is serialized in the
-pinned CLI order, and synthesized conversation items use UUIDv7 plus turn/create metadata.
-Responses Lite uses the official `functions` namespace without inventing the opt-in
-`tool_namespaces_info` field. OAuth HTTP pins streaming, JSON media types, level-3 zstd, `version`,
-and one complete Codex identity. Every subscription request uses
-`codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`, `originator: codex_cli_rs`, and
-`version: 0.149.0`; inbound identity values cannot override that triplet. The bundled model
-defaults, unknown-model fallback, output schema name, OAuth authorize/refresh identity, and
-wire-critical dependency lock all follow `0.149.0`. Explicit
-models, tools, instructions, reasoning controls, and WebSocket `generate`/continuation fields remain
-authoritative. Native canonical WebSocket frames also retain the CLI-supplied
-`x-codex-ws-stream-request-start-ms`; the normalizer generates it only when missing or empty.
-Codex `0.149.0` startup prewarm metadata with `turn_id=""` and no `root_turn_id` or
-`turn_started_at_unix_ms` is treated as complete, so those fields are not added; when no other
-defaulting is required, its non-identity fields retain their shape. Incomplete or non-native
-metadata is still filled. Remote compaction and sparse memory metadata retain their request kinds.
+Subscription routes reproduce the Codex CLI `0.149.0` request shape: unsupported fields are
+removed, system messages become developer messages, assistant strings use `output_text`, and
+input roles use `input_text`. Model metadata uses Codex's longest-prefix and single-namespace
+suffix lookup before the true-unknown fallback; explicit effort, `summary:none`, verbosity, tools,
+and continuation controls remain authoritative. Responses Lite, prewarm, compaction, memory,
+serialization order, zstd, and synthesized item metadata follow the same pinned version.
 
-Subscription identifiers are statelessly pseudonymized before optional device convergence. The
-coordinator derives an internal scope from the authenticated downstream-key verifier; the core
-combines it with the stable ChatGPT account namespace, a field domain, and the source ID through
-HMAC-SHA256, emitting UUIDv8 values. The mapping covers installation, session, thread, turn,
-root/parent identities, window, client-request, item turn metadata, and prompt-cache carriers.
-Identical account/key/source inputs produce identical pseudonyms on different machines, while a
-different account or downstream key produces a different namespace. `device` additionally replaces
-installation with an account-level stateless UUIDv8; `off` keeps its one-to-one pseudonym.
-OpenAI API-key bodies and carrier-free WebSocket frames remain byte-exact; organization/project
-headers are not sent on OAuth routes.
+Every subscription request also uses the fixed identity
+`codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
+`originator: codex_cli_rs`, and `version: 0.149.0`. Request IDs are mapped to UUIDv8 with a
+stateless HMAC over ChatGPT account, downstream key scope, field, and source value; `device` then
+converges installation per account. The mapping is host-independent and the internal scope never
+crosses upstream. OpenAI API-key bodies and carrier-free WebSocket frames remain byte-exact.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
 - One socket is bound to one downstream key and credential; responses are sequential, and an
   overlapping `response.create` closes the connection with a policy violation.
 - Other valid Responses v2 JSON application events pass through while a response is active.
-- The core captures one credential fingerprint at the upstream handshake. It checks the current
-  fingerprint revision before every `response.create`; after a mode change, an idle old socket
-  closes once with reconnectable service-restart semantics before forwarding another create.
+- Mode changes fence existing sockets before their next `response.create`.
 - A key may hold at most eight live sockets. The first application frame must arrive within 30
   seconds, an idle connection between turns closes after five minutes, each write is bounded to
   120 seconds, and application messages are limited to 16 MiB. There is no hard total lifetime.
-- Codex's `generate=false` startup prewarm is retained in history as `websocket_prewarm` for
-  in-flight/revocation safety, but it is excluded from daily inference aggregates.
-- The public and provider hops support per-message deflate. The provider offer matches Codex
-  `0.149.0` (`permessage-deflate; client_max_window_bits`); the authenticated loopback hop remains
-  uncompressed, and payload semantics are unchanged.
+- `generate=false` prewarm is tracked for revocation safety but excluded from daily inference
+  aggregates. Public/provider sockets support deflate; the internal loopback hop does not.
 
 ## Administration
 
@@ -254,6 +227,9 @@ HTTP/1.1 Upgrade/Connection headers without buffering the upgraded connection.
 Operational boundaries:
 
 - Run only one coordinator/core pair per state directory.
+- The service is not active-active: SQLite, the credential vault, OAuth refresh locking, policy
+  sidecars, revocation state, and usage history are node-local. Stateless identity projection alone
+  is multi-machine safe; horizontal deployment first requires shared storage and distributed locks.
 - Stop the service before backing up or restoring the complete state directory.
 - Provider secrets live in a private `0600` vault and are not encrypted at rest.
 - Credential fingerprint sidecars are private `0600` core-vault state containing only mode and
@@ -265,22 +241,14 @@ Operational boundaries:
 - Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or
   disabling a credential therefore prevents the next turn on an already-open idle socket.
 - Inference is not replayed after transport errors, `429`, or `5xx`. OAuth may refresh once and
-  replay once after a pre-response upstream `401`.
+  replay once after a pre-response upstream `401`. Gateway errors expose `retryAdvice`, `phase`,
+  and `deliveryState`; mid-stream HTTP failures use trailers and upgraded WebSockets use close code
+  `4500` with the same JSON tuple. Treat `ambiguous` as possibly delivered and never auto-retry it.
 
-Upstream connection pools are isolated per credential. HTTP uses the platform transport-default
-TLS backend; Responses WebSocket uses AWS-LC rustls with platform-native roots, matching the fixed
-Codex `0.149.0` transport split, including its absent WebSocket ALPN offer and PQ-first key groups.
-The provider WebSocket handshake and compression path use the same pinned OpenAI
-`tokio-tungstenite`/`tungstenite` fork revisions as that release. These profiles are internal and
-are not user-configurable, and every new provider WebSocket gets fresh TLS session state.
-Subscription requests also pin the complete Codex identity triplet;
-regular OpenAI API-key routes preserve a reviewed client-supplied value. Reviewed
-`x-openai-subagent` identity crosses both HTTP and WebSocket routes, including Codex's conditional
-subagent handshake order. OAuth WebSocket headers follow the reviewed provider/extra/default/auth
-merge with the canonical originator, routing, residency, timing, attestation, and memory-generation
-order. Reviewed attestation, inference-call, and memory-generation names cross
-the Go filters. OAuth HTTP clients share only the official allowlist of Cloudflare infrastructure
-cookies; account, session, and arbitrary application cookies are never retained.
+Connection pools are credential-isolated. HTTP uses platform TLS; provider WebSockets use the
+pinned `0.149.0` AWS-LC/native-root stack, fork revisions, compression offer, header order, and
+fresh TLS state. OAuth routes exclude API-key organization/SDK headers and retain only allowlisted
+Cloudflare infrastructure cookies.
 
 Compatibility is exact for request state that a `0.149.0` client supplies or the gateway can derive.
 The gateway does not fabricate absent caller workspace, sandbox, thread-source, trace, attestation,

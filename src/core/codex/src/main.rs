@@ -17,6 +17,7 @@ mod request_identity;
 mod request_normalizer;
 mod request_pseudonym;
 mod response_item_metadata;
+mod response_stream;
 mod responses_lite;
 mod responses_websocket;
 mod responses_websocket_deferred;
@@ -28,6 +29,7 @@ mod upstream_request;
 mod vault;
 mod vault_io;
 mod websocket_connector;
+mod websocket_delivery;
 
 use clap::Parser;
 

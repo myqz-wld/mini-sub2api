@@ -11,6 +11,7 @@ import (
 
 	"mini-sub2api/src/coordinator/internal/storage"
 	"mini-sub2api/src/coordinator/internal/usage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 type websocketTimeouts struct {
@@ -37,6 +38,10 @@ const (
 
 type websocketPumpResult struct {
 	terminalStatus string
+	failure        protocolv1.FailureMetadata
+	hasFailure     bool
+	closeCode      websocket.StatusCode
+	hasCloseCode   bool
 }
 
 const (
@@ -111,7 +116,7 @@ func (s *websocketSession) run() {
 			if s.stopping.Load() {
 				status = storage.RequestUpstreamErr
 			} else if status == storage.RequestUpstreamErr {
-				_ = s.publicSocket.Close(websocket.StatusServiceRestart, "")
+				s.closePublicForCoreFailure(result)
 			}
 			s.cancel()
 			_ = s.publicSocket.CloseNow()
@@ -188,7 +193,7 @@ func (s *websocketSession) clientPump() websocketPumpResult {
 		err = s.coreSocket.Write(writeContext, websocket.MessageText, payload)
 		cancel()
 		if err != nil {
-			return s.pumpResult(storage.RequestUpstreamErr)
+			return s.upstreamPumpResult(err)
 		}
 	}
 }
@@ -197,14 +202,15 @@ func (s *websocketSession) corePump() websocketPumpResult {
 	for {
 		messageType, payload, err := s.coreSocket.Read(s.ctx)
 		if err != nil {
-			return s.pumpResult(storage.RequestUpstreamErr)
+			return s.upstreamPumpResult(err)
 		}
 		if messageType != websocket.MessageText {
-			return s.pumpResult(storage.RequestUpstreamErr)
+			return s.upstreamPumpResult(nil)
 		}
+		s.observeCoreResponse()
 		event, ok := usage.ParseWebSocketEvent(payload)
 		if !ok {
-			return s.pumpResult(storage.RequestUpstreamErr)
+			return s.upstreamPumpResult(nil)
 		}
 		terminalStatus, terminal := websocketTerminalStatus(event.Type)
 		s.observeServerEvent(event, terminal)
@@ -272,13 +278,6 @@ func (s *websocketSession) observeServerEvent(event usage.WebSocketEvent, termin
 	if s.active == nil {
 		return
 	}
-	if s.active.ttfb == nil {
-		value := s.handler.clock().UTC().Sub(s.active.started)
-		if value < 0 {
-			value = 0
-		}
-		s.active.ttfb = &value
-	}
 	if event.Usage != nil {
 		value := *event.Usage
 		s.active.usage = &value
@@ -286,6 +285,19 @@ func (s *websocketSession) observeServerEvent(event usage.WebSocketEvent, termin
 	if terminal {
 		s.active.terminalPending = true
 	}
+}
+
+func (s *websocketSession) observeCoreResponse() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active == nil || s.active.ttfb != nil {
+		return
+	}
+	value := s.handler.clock().UTC().Sub(s.active.started)
+	if value < 0 {
+		value = 0
+	}
+	s.active.ttfb = &value
 }
 
 func (s *websocketSession) completeActive(status string) bool {
@@ -341,6 +353,64 @@ func (s *websocketSession) notifyDeadline(event websocketDeadlineEvent) {
 func (s *websocketSession) pumpResult(status string) websocketPumpResult {
 	s.recordExitCause(status)
 	return websocketPumpResult{terminalStatus: status}
+}
+
+func (s *websocketSession) upstreamPumpResult(err error) websocketPumpResult {
+	s.recordExitCause(storage.RequestUpstreamErr)
+	if metadata, ok := parseCoreFailureClose(err); ok {
+		return websocketPumpResult{
+			terminalStatus: storage.RequestUpstreamErr, failure: metadata, hasFailure: true,
+		}
+	}
+	if code, ok := passthroughCoreClose(err); ok {
+		return websocketPumpResult{
+			terminalStatus: storage.RequestUpstreamErr, closeCode: code, hasCloseCode: true,
+		}
+	}
+	return websocketPumpResult{
+		terminalStatus: storage.RequestUpstreamErr,
+		failure:        s.currentDeliveryFailure(),
+		hasFailure:     true,
+	}
+}
+
+func (s *websocketSession) currentDeliveryFailure() protocolv1.FailureMetadata {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	metadata := protocolv1.FailureMetadata{
+		RetryAdvice: protocolv1.RetrySafe, Phase: protocolv1.PhaseWebSocketRelay,
+		DeliveryState: protocolv1.DeliveryNotDelivered,
+	}
+	if s.active == nil {
+		return metadata
+	}
+	if s.active.ttfb != nil {
+		metadata.RetryAdvice = protocolv1.RetryNever
+		metadata.DeliveryState = protocolv1.DeliveryDelivered
+		return metadata
+	}
+	metadata.RetryAdvice = protocolv1.RetryAmbiguous
+	metadata.DeliveryState = protocolv1.DeliveryPossiblyDelivered
+	return metadata
+}
+
+func (s *websocketSession) closePublicForCoreFailure(result websocketPumpResult) {
+	if result.hasFailure {
+		if reason, ok := failureCloseReason(result.failure); ok {
+			_ = s.publicSocket.Close(websocket.StatusCode(protocolv1.FailureCloseCode), reason)
+			return
+		}
+	}
+	if result.hasCloseCode {
+		_ = s.publicSocket.Close(result.closeCode, "")
+		return
+	}
+	metadata := s.currentDeliveryFailure()
+	if reason, ok := failureCloseReason(metadata); ok {
+		_ = s.publicSocket.Close(websocket.StatusCode(protocolv1.FailureCloseCode), reason)
+		return
+	}
+	_ = s.publicSocket.Close(websocket.StatusServiceRestart, "")
 }
 
 func (s *websocketSession) recordExitCause(status string) {

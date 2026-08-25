@@ -450,3 +450,6 @@ fn internal_handshake(base_url: &str, account_ref: &str) -> reqwest::RequestBuil
 
 #[path = "responses_websocket_oauth_tests.rs"]
 mod oauth_tests;
+
+#[path = "responses_websocket_delivery_tests.rs"]
+mod delivery_tests;

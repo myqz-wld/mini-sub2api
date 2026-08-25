@@ -2,8 +2,9 @@
   "error": {
     "code": "credential_requires_login",
     "message": "The selected credential requires sign-in.",
-    "retryable": false,
-    "requestId": "req_01JEXAMPLE"
+    "requestId": "req_01JEXAMPLE",
+    "retryAdvice": "never",
+    "phase": "credential",
+    "deliveryState": "not_delivered"
   }
 }
-

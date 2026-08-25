@@ -7,6 +7,94 @@ pub const ACCOUNT_REF_HEADER: &str = "X-Mini-Sub2Api-Account-Ref";
 pub const PSEUDONYM_SCOPE_HEADER: &str = "X-Mini-Sub2Api-Pseudonym-Scope";
 pub const REQUEST_ID_HEADER: &str = "X-Mini-Sub2Api-Request-Id";
 pub const CORE_TTFB_HEADER: &str = "X-Mini-Sub2Api-Core-TTFB-Ms";
+pub const FAILURE_PHASE_TRAILER: &str = "X-Mini-Sub2Api-Failure-Phase";
+pub const DELIVERY_STATE_TRAILER: &str = "X-Mini-Sub2Api-Delivery-State";
+pub const RETRY_ADVICE_TRAILER: &str = "X-Mini-Sub2Api-Retry-Advice";
+pub const FAILURE_CLOSE_CODE: u16 = 4500;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryAdvice {
+    Safe,
+    Ambiguous,
+    Never,
+}
+
+impl RetryAdvice {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Safe => "safe",
+            Self::Ambiguous => "ambiguous",
+            Self::Never => "never",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailurePhase {
+    Internal,
+    Request,
+    Credential,
+    UpstreamConnect,
+    UpstreamRequest,
+    UpstreamResponse,
+    UpstreamStream,
+    WebSocketRelay,
+}
+
+impl FailurePhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Internal => "internal",
+            Self::Request => "request",
+            Self::Credential => "credential",
+            Self::UpstreamConnect => "upstream_connect",
+            Self::UpstreamRequest => "upstream_request",
+            Self::UpstreamResponse => "upstream_response",
+            Self::UpstreamStream => "upstream_stream",
+            Self::WebSocketRelay => "websocket_relay",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryState {
+    NotDelivered,
+    PossiblyDelivered,
+    Delivered,
+}
+
+impl DeliveryState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotDelivered => "not_delivered",
+            Self::PossiblyDelivered => "possibly_delivered",
+            Self::Delivered => "delivered",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailureMetadata {
+    pub retry_advice: RetryAdvice,
+    pub phase: FailurePhase,
+    pub delivery_state: DeliveryState,
+}
+
+impl FailureMetadata {
+    pub const fn is_valid(self) -> bool {
+        matches!(
+            (self.retry_advice, self.delivery_state),
+            (RetryAdvice::Safe, DeliveryState::NotDelivered)
+                | (RetryAdvice::Ambiguous, DeliveryState::PossiblyDelivered)
+                | (RetryAdvice::Never, DeliveryState::NotDelivered)
+                | (RetryAdvice::Never, DeliveryState::Delivered)
+        )
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,8 +130,9 @@ pub struct ErrorEnvelope {
 pub struct CoreError {
     pub code: String,
     pub message: String,
-    pub retryable: bool,
     pub request_id: String,
+    #[serde(flatten)]
+    pub failure: FailureMetadata,
 }
 
 #[cfg(test)]
@@ -78,10 +167,27 @@ mod tests {
             error: CoreError {
                 code: "credential_requires_login".to_string(),
                 message: "The selected credential requires sign-in.".to_string(),
-                retryable: false,
                 request_id: "req_01JEXAMPLE".to_string(),
+                failure: FailureMetadata {
+                    retry_advice: RetryAdvice::Never,
+                    phase: FailurePhase::Credential,
+                    delivery_state: DeliveryState::NotDelivered,
+                },
             },
         };
         assert_eq!(got, want);
+        assert!(got.error.failure.is_valid());
+    }
+
+    #[test]
+    fn retry_advice_requires_a_coherent_delivery_state() {
+        assert!(
+            !FailureMetadata {
+                retry_advice: RetryAdvice::Safe,
+                phase: FailurePhase::UpstreamRequest,
+                delivery_state: DeliveryState::PossiblyDelivered,
+            }
+            .is_valid()
+        );
     }
 }

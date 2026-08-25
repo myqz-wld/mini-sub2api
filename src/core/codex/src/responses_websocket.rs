@@ -17,6 +17,11 @@ use crate::upstream_request::build_websocket;
 use crate::vault::Vault;
 use crate::websocket_connector::WebSocketConnection as UpstreamWebSocket;
 use crate::websocket_connector::WebSocketHandshake;
+use crate::websocket_delivery::WebSocketDeliveryTracker;
+use crate::websocket_delivery::failure_close;
+use crate::websocket_delivery::internal_close;
+use crate::websocket_delivery::is_response_create;
+use crate::websocket_delivery::is_terminal_response_event;
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::extract::State;
@@ -225,16 +230,19 @@ pub(crate) async fn relay(
     } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
-    if let Some(initial) = initial
-        && upstream_write.send(initial).await.is_err()
-    {
-        let _ = internal_write.send(internal_close(1011)).await;
-        return;
+    let delivery = WebSocketDeliveryTracker::default();
+    if let Some(initial) = initial {
+        delivery.mark_attempted();
+        if upstream_write.send(initial).await.is_err() {
+            let _ = internal_write.send(failure_close(delivery.failure())).await;
+            return;
+        }
     }
     let exit = {
         let client_to_upstream = async {
             let mut create_sequence = initial_create_sequence;
             while let Some(message) = internal_read.next().await {
+                let mut create_attempt = false;
                 let outbound = match message {
                     Ok(InternalMessage::Text(text)) => {
                         let text = text.to_string();
@@ -264,7 +272,10 @@ pub(crate) async fn relay(
                             &fingerprint,
                             &mut create_sequence,
                         ) {
-                            Ok(prepared) => UpstreamMessage::Text(prepared.into()),
+                            Ok(prepared) => {
+                                create_attempt = is_create;
+                                UpstreamMessage::Text(prepared.into())
+                            }
                             Err(()) => upstream_close(UpstreamCloseCode::Protocol),
                         }
                     }
@@ -285,7 +296,17 @@ pub(crate) async fn relay(
                     Err(_) => upstream_close(UpstreamCloseCode::Away),
                 };
                 let terminal = matches!(outbound, UpstreamMessage::Close(_));
-                if upstream_write.send(outbound).await.is_err() || terminal {
+                if create_attempt {
+                    delivery.mark_attempted();
+                }
+                if upstream_write.send(outbound).await.is_err() {
+                    return if terminal {
+                        RelayExit::Complete
+                    } else {
+                        RelayExit::Failure(delivery.failure())
+                    };
+                }
+                if terminal {
                     return RelayExit::Complete;
                 }
             }
@@ -296,29 +317,47 @@ pub(crate) async fn relay(
         };
         let upstream_to_client = async {
             while let Some(message) = upstream_read.next().await {
-                let outbound = match message {
+                let (outbound, terminal_event) = match message {
                     Ok(UpstreamMessage::Text(text)) => {
-                        InternalMessage::Text(text.to_string().into())
+                        let text = text.to_string();
+                        delivery.mark_response_observed();
+                        let terminal = is_terminal_response_event(&text);
+                        (InternalMessage::Text(text.into()), terminal)
                     }
-                    Ok(UpstreamMessage::Binary(_)) => internal_close(1003),
-                    Ok(UpstreamMessage::Ping(payload)) => InternalMessage::Ping(payload),
-                    Ok(UpstreamMessage::Pong(payload)) => InternalMessage::Pong(payload),
+                    Ok(UpstreamMessage::Binary(_)) | Ok(UpstreamMessage::Frame(_)) => {
+                        return RelayExit::Failure(delivery.failure());
+                    }
+                    Ok(UpstreamMessage::Ping(payload)) => (InternalMessage::Ping(payload), false),
+                    Ok(UpstreamMessage::Pong(payload)) => (InternalMessage::Pong(payload), false),
                     Ok(UpstreamMessage::Close(frame)) => {
-                        InternalMessage::Close(frame.map(|frame| InternalCloseFrame {
-                            code: u16::from(frame.code),
-                            reason: frame.reason.to_string().into(),
-                        }))
+                        let failure = delivery.failure();
+                        if failure.delivery_state
+                            != mini_sub2api_protocol_v1::DeliveryState::NotDelivered
+                        {
+                            return RelayExit::Failure(failure);
+                        }
+                        (
+                            InternalMessage::Close(frame.map(|frame| InternalCloseFrame {
+                                code: u16::from(frame.code),
+                                reason: frame.reason.to_string().into(),
+                            })),
+                            false,
+                        )
                     }
-                    Ok(UpstreamMessage::Frame(_)) => internal_close(1011),
-                    Err(_) => internal_close(1011),
+                    Err(_) => return RelayExit::Failure(delivery.failure()),
                 };
                 let terminal = matches!(outbound, InternalMessage::Close(_));
-                if internal_write.send(outbound).await.is_err() || terminal {
+                if internal_write.send(outbound).await.is_err() {
+                    return RelayExit::Complete;
+                }
+                if terminal_event {
+                    delivery.mark_terminal();
+                }
+                if terminal {
                     return RelayExit::Complete;
                 }
             }
-            let _ = internal_write.send(internal_close(1011)).await;
-            RelayExit::Complete
+            RelayExit::Failure(delivery.failure())
         };
         tokio::select! {
             biased;
@@ -326,18 +365,28 @@ pub(crate) async fn relay(
             exit = upstream_to_client => exit,
         }
     };
-    if exit == RelayExit::StaleFingerprint {
-        let _ = internal_write.send(internal_close(1012)).await;
-        let _ = upstream_write
-            .send(upstream_close(UpstreamCloseCode::Restart))
-            .await;
+    match exit {
+        RelayExit::Complete => {}
+        RelayExit::StaleFingerprint => {
+            let _ = internal_write.send(internal_close(1012)).await;
+            let _ = upstream_write
+                .send(upstream_close(UpstreamCloseCode::Restart))
+                .await;
+        }
+        RelayExit::Failure(metadata) => {
+            let _ = internal_write.send(failure_close(metadata)).await;
+            let _ = upstream_write
+                .send(upstream_close(UpstreamCloseCode::Restart))
+                .await;
+        }
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy)]
 enum RelayExit {
     Complete,
     StaleFingerprint,
+    Failure(mini_sub2api_protocol_v1::FailureMetadata),
 }
 
 pub(crate) async fn fingerprint_is_current(
@@ -349,17 +398,6 @@ pub(crate) async fn fingerprint_is_current(
         return false;
     };
     current.revision() == captured.revision() && current.mode() == captured.mode()
-}
-
-pub(crate) fn is_response_create(text: &str) -> Result<bool, ()> {
-    let value: Value = serde_json::from_str(text).map_err(|_| ())?;
-    let message_type = value
-        .as_object()
-        .and_then(|object| object.get("type"))
-        .and_then(Value::as_str)
-        .filter(|message_type| !message_type.is_empty())
-        .ok_or(())?;
-    Ok(message_type == "response.create")
 }
 
 fn prepare_client_text(
@@ -410,13 +448,6 @@ fn prepare_client_text(
     } else {
         Ok(prepared)
     }
-}
-
-fn internal_close(code: u16) -> InternalMessage {
-    InternalMessage::Close(Some(InternalCloseFrame {
-        code,
-        reason: "".into(),
-    }))
 }
 
 fn upstream_close(code: UpstreamCloseCode) -> UpstreamMessage {

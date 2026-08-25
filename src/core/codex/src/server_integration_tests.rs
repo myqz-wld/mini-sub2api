@@ -5,9 +5,15 @@ use axum::extract::State as AxumState;
 use axum::response::Response as AxumResponse;
 use axum::routing::post as axum_post;
 use bytes::Bytes;
+use futures_util::StreamExt;
 use futures_util::stream;
 use http::HeaderName;
 use http::HeaderValue;
+use http_body_util::BodyExt;
+use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
+use mini_sub2api_protocol_v1::DELIVERY_STATE_TRAILER;
+use mini_sub2api_protocol_v1::FAILURE_PHASE_TRAILER;
+use mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER;
 use std::convert::Infallible;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -146,6 +152,64 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
     assert!(!headers.contains_key(PSEUDONYM_SCOPE_HEADER));
     assert!(!headers.contains_key("x-forwarded-for"));
     assert!(!headers.contains_key("x-stainless-unreviewed"));
+}
+
+#[tokio::test]
+async fn upstream_stream_failure_becomes_delivery_trailers() {
+    let app = Router::new().route(
+        "/responses",
+        axum_post(|| async {
+            let chunks = stream::unfold(0_u8, |step| async move {
+                match step {
+                    0 => Some((
+                        Ok::<_, std::io::Error>(Bytes::from_static(b"data: first\n\n")),
+                        1,
+                    )),
+                    1 => {
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                        Some((Err(std::io::Error::other("simulated upstream reset")), 2))
+                    }
+                    _ => None,
+                }
+            });
+            AxumResponse::builder()
+                .status(StatusCode::OK)
+                .header(http::header::CONTENT_TYPE, "text/event-stream")
+                .body(Body::from_stream(chunks))
+                .expect("mock response")
+        }),
+    );
+    let upstream = spawn_loopback(app).await;
+    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let response = call_core_with_headers(
+        &state,
+        &account_ref,
+        Bytes::from_static(br#"{"model":"test","stream":true}"#),
+        HeaderMap::new(),
+    )
+    .await
+    .expect("core response");
+    assert!(response.headers().contains_key(http::header::TRAILER));
+
+    let mut body = response.into_body();
+    let data = body
+        .frame()
+        .await
+        .expect("data frame")
+        .expect("valid data frame")
+        .into_data()
+        .expect("data");
+    assert_eq!(data, Bytes::from_static(b"data: first\n\n"));
+    let trailers = body
+        .frame()
+        .await
+        .expect("trailer frame")
+        .expect("valid trailer frame")
+        .into_trailers()
+        .expect("trailers");
+    assert_eq!(trailers[FAILURE_PHASE_TRAILER], "upstream_stream");
+    assert_eq!(trailers[DELIVERY_STATE_TRAILER], "delivered");
+    assert_eq!(trailers[RETRY_ADVICE_TRAILER], "never");
 }
 
 #[tokio::test]

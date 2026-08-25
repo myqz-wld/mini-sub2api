@@ -7,7 +7,6 @@ use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket::RelayContext;
 use crate::responses_websocket::fingerprint_is_current;
-use crate::responses_websocket::is_response_create;
 use crate::responses_websocket::relay;
 use crate::responses_websocket::send_handshake;
 use crate::server::AppState;
@@ -16,7 +15,10 @@ use crate::server::account_lock;
 use crate::server::resolve_auth;
 use crate::upstream_request::ResolvedAuth;
 use crate::websocket_connector::WebSocketHandshake;
-use axum::extract::ws::CloseFrame;
+use crate::websocket_delivery::failure_before_websocket_delivery;
+use crate::websocket_delivery::failure_close;
+use crate::websocket_delivery::internal_close;
+use crate::websocket_delivery::is_response_create;
 use axum::extract::ws::Message;
 use axum::extract::ws::WebSocket;
 use bytes::Bytes;
@@ -39,7 +41,7 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
     let first = match first_create(&mut internal).await {
         Ok(first) => first,
         Err(code) => {
-            let _ = internal.send(close(code)).await;
+            let _ = internal.send(internal_close(code)).await;
             return;
         }
     };
@@ -50,7 +52,7 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
     )
     .await
     {
-        let _ = internal.send(close(1012)).await;
+        let _ = internal.send(internal_close(1012)).await;
         return;
     }
     let frame_request_id = format!("{}-ws-1", context.request_id);
@@ -62,7 +64,7 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         &context.pseudonym_scope,
         &frame_request_id,
     ) else {
-        let _ = internal.send(close(1002)).await;
+        let _ = internal.send(internal_close(1002)).await;
         return;
     };
     let mut upstream_headers = prepared.headers;
@@ -73,11 +75,11 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         )
         .is_err()
     {
-        let _ = internal.send(close(1002)).await;
+        let _ = internal.send(internal_close(1002)).await;
         return;
     }
     let Ok(text) = String::from_utf8(prepared.body.to_vec()) else {
-        let _ = internal.send(close(1002)).await;
+        let _ = internal.send(internal_close(1002)).await;
         return;
     };
     let text = if context.resolved.fingerprint.mode() == FingerprintMode::Device {
@@ -89,7 +91,7 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         ) {
             Ok(text) => text,
             Err(_) => {
-                let _ = internal.send(close(1002)).await;
+                let _ = internal.send(internal_close(1002)).await;
                 return;
             }
         }
@@ -99,12 +101,8 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
     let (upstream, turn_state) = match connect(&context, &upstream_headers).await {
         Ok(connected) => connected,
         Err(error) => {
-            let code = if matches!(error, CoreFailure::UpstreamAuthFailed) {
-                1008
-            } else {
-                1011
-            };
-            let _ = internal.send(close(code)).await;
+            let metadata = failure_before_websocket_delivery(&error);
+            let _ = internal.send(failure_close(metadata)).await;
             return;
         }
     };
@@ -170,7 +168,7 @@ async fn connect(
         }
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
-        return Err(CoreFailure::UpstreamConnectFailed);
+        return Err(CoreFailure::UpstreamHandshakeRejected);
     }
     let turn_state = handshake.headers().get("x-codex-turn-state").cloned();
     match handshake {
@@ -201,11 +199,4 @@ async fn first_create(internal: &mut WebSocket) -> Result<String, u16> {
         }
     }
     Err(1001)
-}
-
-fn close(code: u16) -> Message {
-    Message::Close(Some(CloseFrame {
-        code,
-        reason: "".into(),
-    }))
 }

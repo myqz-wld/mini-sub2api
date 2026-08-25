@@ -152,7 +152,12 @@ frames.
 
 - The core preserves the upstream status, safe end-to-end headers, JSON, and SSE bytes.
 - The core adds `X-Mini-Sub2Api-Core-TTFB-Ms` after receiving upstream response headers.
+- Every streamed response declares the three failure trailers. They remain empty on clean EOF; a
+  provider-body failure emits `X-Mini-Sub2Api-Failure-Phase`,
+  `X-Mini-Sub2Api-Delivery-State`, and `X-Mini-Sub2Api-Retry-Advice` as the final trailer block.
 - The coordinator removes internal headers, adds the public request id, and merges `upstream_ttfb;dur=<milliseconds>` into `Server-Timing`.
+- The coordinator validates and republishes a failure trailer block without inserting bytes into
+  the JSON/SSE body.
 - Neither layer adds, removes, reorders, or mutates SSE events.
 - Client cancellation cancels the internal request and upstream response body.
 
@@ -208,6 +213,9 @@ for the first `response.create` so its model and service tier can drive the prov
   loopback hop does not request WebSocket compression.
 - Ping, pong, close, cancellation, and backpressure remain connection-scoped. Neither layer
   reconnects or replays an active turn.
+- Gateway failures after upgrade use application close code `4500`. Its reason is compact JSON with
+  exactly `retryAdvice`, `phase`, and `deliveryState`. Protocol, policy, normal lifecycle, and stale
+  fingerprint closes retain their standard WebSocket codes.
 
 A subscription provider rejection after the public upgrade becomes a WebSocket close and cannot be
 surfaced as the original public HTTP handshake. API-key credentials retain pre-upgrade provider
@@ -236,15 +244,49 @@ Before any upstream response bytes are sent, core errors use the JSON shape in `
 - `credential_requires_login`
 - `credential_busy`
 - `upstream_connect_failed`
+- `upstream_delivery_unknown`
+- `upstream_response_failed`
+- `upstream_handshake_rejected`
 - `upstream_auth_failed`
 - `internal_error`
 
-The coordinator maps these to a stable OpenAI-shaped public error and never exposes account existence, filesystem paths, credentials, auth endpoint bodies, or internal process details.
+Every error also carries `retryAdvice`, `phase`, and `deliveryState`. The coordinator accepts only
+known codes, the matching request id, valid enum values, and a coherent retry/delivery pair before
+mapping it to a stable OpenAI-shaped public error. It never exposes account existence, filesystem
+paths, credentials, auth endpoint bodies, or internal process details.
 
 ## Retry contract
 
-The core does not retry transport, `429`, or `5xx` inference failures. It may perform exactly one forced credential refresh and one replay after an upstream `401`, only before any response bytes have reached the coordinator.
+The v1 failure contract is a three-field tuple:
+
+- `retryAdvice`: `safe`, `ambiguous`, or `never`.
+- `deliveryState`: `not_delivered`, `possibly_delivered`, or `delivered`.
+- `phase`: `internal`, `request`, `credential`, `upstream_connect`, `upstream_request`,
+  `upstream_response`, `upstream_stream`, or `websocket_relay`.
+
+`safe` is valid only with `not_delivered`; `ambiguous` only with `possibly_delivered`; `never` with
+either `not_delivered` or `delivered`. A caller may retry `safe` according to its own rate/backoff
+policy. It must treat `ambiguous` as possibly already executed and must not automatically replay it.
+`never` is also not automatically replayed.
+
+The core records the real transport boundary. An HTTP connect failure is safe; failure after the
+send attempt but before response headers is ambiguous; an upstream response or later stream
+failure proves delivery. For WebSocket, a `response.create` becomes ambiguous immediately before
+the provider write, becomes delivered after the first provider application event, and returns to
+idle after a terminal event. A deferred OAuth handshake failure occurs before inference delivery.
+
+The coordinator parses this metadata from pre-response JSON, HTTP trailers, and WebSocket `4500`
+reasons. If an upgraded core socket fails without valid metadata, its own operation tracker falls
+back conservatively: idle is safe, an active turn with no core event is ambiguous, and an active
+turn after a core event is delivered. Malformed or incoherent `4500` payloads are never forwarded
+as trusted metadata.
+
+Neither layer retries transport, `429`, or `5xx` inference failures. OAuth may perform exactly one
+forced credential refresh and one replay after an upstream `401`, before response bytes reach the
+coordinator; this is credential recovery, not a general inference retry policy.
 
 ## Compatibility changes
 
-Any incompatible change creates a new `src/protocol/vN/` directory. v1 fixtures are immutable after release except for additive examples that do not change decoding requirements.
+The protocol has not been released outside this deployment, so the delivery-aware failure shape
+replaces the earlier v1 boolean in place. After v1 is externally released, incompatible changes
+must use a new `src/protocol/vN/` directory.

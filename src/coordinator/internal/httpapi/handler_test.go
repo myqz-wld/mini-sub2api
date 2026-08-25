@@ -150,6 +150,46 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	}
 }
 
+func TestResponsesPublishesDeliveryTrailersAfterUpstreamStreamFailure(t *testing.T) {
+	store, _, key := setupHTTPTest(t)
+	trailers := make(http.Header)
+	core := &fakeCore{response: func(context.Context, string) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Trailer:    trailers,
+			Body:       &failureTrailerBody{trailers: trailers},
+		}, nil
+	}}
+	server := httptest.NewServer(NewHandler(store, core, nil))
+	t.Cleanup(server.Close)
+	request, err := http.NewRequest(
+		http.MethodPost, server.URL+"/v1/responses", strings.NewReader(`{"stream":true}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+key.Secret)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || string(body) != "data: first\n\n" {
+		t.Fatalf("body = %q, %v", body, err)
+	}
+	if response.Trailer.Get(protocolv1.FailurePhaseTrailer) != string(protocolv1.PhaseUpstreamStream) ||
+		response.Trailer.Get(protocolv1.DeliveryStateTrailer) != string(protocolv1.DeliveryDelivered) ||
+		response.Trailer.Get(protocolv1.RetryAdviceTrailer) != string(protocolv1.RetryNever) {
+		t.Fatalf("failure trailers = %#v", response.Trailer)
+	}
+	history := waitForHistory(t, store, key.ID, 1)
+	if history[0].Status != storage.RequestUpstreamErr {
+		t.Fatalf("history = %#v", history)
+	}
+}
+
 func TestInvalidAndRevokedKeysShareGenericFailure(t *testing.T) {
 	store, _, key := setupHTTPTest(t)
 	core := &fakeCore{response: func(context.Context, string) (*http.Response, error) {
@@ -198,6 +238,10 @@ func TestCoreRequiresLoginIsMappedAndCredentialIsMarked(t *testing.T) {
 		body, _ := json.Marshal(protocolv1.ErrorEnvelope{Error: protocolv1.CoreError{
 			Code: "credential_requires_login", Message: "The selected credential requires sign-in.",
 			RequestID: requestID,
+			FailureMetadata: protocolv1.FailureMetadata{
+				RetryAdvice: protocolv1.RetryNever, Phase: protocolv1.PhaseCredential,
+				DeliveryState: protocolv1.DeliveryNotDelivered,
+			},
 		}})
 		return &http.Response{
 			StatusCode: http.StatusUnauthorized,
@@ -208,7 +252,10 @@ func TestCoreRequiresLoginIsMappedAndCredentialIsMarked(t *testing.T) {
 	server := httptest.NewServer(NewHandler(store, core, nil))
 	t.Cleanup(server.Close)
 	body := callPublic(t, server, key.Secret)
-	if !strings.Contains(body, `"code":"credential_requires_login"`) || strings.Contains(body, "retryable") {
+	if !strings.Contains(body, `"code":"credential_requires_login"`) || strings.Contains(body, "retryable") ||
+		!strings.Contains(body, `"retryAdvice":"never"`) ||
+		!strings.Contains(body, `"phase":"credential"`) ||
+		!strings.Contains(body, `"deliveryState":"not_delivered"`) {
 		t.Fatalf("public error = %q", body)
 	}
 	stored, err := store.Credential(context.Background(), credential.ID)
@@ -340,6 +387,24 @@ type cancellationBody struct {
 	once   sync.Once
 	first  bool
 }
+
+type failureTrailerBody struct {
+	trailers http.Header
+	sent     bool
+}
+
+func (b *failureTrailerBody) Read(destination []byte) (int, error) {
+	if !b.sent {
+		b.sent = true
+		return copy(destination, []byte("data: first\n\n")), nil
+	}
+	b.trailers.Set(protocolv1.FailurePhaseTrailer, string(protocolv1.PhaseUpstreamStream))
+	b.trailers.Set(protocolv1.DeliveryStateTrailer, string(protocolv1.DeliveryDelivered))
+	b.trailers.Set(protocolv1.RetryAdviceTrailer, string(protocolv1.RetryNever))
+	return 0, io.EOF
+}
+
+func (*failureTrailerBody) Close() error { return nil }
 
 func (b *cancellationBody) Read(destination []byte) (int, error) {
 	if !b.first {
