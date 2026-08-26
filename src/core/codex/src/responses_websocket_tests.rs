@@ -25,6 +25,9 @@ const INTERNAL_TOKEN: &str = "internal-websocket-test-token-at-least-32-bytes";
 const ACCOUNT_NAMESPACE: &str = "chatgpt-account-test";
 const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+#[path = "responses_websocket_inject_tests.rs"]
+mod inject_tests;
+
 fn device_fingerprint() -> FingerprintSnapshot {
     FingerprintSnapshot::for_test(FingerprintMode::Device, 1)
 }
@@ -73,6 +76,9 @@ fn subscription_create_normalization_preserves_websocket_fields() {
         "input": "hello",
         "tools": [],
         "generate": false,
+        "stream_id": "stream-caller",
+        "background": true,
+        "stream": true,
         "previous_response_id": "resp_previous",
         "client_metadata": {"custom": "kept"}
     })
@@ -94,6 +100,9 @@ fn subscription_create_normalization_preserves_websocket_fields() {
 
     assert_eq!(value["type"], "response.create");
     assert_eq!(value["generate"], false);
+    assert_eq!(value["stream_id"], "stream-caller");
+    assert!(value.get("background").is_none());
+    assert!(value.get("stream").is_none());
     assert_eq!(value["previous_response_id"], "resp_previous");
     assert_eq!(value["client_metadata"]["custom"], "kept");
     assert_eq!(value["input"][0]["type"], "additional_tools");

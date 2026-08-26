@@ -457,12 +457,10 @@ fn apply_profile_identity(
             HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR),
         );
     }
-    if !headers.contains_key(CODEX_VERSION_HEADER) {
-        headers.insert(
-            CODEX_VERSION_HEADER,
-            HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
-        );
-    }
+    headers.insert(
+        CODEX_VERSION_HEADER,
+        HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
+    );
     if !headers.contains_key(http::header::USER_AGENT) {
         let value = HeaderValue::from_str(crate::codex_user_agent::canonical_value().as_str())
             .map_err(|_| CoreFailure::Internal)?;

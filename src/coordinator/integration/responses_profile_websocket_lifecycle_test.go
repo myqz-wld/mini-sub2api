@@ -18,7 +18,7 @@ func TestResponsesProfileWebSocketOrdinarySecondTurnUsesDelta(t *testing.T) {
 	second := map[string]any{
 		"type": "response.create", "model": "gpt-5.4", "input": []any{
 			responsesProfileMessage("ordinary-first"),
-			map[string]any{"type": "message", "role": "assistant", "content": []any{}},
+			map[string]any{"type": "message", "id": "msg_profile_assistant", "role": "assistant", "content": []any{}},
 			responsesProfileMessage("ordinary-second"),
 		},
 	}

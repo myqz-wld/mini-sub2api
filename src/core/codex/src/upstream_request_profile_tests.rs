@@ -68,10 +68,15 @@ fn codex_openai_profile_keeps_http_body_uncompressed() {
 }
 
 #[test]
-fn codex_openai_profile_fills_only_missing_identity_headers() {
+fn codex_openai_profile_pins_version_and_fills_other_missing_identity_headers() {
+    let mut inbound = HeaderMap::new();
+    inbound.insert(
+        CODEX_VERSION_HEADER,
+        HeaderValue::from_static("caller-version-must-not-survive"),
+    );
     let request = build(
         &offline_client(),
-        &HeaderMap::new(),
+        &inbound,
         "https://example.test/v1/responses",
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-profile-key-not-real".to_string(),
@@ -101,5 +106,23 @@ fn codex_openai_profile_fills_only_missing_identity_headers() {
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok()),
         Some(crate::codex_user_agent::canonical_value().as_str())
+    );
+
+    let (websocket, _) = build_websocket(
+        &inbound,
+        "https://example.test/v1/responses",
+        &ResolvedAuth::OpenAiApiKey {
+            token: "offline-profile-key-not-real".to_string(),
+        },
+        UpstreamProfile::CodexOpenAi149,
+        1024,
+    )
+    .expect("Codex OpenAI WebSocket request");
+    assert_eq!(
+        websocket
+            .headers()
+            .get(CODEX_VERSION_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(CODEX_COMPATIBILITY_VERSION)
     );
 }

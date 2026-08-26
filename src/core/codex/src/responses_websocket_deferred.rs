@@ -2,6 +2,7 @@ use crate::error::CoreFailure;
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
+use crate::request_identity::apply_synthetic_prewarm;
 use crate::request_normalizer::EmulationTransport;
 use crate::request_normalizer::SubscriptionIdentity;
 use crate::request_normalizer::prepare_emulated_request;
@@ -14,7 +15,7 @@ use crate::responses_websocket::fingerprint_is_current;
 use crate::responses_websocket::relay;
 use crate::responses_websocket::send_handshake;
 use crate::responses_websocket_emulation::encode_frame_bounded;
-use crate::responses_websocket_emulation::plan_public_text;
+use crate::responses_websocket_emulation::plan_public_text_with_synthesized_ids;
 use crate::responses_websocket_prewarm::HIDDEN_SETUP_TIMEOUT;
 use crate::responses_websocket_prewarm::HiddenSetupOutcome;
 use crate::responses_websocket_prewarm::prewarm_mode;
@@ -86,6 +87,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         let _ = internal.send(internal_close(1002)).await;
         return;
     };
+    let synthesized_item_ids = prepared.synthesized_item_ids;
     let mut upstream_headers = prepared.headers;
     if context.resolved.fingerprint.mode() == FingerprintMode::Device
         && project_device_headers(
@@ -125,14 +127,33 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
             return;
         }
     };
-    let hidden = continuation.plan_hidden_setup(&value, prewarm_mode(&value));
+    let mut handshake_headers = upstream_headers.clone();
+    let hidden = match continuation.plan_hidden_setup_with_synthesized_ids(
+        &value,
+        prewarm_mode(&value),
+        &synthesized_item_ids,
+    ) {
+        Some(mut hidden) => {
+            let prepared = hidden.frame.as_object_mut().is_some_and(|frame| {
+                apply_synthetic_prewarm(frame, &mut handshake_headers).is_ok()
+            });
+            if prepared {
+                Some(hidden)
+            } else {
+                continuation.fail_hidden_setup();
+                handshake_headers.clone_from(&upstream_headers);
+                None
+            }
+        }
+        None => None,
+    };
     let mut pending = VecDeque::new();
     let mut pending_cost = 0_usize;
     let Some(connected) = wait_deferred(
         &mut internal,
         &mut pending,
         &mut pending_cost,
-        connect(&mut context, &upstream_headers),
+        connect(&mut context, &handshake_headers),
     )
     .await
     else {
@@ -185,7 +206,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
                 &mut internal,
                 &mut pending,
                 &mut pending_cost,
-                connect(&mut context, &upstream_headers),
+                connect(&mut context, &handshake_headers),
             )
             .await
             else {
@@ -215,7 +236,12 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         }
     }
     debug_assert!(!continuation.public_create_attempted());
-    let text = match plan_public_text(&mut continuation, &value, MAX_WEBSOCKET_MESSAGE_BYTES) {
+    let text = match plan_public_text_with_synthesized_ids(
+        &mut continuation,
+        &value,
+        &synthesized_item_ids,
+        MAX_WEBSOCKET_MESSAGE_BYTES,
+    ) {
         Ok(text) => text,
         Err(_) => {
             let _ = internal.send(internal_close(1002)).await;

@@ -91,9 +91,9 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 			firstValue := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 			secondValue := decodeResponsesProfileWebSocketFrame(t, captures[1].Frame)
 			if !test.expectHiddenPrewarm {
-				assertResponsesProfileSurface(t, firstValue, test.lite)
+				assertResponsesProfileSurface(t, firstValue, test.lite, true)
 			}
-			assertResponsesProfileSurface(t, secondValue, test.lite)
+			assertResponsesProfileSurface(t, secondValue, test.lite, true)
 			assertResponsesProfileImageDetails(t, firstValue["input"], test.lite)
 			if test.expectHiddenPrewarm {
 				if firstValue["previous_response_id"] != hiddenResponseID {
@@ -122,6 +122,7 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	frame["previous_response_id"] = "caller-previous"
 	frame["conversation"] = "caller-conversation"
 	frame["generate"] = false
+	frame["stream_id"] = "caller-stream"
 	encoded := mustRequestJSON(t, frame)
 	connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.subscriptionKey, nil)
 	defer connection.CloseNow()
@@ -130,9 +131,9 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	captures := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)
 	value := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 	assertWebSocketProfileCredentialBoundary(t, captures[0], true)
-	assertResponsesProfileSurface(t, value, false)
+	assertResponsesProfileSurface(t, value, false, true)
 	if value["previous_response_id"] != "caller-previous" || value["conversation"] != "caller-conversation" ||
-		value["generate"] != false {
+		value["generate"] != false || value["stream_id"] != "caller-stream" {
 		t.Fatal("explicit WebSocket continuation or state was not preserved")
 	}
 }
@@ -277,7 +278,7 @@ func writeResponsesProfileEvents(connection *websocket.Conn, responseID string, 
 	if !hidden {
 		events = append(events, mustRequestJSONValue(map[string]any{
 			"type": "response.output_item.done",
-			"item": map[string]any{"type": "message", "role": "assistant", "content": []any{}},
+			"item": map[string]any{"type": "message", "id": "msg_profile_assistant", "role": "assistant", "content": []any{}},
 		}))
 	}
 	events = append(events, mustRequestJSONValue(map[string]any{
@@ -347,13 +348,30 @@ func waitForResponsesProfileWebSocketCaptures(
 func assertResponsesProfilePrewarm(t *testing.T, capture responsesProfileWebSocketCapture, lite bool) {
 	t.Helper()
 	value := decodeResponsesProfileWebSocketFrame(t, capture.Frame)
-	assertResponsesProfileSurface(t, value, lite)
+	assertResponsesProfileSurface(t, value, lite, true)
 	if value["type"] != "response.create" || value["generate"] != false {
 		t.Fatal("synthetic prewarm did not use response.create generate=false")
 	}
 	input, ok := value["input"].([]any)
 	if !ok || (!lite && len(input) != 0) || (lite && len(input) == 0) {
 		t.Fatal("synthetic prewarm input did not match the profile")
+	}
+	metadata, ok := value["client_metadata"].(map[string]any)
+	if !ok || metadata["turn_id"] != "" {
+		t.Fatal("synthetic prewarm did not receive an independent empty turn identity")
+	}
+	rawTurn, _ := metadata["x-codex-turn-metadata"].(string)
+	var turn map[string]any
+	if json.Unmarshal([]byte(rawTurn), &turn) != nil || turn["request_kind"] != "prewarm" || turn["turn_id"] != "" {
+		t.Fatal("synthetic prewarm turn metadata was not independently generated")
+	}
+	for _, field := range []string{"root_turn_id", "parent_turn_id", "turn_started_at_unix_ms"} {
+		if _, exists := turn[field]; exists {
+			t.Fatalf("synthetic prewarm inherited public %s", field)
+		}
+	}
+	if capture.Headers.Get("X-Codex-Turn-Metadata") != rawTurn {
+		t.Fatal("synthetic prewarm handshake and body identities diverged")
 	}
 }
 

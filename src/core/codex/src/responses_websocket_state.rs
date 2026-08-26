@@ -3,12 +3,14 @@ use crate::request_profile::UpstreamProfile;
 use crate::responses_websocket_projection::encoded_len_within;
 use crate::responses_websocket_projection::equivalent_items;
 use crate::responses_websocket_projection::output_encoded_len;
-use crate::responses_websocket_projection::project_properties;
 use crate::responses_websocket_projection::reusable_item;
-use serde_json::Map;
+use crate::responses_websocket_reuse::RequestSnapshot;
+use crate::responses_websocket_reuse::ReuseBaseline;
+use crate::responses_websocket_reuse::has_explicit_state_carrier;
+use crate::responses_websocket_reuse::incremental_input;
+use crate::responses_websocket_reuse::lite_prewarm_prefix;
+use crate::responses_websocket_reuse::request_snapshot;
 use serde_json::Value;
-
-const EXPLICIT_STATE_CARRIERS: &[&str] = &["previous_response_id", "conversation", "generate"];
 
 const DEFAULT_MAX_OUTPUT_ITEMS: usize = 1024;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
@@ -58,17 +60,6 @@ pub(crate) enum EventDisposition {
     Unassociated,
     ConsumeHiddenSetup,
     ForwardPublic,
-}
-
-struct RequestSnapshot {
-    properties: Map<String, Value>,
-    input: Vec<Value>,
-}
-
-struct ReuseBaseline {
-    request: RequestSnapshot,
-    response_id: String,
-    output: Vec<Value>,
 }
 
 struct PlannedOperation {
@@ -144,10 +135,20 @@ impl ResponsesWebSocketState {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn plan_hidden_setup(
         &mut self,
         request: &Value,
         mode: PrewarmMode,
+    ) -> Option<HiddenSetupPlan> {
+        self.plan_hidden_setup_with_synthesized_ids(request, mode, &[])
+    }
+
+    pub(crate) fn plan_hidden_setup_with_synthesized_ids(
+        &mut self,
+        request: &Value,
+        mode: PrewarmMode,
+        synthesized_item_ids: &[String],
     ) -> Option<HiddenSetupPlan> {
         if !self.automatic_reuse_enabled()
             || self.setup_phase != OperationPhase::Idle
@@ -160,7 +161,7 @@ impl ResponsesWebSocketState {
         }
 
         // Validate the eventual public input before sending any synthesized setup frame.
-        request_snapshot(request)?;
+        request_snapshot(request, synthesized_item_ids)?;
         let mut frame = request.as_object()?.clone();
         let input = frame.get("input")?.as_array()?;
         let prefix = match mode {
@@ -170,7 +171,7 @@ impl ResponsesWebSocketState {
         frame.insert("input".to_string(), Value::Array(prefix));
         frame.insert("generate".to_string(), Value::Bool(false));
         let frame = Value::Object(frame);
-        let request = request_snapshot(&frame)?;
+        let request = request_snapshot(&frame, synthesized_item_ids)?;
 
         self.planned = Some(PlannedOperation {
             kind: OperationKind::HiddenSetup,
@@ -181,10 +182,20 @@ impl ResponsesWebSocketState {
     }
 
     pub(crate) fn plan_public_create(&mut self, request: &Value) -> PublicCreatePlan {
+        self.plan_public_create_with_synthesized_ids(request, &[])
+    }
+
+    pub(crate) fn plan_public_create_with_synthesized_ids(
+        &mut self,
+        request: &Value,
+        synthesized_item_ids: &[String],
+    ) -> PublicCreatePlan {
         self.abandon_pending_operation();
         let explicit_state = has_explicit_state_carrier(request);
         let automatic = self.automatic_reuse_enabled() && !explicit_state;
-        let request_snapshot = automatic.then(|| request_snapshot(request)).flatten();
+        let request_snapshot = automatic
+            .then(|| request_snapshot(request, synthesized_item_ids))
+            .flatten();
         let mut frame = request.clone();
 
         let mode = if explicit_state {
@@ -418,74 +429,6 @@ impl ResponsesWebSocketState {
             OperationKind::PublicCreate => self.public_phase = phase,
         }
     }
-}
-
-fn has_explicit_state_carrier(request: &Value) -> bool {
-    request.as_object().is_some_and(|object| {
-        EXPLICIT_STATE_CARRIERS
-            .iter()
-            .any(|field| object.contains_key(*field))
-    })
-}
-
-fn request_snapshot(request: &Value) -> Option<RequestSnapshot> {
-    let object = request.as_object()?;
-    if object.get("type").and_then(Value::as_str) != Some("response.create") {
-        return None;
-    }
-    let input = object.get("input")?.as_array()?.clone();
-    if !input.iter().all(reusable_item) {
-        return None;
-    }
-    // The normalizer has already evidence-filtered this object. Preserve every retained
-    // property except the input and the two transport-managed continuation controls.
-    let properties = project_properties(object);
-    Some(RequestSnapshot { properties, input })
-}
-
-fn lite_prewarm_prefix(input: &[Value]) -> Option<Vec<Value>> {
-    let first = input.first()?;
-    if first
-        .as_object()
-        .and_then(|object| object.get("type"))
-        .and_then(Value::as_str)
-        != Some("additional_tools")
-    {
-        return None;
-    }
-    let prefix_len = 1 + input[1..]
-        .iter()
-        .take_while(|item| {
-            item.as_object().is_some_and(|object| {
-                object.get("type").and_then(Value::as_str) == Some("message")
-                    && object.get("role").and_then(Value::as_str) == Some("developer")
-            })
-        })
-        .count();
-    Some(input[..prefix_len].to_vec())
-}
-
-fn incremental_input(baseline: &ReuseBaseline, current: &RequestSnapshot) -> Option<Vec<Value>> {
-    if baseline.request.properties != current.properties || baseline.response_id.is_empty() {
-        return None;
-    }
-    let prefix_len = baseline
-        .request
-        .input
-        .len()
-        .checked_add(baseline.output.len())?;
-    let (prefix, delta) = current.input.split_at_checked(prefix_len)?;
-    let expected = baseline
-        .request
-        .input
-        .iter()
-        .chain(&baseline.output)
-        .cloned()
-        .collect::<Vec<_>>();
-    if !equivalent_items(&expected, prefix) {
-        return None;
-    }
-    Some(delta.to_vec())
 }
 
 fn abandon_output(active: &mut ActiveOperation) {

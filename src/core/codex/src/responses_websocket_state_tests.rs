@@ -140,6 +140,7 @@ fn explicit_previous_conversation_and_generate_carriers_take_precedence() {
         ("previous_response_id", json!("caller-response")),
         ("conversation", json!("conversation-1")),
         ("generate", json!(false)),
+        ("stream_id", json!("stream-caller")),
     ];
     for (field, value) in cases {
         let user = message("user", "user-1");
@@ -236,7 +237,7 @@ fn every_retained_non_input_property_change_forces_a_full_frame() {
 }
 
 #[test]
-fn volatile_metadata_stream_options_and_generated_item_identity_do_not_block_reuse() {
+fn volatile_metadata_stream_options_and_synthesized_wire_ids_do_not_block_reuse() {
     let first_user = json!({
         "type":"message", "id":"generated-first", "role":"user", "content":[],
         "internal_chat_message_metadata_passthrough":{"turn_id":"turn-first","create_time":1}
@@ -249,12 +250,11 @@ fn volatile_metadata_stream_options_and_generated_item_identity_do_not_block_reu
     first["client_metadata"] = json!({"turn_id":"turn-first"});
     first["stream_options"] = json!({"include_obfuscation":true});
     let mut state = state();
-    establish_public_baseline(
-        &mut state,
-        &first,
-        "response-1",
-        std::slice::from_ref(&assistant),
-    );
+    let first_plan =
+        state.plan_public_create_with_synthesized_ids(&first, &["generated-first".to_string()]);
+    assert_eq!(first_plan.mode, PublicCreateMode::Full);
+    assert!(state.mark_public_create_attempted());
+    finish_active(&mut state, "response-1", std::slice::from_ref(&assistant));
 
     let mut next = request(vec![
         json!({
@@ -262,7 +262,7 @@ fn volatile_metadata_stream_options_and_generated_item_identity_do_not_block_reu
             "internal_chat_message_metadata_passthrough":{"turn_id":"turn-second","create_time":2}
         }),
         json!({
-            "type":"message", "id":"provider-replayed", "role":"assistant", "content":[],
+            "type":"message", "id":"provider-first", "role":"assistant", "content":[],
             "internal_chat_message_metadata_passthrough":{"turn_id":"turn-second"}
         }),
         message("user", "new-user"),
@@ -270,10 +270,39 @@ fn volatile_metadata_stream_options_and_generated_item_identity_do_not_block_reu
     next["client_metadata"] = json!({"turn_id":"turn-second"});
     next["stream_options"] = json!({"include_obfuscation":false});
 
-    let plan = state.plan_public_create(&next);
+    let plan =
+        state.plan_public_create_with_synthesized_ids(&next, &["generated-second".to_string()]);
     assert_eq!(plan.mode, PublicCreateMode::Incremental);
     assert_eq!(plan.frame["previous_response_id"], "response-1");
     assert_eq!(plan.frame["input"], json!([message("user", "new-user")]));
+}
+
+#[test]
+fn explicit_input_or_output_item_id_changes_force_full_fallback() {
+    for (name, next_user_id, next_output_id) in [
+        ("input", "user-changed", "assistant-stable"),
+        ("output", "user-stable", "assistant-changed"),
+    ] {
+        let first = request(vec![message("user", "user-stable")]);
+        let assistant = message("assistant", "assistant-stable");
+        let mut state = state();
+        establish_public_baseline(
+            &mut state,
+            &first,
+            "response-1",
+            std::slice::from_ref(&assistant),
+        );
+        let next = request(vec![
+            message("user", next_user_id),
+            message("assistant", next_output_id),
+            message("user", "user-new"),
+        ]);
+        assert_eq!(
+            state.plan_public_create(&next).mode,
+            PublicCreateMode::Full,
+            "{name}"
+        );
+    }
 }
 
 #[test]

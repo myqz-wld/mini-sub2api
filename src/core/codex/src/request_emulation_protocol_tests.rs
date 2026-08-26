@@ -10,6 +10,9 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     let caller = json!({
         "type":"response.create",
         "generate":false,
+        "stream_id":"stream-caller",
+        "background":true,
+        "stream":false,
         "state":{"unsupported":true},
         "model":"gpt-5.4",
         "input":[]
@@ -21,7 +24,10 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     );
     assert!(http.value.get("type").is_none());
     assert!(http.value.get("generate").is_none());
+    assert!(http.value.get("stream_id").is_none());
     assert!(http.value.get("state").is_none());
+    assert_eq!(http.value["background"], true);
+    assert_eq!(http.value["stream"], false);
     assert!(http.headers.get("x-codex-routing-hint").is_none());
 
     let websocket = prepare_value(
@@ -31,7 +37,10 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     );
     assert_eq!(websocket.value["type"], "response.create");
     assert_eq!(websocket.value["generate"], false);
+    assert_eq!(websocket.value["stream_id"], "stream-caller");
     assert!(websocket.value.get("state").is_none());
+    assert!(websocket.value.get("background").is_none());
+    assert!(websocket.value.get("stream").is_none());
     assert!(websocket.headers.get("x-codex-routing-hint").is_none());
 
     let subscription = prepare_value(
@@ -46,6 +55,46 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
             .and_then(|value| value.to_str().ok()),
         Some("model=gpt-5.4")
     );
+    assert_eq!(subscription.value["stream_id"], "stream-caller");
+    assert!(subscription.value.get("background").is_none());
+    assert!(subscription.value.get("stream").is_none());
+}
+
+#[test]
+fn web_and_file_search_filters_use_disjoint_documented_schemas() {
+    let prepared = prepare_value(
+        UpstreamProfile::CodexOpenAi149,
+        EmulationTransport::Http,
+        json!({
+            "model":"gpt-5.4",
+            "input":[],
+            "tools":[
+                {"type":"web_search","filters":{
+                    "allowed_domains":["example.test"],
+                    "key":"file_kind","type":"eq","value":"manual","unknown":true
+                }},
+                {"type":"file_search","vector_store_ids":["vs_1"],"filters":{
+                    "type":"and","filters":[
+                        {"type":"eq","key":"kind","value":"manual","allowed_domains":["wrong.test"],"unknown":true}
+                    ],"allowed_domains":["wrong.test"],"unknown":true
+                }},
+                {"type":"web_search_preview","filters":{"allowed_domains":["wrong.test"]},
+                    "external_web_access":false,"search_context_size":"low"}
+            ]
+        }),
+    );
+    let tools = prepared.value["tools"].as_array().expect("tools");
+    assert_eq!(
+        tools[0]["filters"],
+        json!({"allowed_domains":["example.test"]})
+    );
+    assert_eq!(
+        tools[1]["filters"],
+        json!({"type":"and","filters":[{"type":"eq","key":"kind","value":"manual"}]})
+    );
+    assert!(tools[2].get("filters").is_none());
+    assert!(tools[2].get("external_web_access").is_none());
+    assert_eq!(tools[2]["search_context_size"], "low");
 }
 
 #[test]

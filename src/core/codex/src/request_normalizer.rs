@@ -13,6 +13,7 @@ pub(crate) use request_identity::SubscriptionTransport as EmulationTransport;
 pub struct PreparedEmulatedRequest {
     pub headers: HeaderMap,
     pub body: Bytes,
+    pub(crate) synthesized_item_ids: Vec<String>,
 }
 
 #[cfg(test)]
@@ -103,7 +104,8 @@ fn prepare_emulated_request_inner(
         | (UpstreamProfile::CodexSubscription149, None) => return Err(()),
     }
 
-    overlay::apply(object, &mut prepared_headers, transport, upstream_profile);
+    let synthesized_item_ids =
+        overlay::apply(object, &mut prepared_headers, transport, upstream_profile);
     let encoded = serde_json::to_vec(&value).map_err(|_| ())?;
     if encoded.len() > max_bytes {
         return Err(());
@@ -111,6 +113,7 @@ fn prepare_emulated_request_inner(
     Ok(PreparedEmulatedRequest {
         headers: prepared_headers,
         body: Bytes::from(encoded),
+        synthesized_item_ids,
     })
 }
 

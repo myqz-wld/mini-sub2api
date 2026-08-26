@@ -8,6 +8,7 @@ use crate::request_normalizer::prepare_projected_subscription_websocket_turn;
 use crate::request_profile::UpstreamProfile;
 use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
+use crate::responses_websocket_inject;
 use crate::responses_websocket_state::PublicCreateMode;
 use crate::responses_websocket_state::ResponsesWebSocketState;
 use bytes::Bytes;
@@ -31,6 +32,16 @@ pub(crate) fn prepare_client_text(
         .and_then(Value::as_str)
         .filter(|message_type| !message_type.is_empty())
         .ok_or(())?;
+    if message_type == "response.inject" {
+        return responses_websocket_inject::prepare(
+            text,
+            value,
+            account_namespace,
+            profile,
+            pseudonym_scope,
+            MAX_WEBSOCKET_MESSAGE_BYTES,
+        );
+    }
     if message_type != "response.create" {
         return Ok(text);
     }
@@ -38,7 +49,7 @@ pub(crate) fn prepare_client_text(
         continuation.plan_public_create(&value);
         return Ok(text);
     }
-    let prepared = {
+    let (prepared, synthesized_item_ids) = {
         let subscription_identity =
             account_namespace.map(|account_namespace| SubscriptionIdentity {
                 account_namespace,
@@ -61,8 +72,12 @@ pub(crate) fn prepare_client_text(
                 None,
             )?
         };
+        let synthesized_item_ids = prepared.synthesized_item_ids;
         *headers = prepared.headers;
-        String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?
+        (
+            String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?,
+            synthesized_item_ids,
+        )
     };
     let prepared = if fingerprint.mode() == FingerprintMode::Device
         && let Some(account_namespace) = account_namespace
@@ -79,22 +94,38 @@ pub(crate) fn prepare_client_text(
         Ok(prepared)
     }?;
     let value = serde_json::from_str::<Value>(&prepared).map_err(|_| ())?;
-    plan_public_text(continuation, &value, MAX_WEBSOCKET_MESSAGE_BYTES)
+    plan_public_text_with_synthesized_ids(
+        continuation,
+        &value,
+        &synthesized_item_ids,
+        MAX_WEBSOCKET_MESSAGE_BYTES,
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn plan_public_text(
     continuation: &mut ResponsesWebSocketState,
     value: &Value,
     maximum: usize,
 ) -> Result<String, ()> {
-    let plan = continuation.plan_public_create(value);
+    plan_public_text_with_synthesized_ids(continuation, value, &[], maximum)
+}
+
+pub(crate) fn plan_public_text_with_synthesized_ids(
+    continuation: &mut ResponsesWebSocketState,
+    value: &Value,
+    synthesized_item_ids: &[String],
+    maximum: usize,
+) -> Result<String, ()> {
+    let plan = continuation.plan_public_create_with_synthesized_ids(value, synthesized_item_ids);
     debug_assert_ne!(plan.mode, PublicCreateMode::Passthrough);
     let encoded = encode_frame_bounded(&plan.frame, maximum);
     if encoded.is_ok() || plan.mode != PublicCreateMode::Incremental {
         return encoded;
     }
     continuation.fail_public_create();
-    let fallback = continuation.plan_public_create(value);
+    let fallback =
+        continuation.plan_public_create_with_synthesized_ids(value, synthesized_item_ids);
     debug_assert_eq!(fallback.mode, PublicCreateMode::Full);
     encode_frame_bounded(&fallback.frame, maximum)
 }

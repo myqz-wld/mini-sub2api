@@ -24,8 +24,10 @@ mod responses_websocket;
 mod responses_websocket_deferred;
 mod responses_websocket_emulation;
 mod responses_websocket_http;
+mod responses_websocket_inject;
 mod responses_websocket_prewarm;
 mod responses_websocket_projection;
+mod responses_websocket_reuse;
 mod responses_websocket_state;
 mod server;
 #[cfg(test)]

@@ -78,13 +78,19 @@ const fn profile(
     }
 }
 
-pub(crate) fn merge_request_defaults(object: &mut Map<String, Value>, profile: ModelProfile) {
+pub(crate) fn merge_request_defaults(
+    object: &mut Map<String, Value>,
+    profile: ModelProfile,
+    include_stream: bool,
+) {
     object
         .entry("store".to_string())
         .or_insert(Value::Bool(false));
-    object
-        .entry("stream".to_string())
-        .or_insert(Value::Bool(true));
+    if include_stream {
+        object
+            .entry("stream".to_string())
+            .or_insert(Value::Bool(true));
+    }
     object
         .entry("tool_choice".to_string())
         .or_insert_with(|| Value::String("auto".to_string()));
@@ -177,6 +183,7 @@ mod tests {
         merge_request_defaults(
             explicit_effort.as_object_mut().expect("object"),
             model_profile("gpt-5.2"),
+            true,
         );
         assert_eq!(explicit_effort["reasoning"]["effort"], "high");
         assert_eq!(explicit_effort["reasoning"]["summary"], "auto");
@@ -187,6 +194,7 @@ mod tests {
         merge_request_defaults(
             disabled_summary.as_object_mut().expect("object"),
             model_profile("gpt-5.2"),
+            true,
         );
         assert_eq!(disabled_summary["reasoning"]["summary"], "none");
         assert_eq!(disabled_summary["reasoning"]["effort"], "medium");
@@ -207,6 +215,7 @@ mod tests {
         merge_request_defaults(
             request.as_object_mut().expect("object"),
             model_profile("gpt-5.6-sol"),
+            true,
         );
         assert_eq!(request, expected);
     }
@@ -217,6 +226,7 @@ mod tests {
         merge_request_defaults(
             request.as_object_mut().expect("object"),
             model_profile("future-model"),
+            true,
         );
         assert_eq!(request["text"]["verbosity"], "high");
     }

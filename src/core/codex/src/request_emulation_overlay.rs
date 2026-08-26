@@ -8,12 +8,9 @@ use http::HeaderMap;
 use serde_json::Map;
 use serde_json::Value;
 
-// Union of the documented Responses create/response.create surface and the additional top-level
-// carriers emitted by Codex 0.149.0 (`client_metadata` and `generate`). Known structured members
-// are filtered below or by the tool/item normalizers; only explicitly free-form containers remain
-// opaque.
+// Transport-neutral documented Responses create fields plus the captured Codex
+// `client_metadata` carrier. HTTP- and WebSocket-only fields are selected separately below.
 const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
-    "background",
     "client_metadata",
     "context_management",
     "conversation",
@@ -35,7 +32,6 @@ const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
     "safety_identifier",
     "service_tier",
     "store",
-    "stream",
     "stream_options",
     "temperature",
     "text",
@@ -47,18 +43,23 @@ const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
     "user",
 ];
 
-const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate"];
+const SUPPORTED_HTTP_FIELDS: &[&str] = &["background", "stream"];
+const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id"];
 
 pub(super) fn apply(
     object: &mut Map<String, Value>,
     headers: &mut HeaderMap,
     transport: EmulationTransport,
     profile: UpstreamProfile,
-) {
+) -> Vec<String> {
     object.retain(|name, _| {
         SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
-            || (transport == EmulationTransport::WebSocket
-                && SUPPORTED_WEBSOCKET_FIELDS.contains(&name.as_str()))
+            || match transport {
+                EmulationTransport::Http => SUPPORTED_HTTP_FIELDS.contains(&name.as_str()),
+                EmulationTransport::WebSocket => {
+                    SUPPORTED_WEBSOCKET_FIELDS.contains(&name.as_str())
+                }
+            }
     });
     canonicalize_structured_request_members(object);
     let mut model_profile = object
@@ -69,9 +70,11 @@ pub(super) fn apply(
     model_profile.responses_lite |= responses_lite_requested(object);
     let already_lite = model_profile.responses_lite && already_lite_shaped(object, transport);
 
-    if !already_lite {
-        normalize_input(object);
-    }
+    let synthesized_item_ids = if already_lite {
+        Vec::new()
+    } else {
+        normalize_input(object)
+    };
     if model_profile.responses_lite {
         if !already_lite {
             relocate_lite_fields(object);
@@ -80,7 +83,11 @@ pub(super) fn apply(
         canonicalize_top_level_tools(object);
     }
 
-    request_defaults::merge_request_defaults(object, model_profile);
+    request_defaults::merge_request_defaults(
+        object,
+        model_profile,
+        transport == EmulationTransport::Http,
+    );
     if profile.uses_codex_subscription() {
         request_identity::apply_routing_hint(object, headers);
     } else {
@@ -100,6 +107,7 @@ pub(super) fn apply(
         (!model_profile.responses_lite).then_some("high"),
     );
     canonicalize_request_order(object, transport);
+    synthesized_item_ids
 }
 
 fn canonicalize_structured_request_members(object: &mut Map<String, Value>) {
@@ -196,16 +204,16 @@ fn canonicalize_top_level_tools(object: &mut Map<String, Value>) {
         Value::Array(responses_lite::canonicalize_tools(tools));
 }
 
-fn normalize_input(object: &mut Map<String, Value>) {
+fn normalize_input(object: &mut Map<String, Value>) -> Vec<String> {
     let Some(input) = object.get_mut("input") else {
-        return;
+        return Vec::new();
     };
     let mut items = match std::mem::take(input) {
         Value::String(text) => vec![user_message(text)],
         Value::Array(items) => items,
         other => {
             *input = other;
-            return;
+            return Vec::new();
         }
     };
     for item in &mut items {
@@ -233,8 +241,9 @@ fn normalize_input(object: &mut Map<String, Value>) {
             );
         }
     }
-    responses_lite::assign_missing_item_ids(&mut items);
+    let synthesized_item_ids = responses_lite::assign_missing_item_ids(&mut items);
     *input = Value::Array(items);
+    synthesized_item_ids
 }
 
 fn already_lite_shaped(object: &Map<String, Value>, transport: EmulationTransport) -> bool {
@@ -269,7 +278,6 @@ fn developer_message(text: String) -> Value {
 fn user_message(text: String) -> Value {
     serde_json::json!({
         "type": "message",
-        "id": responses_lite::new_item_id("msg"),
         "role": "user",
         "content": [{"type": "input_text", "text": text}],
     })
@@ -299,13 +307,13 @@ fn canonicalize_request_order(object: &mut Map<String, Value>, transport: Emulat
         "model",
         "instructions",
         "previous_response_id",
+        "stream_id",
         "input",
         "tools",
         "tool_choice",
         "parallel_tool_calls",
         "reasoning",
         "store",
-        "stream",
         "stream_options",
         "include",
         "service_tier",
