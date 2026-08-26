@@ -1,4 +1,5 @@
 use super::*;
+use crate::request_profile::UpstreamProfile;
 use crate::transport_registry::CredentialTransportPolicy;
 use crate::transport_registry::TransportRegistry;
 use crate::upstream_request::ResolvedAuth;
@@ -75,6 +76,7 @@ async fn production_connector_negotiates_and_uses_permessage_deflate_on_loopback
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-deflate-key-not-real".to_string(),
         },
+        UpstreamProfile::BareOpenAi,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -180,6 +182,7 @@ async fn explicit_http_proxy_tunnels_without_resolving_the_target_host() {
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-proxy-key-not-real".to_string(),
         },
+        UpstreamProfile::BareOpenAi,
         1024 * 1024,
     )
     .expect("proxied request");

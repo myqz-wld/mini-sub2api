@@ -2,13 +2,24 @@ use crate::error::CoreFailure;
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
-use crate::request_normalizer::prepare_websocket_subscription_request;
+use crate::request_normalizer::EmulationTransport;
+use crate::request_normalizer::SubscriptionIdentity;
+use crate::request_normalizer::prepare_emulated_request;
+use crate::request_profile::CallerKind;
+use crate::request_profile::UpstreamProfile;
 use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket::RelayContext;
 use crate::responses_websocket::fingerprint_is_current;
 use crate::responses_websocket::relay;
 use crate::responses_websocket::send_handshake;
+use crate::responses_websocket_emulation::encode_frame_bounded;
+use crate::responses_websocket_emulation::plan_public_text;
+use crate::responses_websocket_prewarm::HIDDEN_SETUP_TIMEOUT;
+use crate::responses_websocket_prewarm::HiddenSetupOutcome;
+use crate::responses_websocket_prewarm::prewarm_mode;
+use crate::responses_websocket_prewarm::run_hidden_setup;
+use crate::responses_websocket_state::ResponsesWebSocketState;
 use crate::server::AppState;
 use crate::server::ResolvedCredential;
 use crate::server::account_lock;
@@ -25,7 +36,12 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use http::HeaderMap;
 use http::StatusCode;
+use std::collections::VecDeque;
+use std::future::Future;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
+
+const MAX_DEFERRED_PENDING_MESSAGES: usize = 1024;
+const DEFERRED_PENDING_MESSAGE_OVERHEAD: usize = 64;
 
 pub(crate) struct DeferredOAuthContext {
     pub(crate) state: AppState,
@@ -33,11 +49,12 @@ pub(crate) struct DeferredOAuthContext {
     pub(crate) account_ref: String,
     pub(crate) account_namespace: String,
     pub(crate) pseudonym_scope: String,
-    pub(crate) request_id: String,
+    pub(crate) caller: CallerKind,
+    pub(crate) profile: UpstreamProfile,
     pub(crate) resolved: ResolvedCredential,
 }
 
-pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) {
+pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthContext) {
     let first = match first_create(&mut internal).await {
         Ok(first) => first,
         Err(code) => {
@@ -55,14 +72,16 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         let _ = internal.send(internal_close(1012)).await;
         return;
     }
-    let frame_request_id = format!("{}-ws-1", context.request_id);
-    let Ok(prepared) = prepare_websocket_subscription_request(
+    let Ok(prepared) = prepare_emulated_request(
+        context.profile,
+        EmulationTransport::WebSocket,
         &context.headers,
         Bytes::from(first),
         MAX_WEBSOCKET_MESSAGE_BYTES,
-        &context.account_namespace,
-        &context.pseudonym_scope,
-        &frame_request_id,
+        Some(SubscriptionIdentity {
+            account_namespace: &context.account_namespace,
+            downstream_scope: &context.pseudonym_scope,
+        }),
     ) else {
         let _ = internal.send(internal_close(1002)).await;
         return;
@@ -98,7 +117,28 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
     } else {
         text
     };
-    let (upstream, turn_state) = match connect(&context, &upstream_headers).await {
+    let mut continuation = ResponsesWebSocketState::new(context.caller, context.profile);
+    let value = match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(value) => value,
+        Err(_) => {
+            let _ = internal.send(internal_close(1002)).await;
+            return;
+        }
+    };
+    let hidden = continuation.plan_hidden_setup(&value, prewarm_mode(&value));
+    let mut pending = VecDeque::new();
+    let mut pending_cost = 0_usize;
+    let Some(connected) = wait_deferred(
+        &mut internal,
+        &mut pending,
+        &mut pending_cost,
+        connect(&mut context, &upstream_headers),
+    )
+    .await
+    else {
+        return;
+    };
+    let (mut upstream, mut turn_state) = match connected {
         Ok(connected) => connected,
         Err(error) => {
             let metadata = failure_before_websocket_delivery(&error);
@@ -106,7 +146,83 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
             return;
         }
     };
-    let mut relay_headers = context.headers;
+    if !fingerprint_is_current(
+        &context.state.vault,
+        &context.account_ref,
+        &context.resolved.fingerprint,
+    )
+    .await
+    {
+        let _ = internal.send(internal_close(1012)).await;
+        return;
+    }
+    if let Some(hidden) = hidden {
+        let outcome =
+            if let Ok(hidden) = encode_frame_bounded(&hidden.frame, MAX_WEBSOCKET_MESSAGE_BYTES) {
+                let Some(outcome) = wait_deferred(
+                    &mut internal,
+                    &mut pending,
+                    &mut pending_cost,
+                    run_hidden_setup(
+                        &mut upstream,
+                        &mut continuation,
+                        hidden,
+                        HIDDEN_SETUP_TIMEOUT,
+                    ),
+                )
+                .await
+                else {
+                    return;
+                };
+                outcome
+            } else {
+                continuation.fail_hidden_setup();
+                HiddenSetupOutcome::Failed
+            };
+        if outcome == HiddenSetupOutcome::Reconnect {
+            continuation.reset_for_reconnect();
+            let Some(reconnected) = wait_deferred(
+                &mut internal,
+                &mut pending,
+                &mut pending_cost,
+                connect(&mut context, &upstream_headers),
+            )
+            .await
+            else {
+                return;
+            };
+            match reconnected {
+                Ok((replacement, replacement_turn_state)) => {
+                    upstream = replacement;
+                    turn_state = replacement_turn_state;
+                }
+                Err(error) => {
+                    let metadata = failure_before_websocket_delivery(&error);
+                    let _ = internal.send(failure_close(metadata)).await;
+                    return;
+                }
+            }
+            if !fingerprint_is_current(
+                &context.state.vault,
+                &context.account_ref,
+                &context.resolved.fingerprint,
+            )
+            .await
+            {
+                let _ = internal.send(internal_close(1012)).await;
+                return;
+            }
+        }
+    }
+    debug_assert!(!continuation.public_create_attempted());
+    let text = match plan_public_text(&mut continuation, &value, MAX_WEBSOCKET_MESSAGE_BYTES) {
+        Ok(text) => text,
+        Err(_) => {
+            let _ = internal.send(internal_close(1002)).await;
+            return;
+        }
+    };
+    let mut relay_headers = upstream_headers;
     if let Some(turn_state) = turn_state {
         relay_headers.insert("x-codex-turn-state", turn_state);
     }
@@ -115,8 +231,9 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         account_ref: context.account_ref,
         account_namespace: Some(context.account_namespace),
         pseudonym_scope: context.pseudonym_scope,
-        request_id: context.request_id,
-        normalize_subscription: true,
+        profile: context.profile,
+        continuation,
+        pending,
         vault: context.state.vault,
         fingerprint: context.resolved.fingerprint,
     };
@@ -125,13 +242,12 @@ pub(crate) async fn run(mut internal: WebSocket, context: DeferredOAuthContext) 
         upstream,
         relay_context,
         Some(UpstreamMessage::Text(text.into())),
-        1,
     )
     .await;
 }
 
 async fn connect(
-    context: &DeferredOAuthContext,
+    context: &mut DeferredOAuthContext,
     headers: &HeaderMap,
 ) -> Result<
     (
@@ -145,6 +261,7 @@ async fn connect(
         headers,
         &context.resolved.upstream_url,
         &context.resolved.auth,
+        context.profile,
     )
     .await?;
     if handshake.status() == StatusCode::UNAUTHORIZED {
@@ -161,10 +278,21 @@ async fn connect(
         )
         .await?;
         drop(_guard);
-        handshake =
-            send_handshake(&retry.transport, headers, &retry.upstream_url, &retry.auth).await?;
+        handshake = send_handshake(
+            &retry.transport,
+            headers,
+            &retry.upstream_url,
+            &retry.auth,
+            context.profile,
+        )
+        .await?;
         if handshake.status() == StatusCode::UNAUTHORIZED {
             return Err(CoreFailure::UpstreamAuthFailed);
+        }
+        if handshake.status() == StatusCode::SWITCHING_PROTOCOLS {
+            context.resolved.upstream_url = retry.upstream_url;
+            context.resolved.auth = retry.auth;
+            context.resolved.transport = retry.transport;
         }
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
@@ -174,6 +302,66 @@ async fn connect(
     match handshake {
         WebSocketHandshake::Connected { socket, .. } => Ok((*socket, turn_state)),
         WebSocketHandshake::Rejected(_) => Err(CoreFailure::Internal),
+    }
+}
+
+async fn wait_deferred<T>(
+    internal: &mut WebSocket,
+    pending: &mut VecDeque<Message>,
+    pending_cost: &mut usize,
+    future: impl Future<Output = T>,
+) -> Option<T> {
+    tokio::pin!(future);
+    loop {
+        tokio::select! {
+            biased;
+            output = &mut future => return Some(output),
+            message = internal.next() => {
+                match message {
+                    Some(Ok(Message::Text(text))) => {
+                        match is_response_create(&text) {
+                            Ok(true) => {
+                                let _ = internal.send(internal_close(1008)).await;
+                                return None;
+                            }
+                            Ok(false) => {
+                                let Some(message_cost) = text.len().checked_add(DEFERRED_PENDING_MESSAGE_OVERHEAD) else {
+                                    let _ = internal.send(internal_close(1009)).await;
+                                    return None;
+                                };
+                                let Some(next) = pending_cost.checked_add(message_cost) else {
+                                    let _ = internal.send(internal_close(1009)).await;
+                                    return None;
+                                };
+                                if pending.len() >= MAX_DEFERRED_PENDING_MESSAGES
+                                    || next > MAX_WEBSOCKET_MESSAGE_BYTES
+                                {
+                                    let _ = internal.send(internal_close(1009)).await;
+                                    return None;
+                                }
+                                *pending_cost = next;
+                                pending.push_back(Message::Text(text));
+                            }
+                            Err(()) => {
+                                let _ = internal.send(internal_close(1002)).await;
+                                return None;
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        if internal.send(Message::Pong(payload)).await.is_err() {
+                            return None;
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Binary(_))) => {
+                        let _ = internal.send(internal_close(1003)).await;
+                        return None;
+                    }
+                    Some(Ok(Message::Close(_)) | Err(_)) | None => return None,
+                }
+            }
+        }
     }
 }
 

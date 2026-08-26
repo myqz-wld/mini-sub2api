@@ -55,11 +55,7 @@ pub(crate) fn apply(
     let identity = resolve_identity(object, headers, &context);
     apply_headers(headers, &identity, &context);
     apply_client_metadata(object, headers, &identity, &context);
-    if object
-        .get("prompt_cache_key")
-        .and_then(Value::as_str)
-        .is_none_or(str::is_empty)
-    {
+    if !object.contains_key("prompt_cache_key") {
         object.insert(
             "prompt_cache_key".to_string(),
             Value::String(identity.session_id),
@@ -85,6 +81,10 @@ pub(crate) fn apply_routing_hint(object: &Map<String, Value>, headers: &mut Head
     if let Ok(value) = HeaderValue::from_str(&hint) {
         headers.insert(HeaderName::from_static(ROUTING_HINT_HEADER), value);
     }
+}
+
+pub(crate) fn remove_routing_hint(headers: &mut HeaderMap) {
+    headers.remove(ROUTING_HINT_HEADER);
 }
 
 fn resolve_identity(

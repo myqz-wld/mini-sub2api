@@ -149,15 +149,14 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	if err := json.Unmarshal(capture.Body, &normalized); err != nil {
 		t.Fatal(err)
 	}
-	if len(normalized) != 11 {
-		t.Fatalf("normalized top-level field count = %d, fields = %#v", len(normalized), normalized)
-	}
 	if normalized["tools"] != nil || normalized["instructions"] != nil || normalized["store"] != false {
 		t.Fatalf("normalization fields = %#v", normalized)
 	}
-	for _, field := range []string{"max_output_tokens", "temperature", "top_p"} {
-		if _, ok := normalized[field]; ok {
-			t.Fatalf("unsupported subscription field %s crossed upstream", field)
+	for field, expected := range map[string]any{
+		"max_output_tokens": float64(32768), "temperature": 0.2, "top_p": 0.9,
+	} {
+		if normalized[field] != expected {
+			t.Fatalf("explicit Responses field %s = %#v, want %#v", field, normalized[field], expected)
 		}
 	}
 	if normalized["parallel_tool_calls"] != false || normalized["tool_choice"] != "auto" ||
@@ -195,7 +194,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	}
 	assertNormalizedMessages(t, input[1:], []any{
 		map[string]any{
-			"type": "message", "role": "developer",
+			"type": "message", "role": "system",
 			"content": []any{map[string]any{"type": "input_text", "text": "Follow system rules"}},
 		},
 		map[string]any{

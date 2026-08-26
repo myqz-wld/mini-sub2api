@@ -174,6 +174,7 @@ async fn literal_loopback_http_and_websocket_bypass_bad_proxy() {
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-test-key".to_string(),
         },
+        crate::request_profile::UpstreamProfile::BareOpenAi,
         crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES,
     )
     .expect("WebSocket request");

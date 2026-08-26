@@ -134,19 +134,38 @@ With `supports_websockets = true`, Codex may reuse one Responses v2 socket for s
 Subscription routing waits for the first `response.create`; a later rejection is therefore a
 WebSocket close rather than HTTP `426`. Set the flag to `false` if HTTP fallback is required.
 
-Subscription routes reproduce the Codex CLI `0.149.0` request shape: unsupported fields are
-removed, system messages become developer messages, assistant strings use `output_text`, and
-input roles use `input_text`. Model metadata uses Codex's longest-prefix and single-namespace
-suffix lookup before the true-unknown fallback; explicit effort, `summary:none`, verbosity, tools,
-and continuation controls remain authoritative. Responses Lite, prewarm, compaction, memory,
-serialization order, zstd, and synthesized item metadata follow the same pinned version.
+## Source-aware Responses profiles
 
-Every subscription request also uses the fixed identity
+The gateway independently classifies the selected credential and the caller source. A syntactically
+valid, non-empty `Originator` header marks a Codex caller; its value is not fixed. This marker
+selects request formatting only—it never changes credential visibility, account permissions, or
+which downstream key is accepted.
+
+| Caller source | Credential | Upstream profile |
+| --- | --- | --- |
+| No valid `Originator` | OpenAI API key | `BareOpenAi`: reviewed headers only; HTTP body and WebSocket text frame bytes remain exact. |
+| Valid `Originator` | OpenAI API key | `CodexOpenAi149`: Codex `0.149.0` Responses emulation with OpenAI API-key authentication. HTTP is not zstd-compressed. |
+| Any source | Codex subscription | `CodexSubscription149`: Codex `0.149.0` Responses emulation with ChatGPT subscription authentication. HTTP uses zstd level 3; WebSocket application messages never use zstd. |
+
+The two Codex emulation profiles begin with the caller's complete Responses object and make only
+the required `0.149.0` overlays. Explicit official fields remain authoritative, including
+`previous_response_id`, `conversation`, `background`, context/limits, metadata, moderation,
+prompt/cache settings, safety identifiers, sampling, truncation, tools, and image detail. The
+supported surface is the union of documented OpenAI Responses fields and completed Codex `0.149.0`
+capture/source wire fields; other protocol fields are removed. Arbitrary keys remain valid inside
+documented opaque/free-form containers such as metadata maps, JSON Schema, `prompt.variables`, and
+function/custom tool-call argument/input/output payload values; structured tools and shell/computer
+outputs are still filtered.
+HTTP does not synthesize `previous_response_id`; it forwards an explicit value unchanged. Non-Lite
+requests default an omitted image detail to `high`; Responses Lite leaves omitted detail absent but
+preserves an explicitly supplied supported detail value.
+
+Every subscription request uses the fixed identity
 `codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
 `originator: codex_cli_rs`, and `version: 0.149.0`. Request IDs are mapped to UUIDv8 with a
 stateless HMAC over ChatGPT account, downstream key scope, field, and source value; `device` then
 converges installation per account. The mapping is host-independent and the internal scope never
-crosses upstream. OpenAI API-key bodies and carrier-free WebSocket frames remain byte-exact.
+crosses upstream.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
@@ -159,6 +178,12 @@ WebSocket policy is intentionally small and split across the coordinator and cor
   120 seconds, and application messages are limited to 16 MiB. There is no hard total lifetime.
 - `generate=false` prewarm is tracked for revocation safety but excluded from daily inference
   aggregates. Public/provider sockets support deflate; the internal loopback hop does not.
+- A bare subscription socket may receive one hidden `generate=false` prewarm before its first
+  ordinary turn. This happens only when the caller did not provide explicit `generate`,
+  `previous_response_id`, or `conversation`. Codex callers are never given a duplicate prewarm.
+  Automatic reuse follows the Codex `0.149.0` semantic projection, excluding volatile generated
+  metadata and item identity; tool-output continuation or a true semantic mismatch safely falls
+  back to a full frame without a previous response id.
 
 ## Administration
 
@@ -252,9 +277,10 @@ Cloudflare infrastructure cookies.
 
 Compatibility is exact for request state that a `0.149.0` client supplies or the gateway can derive.
 The gateway does not fabricate absent caller workspace, sandbox, thread-source, trace, attestation,
-or tool-inventory state, and it preserves explicit public Responses controls. Its provider HTTP
-clients also refuse redirects so credentials cannot be replayed to a redirected authority; this is
-an intentional security boundary from the stock CLI client.
+or tool-inventory state, and it preserves explicit supported Responses controls plus arbitrary
+keys inside documented opaque/free-form containers. Its provider HTTP clients also refuse redirects
+so credentials cannot be replayed to a redirected authority; this is an intentional security
+boundary from the stock CLI client.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.

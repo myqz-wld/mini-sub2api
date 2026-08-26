@@ -1,263 +1,161 @@
-use crate::request_defaults;
-use crate::request_defaults::ModelProfile;
 use crate::request_identity;
-use crate::request_identity::IdentityContext;
-use crate::request_identity::SubscriptionTransport;
+use crate::request_profile::UpstreamProfile;
 use crate::request_pseudonym::RequestPseudonymizer;
-use crate::responses_lite;
 use bytes::Bytes;
 use http::HeaderMap;
-use serde_json::Map;
 use serde_json::Value;
 
-const UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS: &[&str] = &[
-    "max_output_tokens",
-    "max_completion_tokens",
-    "max_tokens",
-    "temperature",
-    "top_p",
-    "frequency_penalty",
-    "presence_penalty",
-];
+#[path = "request_emulation_overlay.rs"]
+mod overlay;
 
-pub struct PreparedSubscriptionRequest {
+pub(crate) use request_identity::SubscriptionTransport as EmulationTransport;
+
+pub struct PreparedEmulatedRequest {
     pub headers: HeaderMap,
     pub body: Bytes,
 }
 
+#[cfg(test)]
+pub type PreparedSubscriptionRequest = PreparedEmulatedRequest;
+
+#[derive(Clone, Copy)]
+pub(crate) struct SubscriptionIdentity<'a> {
+    pub(crate) account_namespace: &'a str,
+    pub(crate) downstream_scope: &'a str,
+}
+
+/// Applies the Codex 0.149.0 request overlay selected by `upstream_profile`.
+///
+/// The caller object is cloned in full before the supported request-field allowlist and targeted
+/// normalization are applied. `BareOpenAi` is deliberately rejected: callers must retain its
+/// separate opaque-body path rather than treating normalization failure as permission to fall back
+/// to bare forwarding.
+pub(crate) fn prepare_emulated_request(
+    upstream_profile: UpstreamProfile,
+    transport: EmulationTransport,
+    headers: &HeaderMap,
+    body: Bytes,
+    max_bytes: usize,
+    subscription_identity: Option<SubscriptionIdentity<'_>>,
+) -> Result<PreparedEmulatedRequest, ()> {
+    prepare_emulated_request_inner(
+        upstream_profile,
+        transport,
+        headers,
+        body,
+        max_bytes,
+        subscription_identity,
+        false,
+    )
+}
+
+pub(crate) fn prepare_projected_subscription_websocket_turn(
+    headers: &HeaderMap,
+    body: Bytes,
+    max_bytes: usize,
+    subscription_identity: SubscriptionIdentity<'_>,
+) -> Result<PreparedEmulatedRequest, ()> {
+    prepare_emulated_request_inner(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::WebSocket,
+        headers,
+        body,
+        max_bytes,
+        Some(subscription_identity),
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_emulated_request_inner(
+    upstream_profile: UpstreamProfile,
+    transport: EmulationTransport,
+    headers: &HeaderMap,
+    body: Bytes,
+    max_bytes: usize,
+    subscription_identity: Option<SubscriptionIdentity<'_>>,
+    headers_already_projected: bool,
+) -> Result<PreparedEmulatedRequest, ()> {
+    if has_non_identity_encoding(headers) {
+        return Err(());
+    }
+
+    let caller = serde_json::from_slice::<Value>(&body).map_err(|_| ())?;
+    let mut value = Value::Object(caller.as_object().ok_or(())?.clone());
+    let object = value
+        .as_object_mut()
+        .expect("caller object was cloned above");
+    let mut prepared_headers = headers.clone();
+
+    match (upstream_profile, subscription_identity) {
+        (UpstreamProfile::BareOpenAi, _) => return Err(()),
+        (UpstreamProfile::CodexOpenAi149, None) => {}
+        (UpstreamProfile::CodexSubscription149, Some(identity)) => {
+            let pseudonymizer =
+                RequestPseudonymizer::new(identity.account_namespace, identity.downstream_scope);
+            if headers_already_projected {
+                pseudonymizer.apply_body_only(object)?;
+            } else {
+                pseudonymizer.apply(&mut prepared_headers, object)?;
+            }
+        }
+        (UpstreamProfile::CodexOpenAi149, Some(_))
+        | (UpstreamProfile::CodexSubscription149, None) => return Err(()),
+    }
+
+    overlay::apply(object, &mut prepared_headers, transport, upstream_profile);
+    let encoded = serde_json::to_vec(&value).map_err(|_| ())?;
+    if encoded.len() > max_bytes {
+        return Err(());
+    }
+    Ok(PreparedEmulatedRequest {
+        headers: prepared_headers,
+        body: Bytes::from(encoded),
+    })
+}
+
+#[cfg(test)]
 pub fn prepare_subscription_request(
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
     account_namespace: &str,
     downstream_scope: &str,
-    request_id: &str,
+    _request_id: &str,
 ) -> Result<PreparedSubscriptionRequest, ()> {
-    prepare_subscription_request_for(
+    prepare_emulated_request(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::Http,
         headers,
         body,
         max_bytes,
-        account_namespace,
-        downstream_scope,
-        request_id,
-        SubscriptionTransport::Http,
+        Some(SubscriptionIdentity {
+            account_namespace,
+            downstream_scope,
+        }),
     )
 }
 
+#[cfg(test)]
 pub fn prepare_websocket_subscription_request(
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
     account_namespace: &str,
     downstream_scope: &str,
-    request_id: &str,
+    _request_id: &str,
 ) -> Result<PreparedSubscriptionRequest, ()> {
-    prepare_subscription_request_for(
+    prepare_emulated_request(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::WebSocket,
         headers,
         body,
         max_bytes,
-        account_namespace,
-        downstream_scope,
-        request_id,
-        SubscriptionTransport::WebSocket,
+        Some(SubscriptionIdentity {
+            account_namespace,
+            downstream_scope,
+        }),
     )
-}
-
-fn prepare_subscription_request_for(
-    headers: &HeaderMap,
-    body: Bytes,
-    max_bytes: usize,
-    account_namespace: &str,
-    downstream_scope: &str,
-    _request_id: &str,
-    transport: SubscriptionTransport,
-) -> Result<PreparedSubscriptionRequest, ()> {
-    let mut prepared_headers = headers.clone();
-    if has_non_identity_encoding(headers) {
-        return Err(());
-    }
-    let mut value = serde_json::from_slice::<Value>(&body).map_err(|_| ())?;
-    {
-        let object = value.as_object_mut().ok_or(())?;
-        RequestPseudonymizer::new(account_namespace, downstream_scope)
-            .apply(&mut prepared_headers, object)?;
-        strip_unsupported_subscription_fields(object);
-        request_defaults::normalize_optional_members(object);
-        if object
-            .get("instructions")
-            .and_then(Value::as_str)
-            .is_some_and(str::is_empty)
-        {
-            object.remove("instructions");
-        }
-    }
-    let fallback_body = encode_body(&value, max_bytes)?;
-    let object = value
-        .as_object_mut()
-        .expect("the request object was validated above");
-    let mut profile = object
-        .get("model")
-        .and_then(Value::as_str)
-        .map(request_defaults::model_profile)
-        .unwrap_or_else(|| request_defaults::model_profile(""));
-    profile.responses_lite |= responses_lite_requested(object);
-    request_identity::apply_routing_hint(object, &mut prepared_headers);
-    if already_subscription_shaped(object, profile) {
-        request_defaults::merge_request_defaults(object, profile);
-        request_identity::apply(
-            object,
-            &mut prepared_headers,
-            IdentityContext {
-                responses_lite: profile.responses_lite,
-                transport,
-                tool_namespaces_info: None,
-            },
-        );
-        responses_lite::canonicalize_request_items(object);
-        canonicalize_request_order(object, transport);
-        return encode_prepared(prepared_headers, &value, max_bytes);
-    }
-
-    let Some(input_value) = object.remove("input") else {
-        return Ok(prepared(prepared_headers, fallback_body));
-    };
-    let mut input = match normalize_input(input_value) {
-        Some(input) => input,
-        None => return Ok(prepared(prepared_headers, fallback_body)),
-    };
-    let tools = match object.remove("tools") {
-        Some(Value::Array(tools)) => tools,
-        Some(other) => {
-            object.insert("tools".to_string(), other);
-            return Ok(prepared(prepared_headers, fallback_body));
-        }
-        None => Vec::new(),
-    };
-    let instructions = match object.remove("instructions") {
-        Some(Value::String(instructions)) => instructions,
-        Some(other) => {
-            object.insert("instructions".to_string(), other);
-            return Ok(prepared(prepared_headers, fallback_body));
-        }
-        None => String::new(),
-    };
-
-    let tools = if profile.responses_lite {
-        responses_lite::group_tools(tools)
-    } else {
-        responses_lite::canonicalize_tools(tools)
-    };
-    if profile.responses_lite {
-        let mut prefix = vec![serde_json::json!({
-            "type": "additional_tools",
-            "role": "developer",
-            "tools": tools,
-        })];
-        if !instructions.is_empty() {
-            prefix.push(developer_message(instructions));
-        }
-        prefix.append(&mut input);
-        object.insert("input".to_string(), Value::Array(prefix));
-        object.insert("parallel_tool_calls".to_string(), Value::Bool(false));
-    } else {
-        object.insert("input".to_string(), Value::Array(input));
-        object.insert("tools".to_string(), Value::Array(tools));
-        if !instructions.is_empty() {
-            object.insert("instructions".to_string(), Value::String(instructions));
-        }
-    }
-    request_defaults::merge_request_defaults(object, profile);
-    request_identity::apply(
-        object,
-        &mut prepared_headers,
-        IdentityContext {
-            responses_lite: profile.responses_lite,
-            transport,
-            tool_namespaces_info: None,
-        },
-    );
-    responses_lite::canonicalize_request_items(object);
-    canonicalize_request_order(object, transport);
-
-    Ok(prepared(prepared_headers, encode_body(&value, max_bytes)?))
-}
-
-fn encode_prepared(
-    headers: HeaderMap,
-    value: &Value,
-    max_bytes: usize,
-) -> Result<PreparedSubscriptionRequest, ()> {
-    Ok(prepared(headers, encode_body(value, max_bytes)?))
-}
-
-fn encode_body(value: &Value, max_bytes: usize) -> Result<Bytes, ()> {
-    let encoded = serde_json::to_vec(value).map_err(|_| ())?;
-    (encoded.len() <= max_bytes)
-        .then(|| Bytes::from(encoded))
-        .ok_or(())
-}
-
-fn canonicalize_request_order(object: &mut Map<String, Value>, transport: SubscriptionTransport) {
-    const HTTP_ORDER: &[&str] = &[
-        "model",
-        "instructions",
-        "input",
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "reasoning",
-        "store",
-        "stream",
-        "stream_options",
-        "include",
-        "service_tier",
-        "prompt_cache_key",
-        "text",
-        "client_metadata",
-    ];
-    const WEBSOCKET_ORDER: &[&str] = &[
-        "type",
-        "model",
-        "instructions",
-        "previous_response_id",
-        "input",
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "reasoning",
-        "store",
-        "stream",
-        "stream_options",
-        "include",
-        "service_tier",
-        "prompt_cache_key",
-        "text",
-        "generate",
-        "client_metadata",
-    ];
-    let order = if transport == SubscriptionTransport::WebSocket {
-        WEBSOCKET_ORDER
-    } else {
-        HTTP_ORDER
-    };
-    let mut existing = std::mem::take(object);
-    for name in order {
-        if let Some(value) = existing.remove(*name) {
-            object.insert((*name).to_string(), value);
-        }
-    }
-}
-
-fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) -> bool {
-    let mut removed = false;
-    for field in UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS {
-        removed |= object.remove(*field).is_some();
-    }
-    removed
-}
-
-fn prepared(headers: HeaderMap, body: Bytes) -> PreparedSubscriptionRequest {
-    PreparedSubscriptionRequest { headers, body }
 }
 
 fn has_non_identity_encoding(headers: &HeaderMap) -> bool {
@@ -268,104 +166,6 @@ fn has_non_identity_encoding(headers: &HeaderMap) -> bool {
             let value = value.trim();
             !value.is_empty() && !value.eq_ignore_ascii_case("identity")
         })
-}
-
-fn already_subscription_shaped(object: &Map<String, Value>, profile: ModelProfile) -> bool {
-    let input = object.get("input").and_then(Value::as_array);
-    if profile.responses_lite {
-        return object.get("tools").is_none()
-            && object.get("instructions").is_none()
-            && (input
-                .and_then(|items| items.first())
-                .and_then(Value::as_object)
-                .and_then(|item| item.get("type"))
-                .and_then(Value::as_str)
-                == Some("additional_tools")
-                || object
-                    .get("previous_response_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| !id.is_empty()));
-    }
-    input.is_some()
-        && object.get("tools").is_some_and(Value::is_array)
-        && [
-            "tool_choice",
-            "parallel_tool_calls",
-            "reasoning",
-            "store",
-            "stream",
-            "include",
-            "prompt_cache_key",
-            "client_metadata",
-        ]
-        .iter()
-        .all(|field| object.contains_key(*field))
-}
-
-fn normalize_input(input: Value) -> Option<Vec<Value>> {
-    let mut input = match input {
-        Value::String(text) => Some(vec![user_message(text)]),
-        Value::Array(input) => Some(input),
-        _ => None,
-    }?;
-    for item in &mut input {
-        let Some(message) = item.as_object_mut() else {
-            continue;
-        };
-        if message.get("type").is_none() && message.get("role").and_then(Value::as_str).is_some() {
-            let existing = std::mem::take(message);
-            message.insert("type".to_string(), Value::String("message".to_string()));
-            message.extend(existing);
-        }
-        if message.get("role").and_then(Value::as_str) == Some("system") {
-            message.insert("role".to_string(), Value::String("developer".to_string()));
-        }
-        if matches!(
-            message.get("type").and_then(Value::as_str),
-            None | Some("message")
-        ) && let Some(text) = message.get("content").and_then(Value::as_str)
-        {
-            let content_type = if message.get("role").and_then(Value::as_str) == Some("assistant") {
-                "output_text"
-            } else {
-                "input_text"
-            };
-            message.insert(
-                "content".to_string(),
-                serde_json::json!([{"type": content_type, "text": text}]),
-            );
-        }
-    }
-    responses_lite::assign_missing_item_ids(&mut input);
-    Some(input)
-}
-
-fn developer_message(text: String) -> Value {
-    serde_json::json!({
-        "type": "message",
-        "role": "developer",
-        "content": [{"type": "input_text", "text": text}],
-    })
-}
-
-fn responses_lite_requested(object: &Map<String, Value>) -> bool {
-    object
-        .get("input")
-        .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(Value::as_object)
-        .and_then(|item| item.get("type"))
-        .and_then(Value::as_str)
-        == Some("additional_tools")
-}
-
-fn user_message(text: String) -> Value {
-    serde_json::json!({
-        "type": "message",
-        "id": responses_lite::new_item_id("msg"),
-        "role": "user",
-        "content": [{"type": "input_text", "text": text}],
-    })
 }
 
 #[cfg(test)]
@@ -388,3 +188,11 @@ mod defaults_tests;
 #[cfg(test)]
 #[path = "request_normalizer_native_ws_tests.rs"]
 mod native_ws_tests;
+
+#[cfg(test)]
+#[path = "request_emulation_overlay_tests.rs"]
+mod emulation_overlay_tests;
+
+#[cfg(test)]
+#[path = "request_emulation_protocol_tests.rs"]
+mod emulation_protocol_tests;

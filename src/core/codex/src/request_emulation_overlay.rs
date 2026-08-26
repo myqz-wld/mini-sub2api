@@ -1,0 +1,329 @@
+use super::EmulationTransport;
+use crate::request_defaults;
+use crate::request_identity;
+use crate::request_identity::IdentityContext;
+use crate::request_profile::UpstreamProfile;
+use crate::responses_lite;
+use http::HeaderMap;
+use serde_json::Map;
+use serde_json::Value;
+
+// Union of the documented Responses create/response.create surface and the additional top-level
+// carriers emitted by Codex 0.149.0 (`client_metadata` and `generate`). Known structured members
+// are filtered below or by the tool/item normalizers; only explicitly free-form containers remain
+// opaque.
+const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
+    "background",
+    "client_metadata",
+    "context_management",
+    "conversation",
+    "include",
+    "input",
+    "instructions",
+    "max_output_tokens",
+    "max_tool_calls",
+    "metadata",
+    "model",
+    "moderation",
+    "parallel_tool_calls",
+    "previous_response_id",
+    "prompt",
+    "prompt_cache_key",
+    "prompt_cache_options",
+    "prompt_cache_retention",
+    "reasoning",
+    "safety_identifier",
+    "service_tier",
+    "store",
+    "stream",
+    "stream_options",
+    "temperature",
+    "text",
+    "tool_choice",
+    "tools",
+    "top_logprobs",
+    "top_p",
+    "truncation",
+    "user",
+];
+
+const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate"];
+
+pub(super) fn apply(
+    object: &mut Map<String, Value>,
+    headers: &mut HeaderMap,
+    transport: EmulationTransport,
+    profile: UpstreamProfile,
+) {
+    object.retain(|name, _| {
+        SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
+            || (transport == EmulationTransport::WebSocket
+                && SUPPORTED_WEBSOCKET_FIELDS.contains(&name.as_str()))
+    });
+    canonicalize_structured_request_members(object);
+    let mut model_profile = object
+        .get("model")
+        .and_then(Value::as_str)
+        .map(request_defaults::model_profile)
+        .unwrap_or_else(|| request_defaults::model_profile(""));
+    model_profile.responses_lite |= responses_lite_requested(object);
+    let already_lite = model_profile.responses_lite && already_lite_shaped(object, transport);
+
+    if !already_lite {
+        normalize_input(object);
+    }
+    if model_profile.responses_lite {
+        if !already_lite {
+            relocate_lite_fields(object);
+        }
+    } else {
+        canonicalize_top_level_tools(object);
+    }
+
+    request_defaults::merge_request_defaults(object, model_profile);
+    if profile.uses_codex_subscription() {
+        request_identity::apply_routing_hint(object, headers);
+    } else {
+        request_identity::remove_routing_hint(headers);
+    }
+    request_identity::apply(
+        object,
+        headers,
+        IdentityContext {
+            responses_lite: model_profile.responses_lite,
+            transport,
+            tool_namespaces_info: None,
+        },
+    );
+    responses_lite::canonicalize_request_items(
+        object,
+        (!model_profile.responses_lite).then_some("high"),
+    );
+    canonicalize_request_order(object, transport);
+}
+
+fn canonicalize_structured_request_members(object: &mut Map<String, Value>) {
+    retain_object_member(object, "conversation", &["id"]);
+    retain_object_member(object, "moderation", &["model", "policy"]);
+    if let Some(policy) = object
+        .get_mut("moderation")
+        .and_then(Value::as_object_mut)
+        .and_then(|moderation| moderation.get_mut("policy"))
+        .and_then(Value::as_object_mut)
+    {
+        policy.retain(|name, _| matches!(name.as_str(), "input" | "output"));
+        for value in policy.values_mut() {
+            if let Some(mode) = value.as_object_mut() {
+                mode.retain(|name, _| name == "mode");
+            }
+        }
+    }
+    retain_object_member(object, "prompt", &["id", "variables", "version"]);
+    retain_object_member(object, "prompt_cache_options", &["mode", "ttl"]);
+    if let Some(entries) = object
+        .get_mut("context_management")
+        .and_then(Value::as_array_mut)
+    {
+        for entry in entries {
+            if let Some(entry) = entry.as_object_mut() {
+                entry.retain(|name, _| matches!(name.as_str(), "type" | "compact_threshold"));
+            }
+        }
+    } else if let Some(entry) = object
+        .get_mut("context_management")
+        .and_then(Value::as_object_mut)
+    {
+        entry.retain(|name, _| matches!(name.as_str(), "type" | "compact_threshold"));
+    }
+    let Some(tool_choice) = object.get_mut("tool_choice").and_then(Value::as_object_mut) else {
+        return;
+    };
+    tool_choice.retain(|name, _| {
+        matches!(
+            name.as_str(),
+            "type" | "name" | "server_label" | "mode" | "tools"
+        )
+    });
+    if let Some(tools) = tool_choice.get_mut("tools").and_then(Value::as_array_mut) {
+        for tool in tools {
+            if let Some(tool) = tool.as_object_mut() {
+                tool.retain(|name, _| matches!(name.as_str(), "type" | "name" | "server_label"));
+            }
+        }
+    }
+}
+
+fn retain_object_member(object: &mut Map<String, Value>, name: &str, fields: &[&str]) {
+    if let Some(member) = object.get_mut(name).and_then(Value::as_object_mut) {
+        member.retain(|name, _| fields.contains(&name.as_str()));
+    }
+}
+
+fn relocate_lite_fields(object: &mut Map<String, Value>) {
+    let Some(mut input) = object.get("input").and_then(Value::as_array).cloned() else {
+        return;
+    };
+    let tools = match object.get("tools") {
+        Some(Value::Array(tools)) => tools.clone(),
+        None => Vec::new(),
+        Some(_) => return,
+    };
+    let instructions = match object.get("instructions") {
+        Some(Value::String(instructions)) => Some(instructions.clone()),
+        None => None,
+        Some(_) => return,
+    };
+
+    object.remove("tools");
+    object.remove("instructions");
+    let mut relocated = vec![serde_json::json!({
+        "type": "additional_tools",
+        "role": "developer",
+        "tools": responses_lite::group_tools(tools),
+    })];
+    if let Some(instructions) = instructions.filter(|instructions| !instructions.is_empty()) {
+        relocated.push(developer_message(instructions));
+    }
+    relocated.append(&mut input);
+    object.insert("input".to_string(), Value::Array(relocated));
+}
+
+fn canonicalize_top_level_tools(object: &mut Map<String, Value>) {
+    let Some(tools) = object.get("tools").and_then(Value::as_array).cloned() else {
+        return;
+    };
+    *object.get_mut("tools").expect("tools member exists") =
+        Value::Array(responses_lite::canonicalize_tools(tools));
+}
+
+fn normalize_input(object: &mut Map<String, Value>) {
+    let Some(input) = object.get_mut("input") else {
+        return;
+    };
+    let mut items = match std::mem::take(input) {
+        Value::String(text) => vec![user_message(text)],
+        Value::Array(items) => items,
+        other => {
+            *input = other;
+            return;
+        }
+    };
+    for item in &mut items {
+        let Some(message) = item.as_object_mut() else {
+            continue;
+        };
+        if message.get("type").is_none() && message.get("role").and_then(Value::as_str).is_some() {
+            let existing = std::mem::take(message);
+            message.insert("type".to_string(), Value::String("message".to_string()));
+            message.extend(existing);
+        }
+        if matches!(
+            message.get("type").and_then(Value::as_str),
+            None | Some("message")
+        ) && let Some(text) = message.get("content").and_then(Value::as_str)
+        {
+            let content_type = if message.get("role").and_then(Value::as_str) == Some("assistant") {
+                "output_text"
+            } else {
+                "input_text"
+            };
+            message.insert(
+                "content".to_string(),
+                serde_json::json!([{"type": content_type, "text": text}]),
+            );
+        }
+    }
+    responses_lite::assign_missing_item_ids(&mut items);
+    *input = Value::Array(items);
+}
+
+fn already_lite_shaped(object: &Map<String, Value>, transport: EmulationTransport) -> bool {
+    if responses_lite_requested(object) {
+        return true;
+    }
+    transport == EmulationTransport::WebSocket
+        && object.get("tools").is_none()
+        && object.get("instructions").is_none()
+        && object.contains_key("previous_response_id")
+}
+
+fn responses_lite_requested(object: &Map<String, Value>) -> bool {
+    object
+        .get("input")
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+        .and_then(Value::as_object)
+        .and_then(|item| item.get("type"))
+        .and_then(Value::as_str)
+        == Some("additional_tools")
+}
+
+fn developer_message(text: String) -> Value {
+    serde_json::json!({
+        "type": "message",
+        "role": "developer",
+        "content": [{"type": "input_text", "text": text}],
+    })
+}
+
+fn user_message(text: String) -> Value {
+    serde_json::json!({
+        "type": "message",
+        "id": responses_lite::new_item_id("msg"),
+        "role": "user",
+        "content": [{"type": "input_text", "text": text}],
+    })
+}
+
+fn canonicalize_request_order(object: &mut Map<String, Value>, transport: EmulationTransport) {
+    const HTTP_ORDER: &[&str] = &[
+        "model",
+        "instructions",
+        "previous_response_id",
+        "input",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning",
+        "store",
+        "stream",
+        "stream_options",
+        "include",
+        "service_tier",
+        "prompt_cache_key",
+        "text",
+        "client_metadata",
+    ];
+    const WEBSOCKET_ORDER: &[&str] = &[
+        "type",
+        "model",
+        "instructions",
+        "previous_response_id",
+        "input",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning",
+        "store",
+        "stream",
+        "stream_options",
+        "include",
+        "service_tier",
+        "prompt_cache_key",
+        "text",
+        "generate",
+        "client_metadata",
+    ];
+    let order = if transport == EmulationTransport::WebSocket {
+        WEBSOCKET_ORDER
+    } else {
+        HTTP_ORDER
+    };
+    let mut existing = std::mem::take(object);
+    for name in order {
+        if let Some(value) = existing.remove(*name) {
+            object.insert((*name).to_string(), value);
+        }
+    }
+    object.extend(existing);
+}

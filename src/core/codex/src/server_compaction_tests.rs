@@ -178,5 +178,5 @@ fn assert_compaction_metadata(raw: &str, expected_device: &str) {
         "responses_compaction_v2"
     );
     assert_eq!(metadata["compaction"]["strategy"], "memento");
-    assert_eq!(metadata["future_compaction_field"]["kept"], true);
+    assert!(metadata.get("future_compaction_field").is_none());
 }

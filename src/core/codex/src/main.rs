@@ -15,12 +15,18 @@ mod oauth_login;
 mod request_defaults;
 mod request_identity;
 mod request_normalizer;
+mod request_profile;
 mod request_pseudonym;
 mod response_item_metadata;
 mod response_stream;
 mod responses_lite;
 mod responses_websocket;
 mod responses_websocket_deferred;
+mod responses_websocket_emulation;
+mod responses_websocket_http;
+mod responses_websocket_prewarm;
+mod responses_websocket_projection;
+mod responses_websocket_state;
 mod server;
 #[cfg(test)]
 mod test_support;

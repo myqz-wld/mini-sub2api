@@ -49,19 +49,20 @@ fn converts_only_supported_upstream_url_schemes() {
 #[test]
 fn api_key_create_frame_is_byte_exact() {
     let original = " {\"type\":\"response.create\", \"model\":\"test\"} ".to_string();
-    let mut sequence = 0;
+    let mut headers = HeaderMap::new();
+    let mut continuation =
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::BareOpenAi);
     let got = prepare_client_text(
         original.clone(),
-        &HeaderMap::new(),
+        &mut headers,
         None,
+        UpstreamProfile::BareOpenAi,
         PSEUDONYM_SCOPE,
-        "req_test",
         &device_fingerprint(),
-        &mut sequence,
+        &mut continuation,
     )
     .expect("valid frame");
     assert_eq!(got, original);
-    assert_eq!(sequence, 0);
 }
 
 #[test]
@@ -76,15 +77,17 @@ fn subscription_create_normalization_preserves_websocket_fields() {
         "client_metadata": {"custom": "kept"}
     })
     .to_string();
-    let mut sequence = 0;
+    let mut headers = HeaderMap::new();
+    let mut continuation =
+        ResponsesWebSocketState::new(CallerKind::Codex, UpstreamProfile::CodexSubscription149);
     let got = prepare_client_text(
         original,
-        &HeaderMap::new(),
+        &mut headers,
         Some(ACCOUNT_NAMESPACE),
+        UpstreamProfile::CodexSubscription149,
         PSEUDONYM_SCOPE,
-        "req_test",
         &device_fingerprint(),
-        &mut sequence,
+        &mut continuation,
     )
     .expect("valid frame");
     let value: Value = serde_json::from_str(&got).expect("normalized JSON");
@@ -95,39 +98,42 @@ fn subscription_create_normalization_preserves_websocket_fields() {
     assert_eq!(value["client_metadata"]["custom"], "kept");
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert_eq!(value["store"], false);
-    assert_eq!(sequence, 1);
 }
 
 #[test]
 fn valid_non_create_application_event_is_byte_exact() {
     let original = "{\"type\":\"response.append_input_item\",\"item\":{}}".to_string();
-    let mut sequence = 0;
+    let mut headers = HeaderMap::new();
+    let mut continuation =
+        ResponsesWebSocketState::new(CallerKind::Codex, UpstreamProfile::CodexSubscription149);
     let got = prepare_client_text(
         original.clone(),
-        &HeaderMap::new(),
+        &mut headers,
         Some(ACCOUNT_NAMESPACE),
+        UpstreamProfile::CodexSubscription149,
         PSEUDONYM_SCOPE,
-        "req_test",
         &device_fingerprint(),
-        &mut sequence,
+        &mut continuation,
     )
     .expect("valid control frame");
     assert_eq!(got, original);
-    assert_eq!(sequence, 0);
 }
 
 #[test]
 fn malformed_or_untyped_application_frames_are_rejected() {
     for frame in ["not-json", "{}", r#"{"type":""}"#] {
+        let mut continuation =
+            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::BareOpenAi);
+        let mut headers = HeaderMap::new();
         assert!(
             prepare_client_text(
                 frame.to_string(),
-                &HeaderMap::new(),
+                &mut headers,
                 None,
+                UpstreamProfile::BareOpenAi,
                 PSEUDONYM_SCOPE,
-                "req_test",
                 &device_fingerprint(),
-                &mut 0,
+                &mut continuation,
             )
             .is_err(),
             "frame {frame}"
@@ -453,3 +459,15 @@ mod oauth_tests;
 
 #[path = "responses_websocket_delivery_tests.rs"]
 mod delivery_tests;
+
+#[path = "responses_websocket_deferred_oauth_tests.rs"]
+mod deferred_oauth_tests;
+
+#[path = "responses_websocket_policy_tests.rs"]
+mod policy_tests;
+
+#[path = "responses_websocket_size_tests.rs"]
+mod size_tests;
+
+#[path = "responses_websocket_initial_tests.rs"]
+mod initial_tests;

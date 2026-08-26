@@ -38,6 +38,7 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
+        UpstreamProfile::CodexSubscription149,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -112,6 +113,7 @@ fn oauth_websocket_replaces_process_identity_and_keeps_canonical_merge_position(
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
+        UpstreamProfile::CodexSubscription149,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -178,6 +180,7 @@ fn oauth_websocket_timing_headers_match_codex_0149_conditional_order() {
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
+        UpstreamProfile::CodexSubscription149,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -258,6 +261,7 @@ fn oauth_websocket_optional_headers_match_codex_0149_merge_order() {
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
+        UpstreamProfile::CodexSubscription149,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -352,6 +356,7 @@ async fn oauth_http_headers_and_zstd_body_match_codex_0149_wire_shape() {
             token: "oauth-http-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
+        UpstreamProfile::CodexSubscription149,
         body.clone(),
     )
     .expect("HTTP request");

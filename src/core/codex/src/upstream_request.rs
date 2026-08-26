@@ -1,4 +1,6 @@
 use crate::error::CoreFailure;
+use crate::request_profile::CredentialKind;
+use crate::request_profile::UpstreamProfile;
 use bytes::Bytes;
 use http::HeaderMap;
 use http::HeaderName;
@@ -184,15 +186,27 @@ pub(crate) enum ResolvedAuth {
     OpenAiApiKey { token: String },
 }
 
+impl ResolvedAuth {
+    pub(crate) const fn credential_kind(&self) -> CredentialKind {
+        match self {
+            Self::CodexOAuth { .. } => CredentialKind::CodexSubscription,
+            Self::OpenAiApiKey { .. } => CredentialKind::OpenAiApiKey,
+        }
+    }
+}
+
 pub(crate) fn build(
     client: &Client,
     inbound_headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
+    profile: UpstreamProfile,
     body: Bytes,
 ) -> Result<Request, CoreFailure> {
+    validate_profile(auth, profile)?;
     let mut headers = authenticated_headers(inbound_headers, auth)?;
-    if matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+    apply_profile_identity(&mut headers, profile)?;
+    if profile.uses_codex_subscription() {
         headers.insert(
             http::header::ACCEPT,
             HeaderValue::from_static("text/event-stream"),
@@ -204,7 +218,7 @@ pub(crate) fn build(
         headers.remove("openai-beta");
         headers.remove("x-responsesapi-include-timing-metrics");
     }
-    let body = prepare_http_body(&mut headers, auth, body)?;
+    let body = prepare_http_body(&mut headers, profile, body)?;
     let headers = ordered_headers(&headers, HTTP_HEADER_ORDER);
     client
         .post(upstream_url)
@@ -218,13 +232,16 @@ pub(crate) fn build_websocket(
     inbound_headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
+    profile: UpstreamProfile,
     max_message_bytes: usize,
 ) -> Result<(WebSocketRequest, WebSocketConfig), CoreFailure> {
+    validate_profile(auth, profile)?;
     let mut headers = authenticated_headers(inbound_headers, auth)?;
+    apply_profile_identity(&mut headers, profile)?;
     headers.remove(http::header::ACCEPT);
     headers.remove(http::header::CONTENT_ENCODING);
     headers.remove(http::header::CONTENT_TYPE);
-    if matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+    if profile.uses_codex_subscription() {
         headers.remove("x-codex-turn-state");
         headers.remove("x-codex-inference-call-id");
         headers.remove("x-openai-internal-codex-responses-lite");
@@ -393,10 +410,10 @@ pub(crate) fn websocket_url(upstream_url: &str) -> Result<Url, CoreFailure> {
 
 fn prepare_http_body(
     headers: &mut HeaderMap,
-    auth: &ResolvedAuth,
+    profile: UpstreamProfile,
     body: Bytes,
 ) -> Result<Bytes, CoreFailure> {
-    if !matches!(auth, ResolvedAuth::CodexOAuth { .. }) {
+    if !profile.uses_codex_subscription() {
         return Ok(body);
     }
     let encoding = headers
@@ -419,6 +436,41 @@ fn prepare_http_body(
     }
 }
 
+fn validate_profile(auth: &ResolvedAuth, profile: UpstreamProfile) -> Result<(), CoreFailure> {
+    if auth.credential_kind() == profile.credential_kind() {
+        Ok(())
+    } else {
+        Err(CoreFailure::Internal)
+    }
+}
+
+fn apply_profile_identity(
+    headers: &mut HeaderMap,
+    profile: UpstreamProfile,
+) -> Result<(), CoreFailure> {
+    if profile != UpstreamProfile::CodexOpenAi149 {
+        return Ok(());
+    }
+    if !headers.contains_key("originator") {
+        headers.insert(
+            "originator",
+            HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR),
+        );
+    }
+    if !headers.contains_key(CODEX_VERSION_HEADER) {
+        headers.insert(
+            CODEX_VERSION_HEADER,
+            HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
+        );
+    }
+    if !headers.contains_key(http::header::USER_AGENT) {
+        let value = HeaderValue::from_str(crate::codex_user_agent::canonical_value().as_str())
+            .map_err(|_| CoreFailure::Internal)?;
+        headers.insert(http::header::USER_AGENT, value);
+    }
+    Ok(())
+}
+
 fn forwarded_headers(source: &HeaderMap, auth: &ResolvedAuth) -> HeaderMap {
     let mut headers = HeaderMap::new();
     copy_allowed(&mut headers, source, COMMON_ALLOWED);
@@ -437,9 +489,11 @@ fn copy_allowed(destination: &mut HeaderMap, source: &HeaderMap, allowed: &[&'st
 }
 
 #[cfg(test)]
-#[path = "upstream_request_tests.rs"]
-mod tests;
-
-#[cfg(test)]
 #[path = "upstream_request_oauth_wire_tests.rs"]
 mod oauth_wire_tests;
+#[cfg(test)]
+#[path = "upstream_request_profile_tests.rs"]
+mod profile_tests;
+#[cfg(test)]
+#[path = "upstream_request_tests.rs"]
+mod tests;

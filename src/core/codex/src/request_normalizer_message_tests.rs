@@ -29,7 +29,7 @@ fn easy_assistant_text_becomes_output_text_while_input_roles_stay_input_text() {
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized request");
     let input = value["input"].as_array().expect("input items");
-    assert_eq!(input[0]["role"], "developer");
+    assert_eq!(input[0]["role"], "system");
     assert_eq!(input[0]["content"][0]["type"], "input_text");
     assert_eq!(input[1]["role"], "user");
     assert_eq!(input[1]["content"][0]["type"], "input_text");
