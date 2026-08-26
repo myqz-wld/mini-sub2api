@@ -235,7 +235,8 @@ for the first `response.create` so its model and service tier can drive the prov
   so pre-upgrade header metadata cannot be combined with a native prewarm snapshot. A synthesized
   hidden prewarm independently replaces public turn identity with `request_kind=prewarm`, an empty
   turn id, and no root-turn, parent-turn, or turn-start fields; its handshake and frame metadata
-  match.
+  match. If hidden setup requires a replacement socket, that new handshake uses the public turn
+  identity because its first frame is the public full create.
 - The fingerprint snapshot used for the handshake is retained for that socket. Before each
   `response.create`, the core re-reads the sidecar revision; a changed or unreadable fingerprint
   closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.

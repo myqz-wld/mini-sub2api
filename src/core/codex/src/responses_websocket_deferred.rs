@@ -206,7 +206,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
                 &mut internal,
                 &mut pending,
                 &mut pending_cost,
-                connect(&mut context, &handshake_headers),
+                connect(&mut context, &upstream_headers),
             )
             .await
             else {
