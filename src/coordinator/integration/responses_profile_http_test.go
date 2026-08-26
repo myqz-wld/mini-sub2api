@@ -244,7 +244,7 @@ func assertHTTPProfileCredentialBoundary(t *testing.T, capture routingMatrixCapt
 func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicitPrevious bool) {
 	t.Helper()
 	value := decodeRequestObject(t, body)
-	assertResponsesProfileSurface(t, value, lite)
+	assertResponsesProfileSurface(t, value, lite, false)
 	if hasExplicitPrevious {
 		if value["previous_response_id"] != "explicit-profile-previous" ||
 			value["conversation"] != "explicit-profile-conversation" {
@@ -278,17 +278,30 @@ func responsesProfileShellBoundariesValid(input any) bool {
 	return false
 }
 
-func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite bool) {
+func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, websocket bool) {
 	t.Helper()
 	for _, field := range []string{
-		"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store", "stream",
-		"stream_options", "include", "service_tier", "text", "background", "context_management",
+		"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store",
+		"stream_options", "include", "service_tier", "text", "context_management",
 		"max_output_tokens", "max_tool_calls", "metadata", "moderation", "prompt",
 		"prompt_cache_options", "prompt_cache_retention", "safety_identifier", "temperature",
 		"top_logprobs", "top_p", "truncation", "user",
 	} {
 		if _, exists := value[field]; !exists {
 			t.Fatalf("Responses field %q was removed", field)
+		}
+	}
+	if websocket {
+		for _, field := range []string{"stream", "background"} {
+			if _, exists := value[field]; exists {
+				t.Fatalf("unsupported WebSocket field %q survived", field)
+			}
+		}
+	} else {
+		for _, field := range []string{"stream", "background"} {
+			if _, exists := value[field]; !exists {
+				t.Fatalf("HTTP Responses field %q was removed", field)
+			}
 		}
 	}
 	if _, exists := value["unsupported_profile_sentinel"]; exists {

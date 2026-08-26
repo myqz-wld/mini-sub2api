@@ -147,43 +147,39 @@ which downstream key is accepted.
 | Valid `Originator` | OpenAI API key | `CodexOpenAi149`: Codex `0.149.0` Responses emulation with OpenAI API-key authentication. HTTP is not zstd-compressed. |
 | Any source | Codex subscription | `CodexSubscription149`: Codex `0.149.0` Responses emulation with ChatGPT subscription authentication. HTTP uses zstd level 3; WebSocket application messages never use zstd. |
 
-The two Codex emulation profiles begin with the caller's complete Responses object and make only
-the required `0.149.0` overlays. Explicit official fields remain authoritative, including
-`previous_response_id`, `conversation`, `background`, context/limits, metadata, moderation,
-prompt/cache settings, safety identifiers, sampling, truncation, tools, and image detail. The
-supported surface is the union of documented OpenAI Responses fields and completed Codex `0.149.0`
-capture/source wire fields; other protocol fields are removed. Arbitrary keys remain valid inside
-documented opaque/free-form containers such as metadata maps, JSON Schema, `prompt.variables`, and
-function/custom tool-call argument/input/output payload values; structured tools and shell/computer
-outputs are still filtered.
-HTTP does not synthesize `previous_response_id`; it forwards an explicit value unchanged. Non-Lite
-requests default an omitted image detail to `high`; Responses Lite leaves omitted detail absent but
-preserves an explicitly supplied supported detail value.
+The emulated profiles clone the caller object, retain only fields supported by OpenAI Responses or
+the fixed Codex capture, and apply missing `0.149.0` defaults. Explicit supported values remain
+authoritative on their transport, including `previous_response_id`, HTTP `background`, WS
+`stream_id`, tools, sampling, and image detail. Unknown structured members are removed; documented
+free-form metadata, JSON Schema, prompt variables, and function/custom payloads remain opaque.
+Web and File Search use separate filter schemas. HTTP never synthesizes `previous_response_id`;
+non-Lite image detail defaults to `high`, while Lite leaves an omitted detail absent.
 
-Every subscription request uses the fixed identity
+`CodexOpenAi149` pins `version: 0.149.0`. Subscription requests additionally use the fixed identity
 `codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
-`originator: codex_cli_rs`, and `version: 0.149.0`. Request IDs are mapped to UUIDv8 with a
-stateless HMAC over ChatGPT account, downstream key scope, field, and source value; `device` then
-converges installation per account. The mapping is host-independent and the internal scope never
-crosses upstream.
+`originator: codex_cli_rs`, and `version: 0.149.0`. Subscription identifiers are isolated with
+account/key-scoped UUIDv8 pseudonyms; `device` converges installation per account.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
 - One socket is bound to one downstream key and credential; responses are sequential, and an
   overlapping `response.create` closes the connection with a policy violation.
-- Other valid Responses v2 JSON application events pass through while a response is active.
+- `BareOpenAi` keeps every valid Responses v2 JSON application event byte-exact. Simulated
+  `response.inject` events retain only documented `type`, `input`, and `response_id` carriers and
+  apply the same structured-item filtering as create input; other typed non-create events pass
+  through while a response is active.
 - Mode changes fence existing sockets before their next `response.create`.
 - A key may hold at most eight live sockets. The first application frame must arrive within 30
   seconds, an idle connection between turns closes after five minutes, each write is bounded to
   120 seconds, and application messages are limited to 16 MiB. There is no hard total lifetime.
 - `generate=false` prewarm is tracked for revocation safety but excluded from daily inference
   aggregates. Public/provider sockets support deflate; the internal loopback hop does not.
-- A bare subscription socket may receive one hidden `generate=false` prewarm before its first
-  ordinary turn. This happens only when the caller did not provide explicit `generate`,
-  `previous_response_id`, or `conversation`. Codex callers are never given a duplicate prewarm.
-  Automatic reuse follows the Codex `0.149.0` semantic projection, excluding volatile generated
-  metadata and item identity; tool-output continuation or a true semantic mismatch safely falls
-  back to a full frame without a previous response id.
+- A bare subscription socket may receive one hidden `generate=false` prewarm unless the caller
+  supplied `generate`, `previous_response_id`, `conversation`, or `stream_id`. It uses an independent
+  prewarm identity; explicit/provider item IDs remain semantic during reuse, while temporary wire
+  IDs do not. Incompatible continuation falls back to a full frame.
+- Simulated WS `response.create` removes HTTP-only `background` and implicit `stream`, while
+  preserving WS-only `stream_id`. `stream_options` remains an explicit supported control.
 
 ## Administration
 

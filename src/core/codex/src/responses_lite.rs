@@ -81,7 +81,8 @@ pub(crate) fn canonicalize_tools(tools: Vec<Value>) -> Vec<Value> {
     tools.into_iter().map(canonical_tool).collect()
 }
 
-pub(crate) fn assign_missing_item_ids(items: &mut [Value]) {
+pub(crate) fn assign_missing_item_ids(items: &mut [Value]) -> Vec<String> {
+    let mut synthesized = Vec::new();
     for item in items {
         let Some(object) = item.as_object_mut() else {
             continue;
@@ -98,6 +99,9 @@ pub(crate) fn assign_missing_item_ids(items: &mut [Value]) {
             continue;
         };
         let id = Value::String(format!("{prefix}_{}", Uuid::now_v7()));
+        if let Some(id) = id.as_str() {
+            synthesized.push(id.to_string());
+        }
         let existing = std::mem::take(object);
         let mut reordered = Map::new();
         for (name, value) in existing {
@@ -109,6 +113,7 @@ pub(crate) fn assign_missing_item_ids(items: &mut [Value]) {
         }
         *object = reordered;
     }
+    synthesized
 }
 
 pub(crate) fn canonicalize_request_items(
@@ -121,18 +126,8 @@ pub(crate) fn canonicalize_request_items(
         .and_then(|metadata| metadata.get("turn_id"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    if let Some(items) = request.get_mut("input").and_then(Value::as_array_mut) {
-        for item in items {
-            let Some(object) = item.as_object_mut() else {
-                continue;
-            };
-            crate::response_item_metadata::stamp(object, turn_id.as_deref());
-            crate::response_item_metadata::strip_unprefixed_id(object);
-            items::canonicalize_item(object);
-        }
-    }
     if let Some(input) = request.get_mut("input") {
-        crate::response_item_metadata::apply_missing_image_detail(input, default_image_detail);
+        canonicalize_input_items(input, default_image_detail, turn_id.as_deref());
     }
     if let Some(tools) = request.get_mut("tools").and_then(Value::as_array_mut) {
         for tool in tools {
@@ -171,8 +166,26 @@ pub(crate) fn canonicalize_request_items(
     }
 }
 
-pub(crate) fn new_item_id(prefix: &str) -> String {
-    format!("{prefix}_{}", Uuid::now_v7())
+pub(crate) fn canonicalize_injected_input(input: &mut Value) {
+    canonicalize_input_items(input, None, None);
+}
+
+fn canonicalize_input_items(
+    input: &mut Value,
+    default_image_detail: Option<&str>,
+    turn_id: Option<&str>,
+) {
+    if let Some(items) = input.as_array_mut() {
+        for item in items {
+            let Some(object) = item.as_object_mut() else {
+                continue;
+            };
+            crate::response_item_metadata::stamp(object, turn_id);
+            crate::response_item_metadata::strip_unprefixed_id(object);
+            items::canonicalize_item(object);
+        }
+    }
+    crate::response_item_metadata::apply_missing_image_detail(input, default_image_detail);
 }
 
 fn reorder_member(object: &mut Map<String, Value>, name: &str, order: &[&str]) {

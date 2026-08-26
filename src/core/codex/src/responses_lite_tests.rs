@@ -20,7 +20,8 @@ fn groups_default_tools_and_matches_item_identity_metadata() {
         serde_json::json!({"type":"reasoning","summary":[]}),
         serde_json::json!({"type":"tool_search_call","status":null,"execution":"server","arguments":{}}),
     ];
-    assign_missing_item_ids(&mut items);
+    let synthesized = assign_missing_item_ids(&mut items);
+    assert_eq!(synthesized.len(), 5);
     let id = items[0]["id"].as_str().expect("message id");
     assert!(id.starts_with("msg_"));
     assert_eq!(

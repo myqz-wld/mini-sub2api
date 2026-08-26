@@ -8,6 +8,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+#[path = "request_identity_prewarm.rs"]
+mod prewarm;
 #[path = "request_identity_turn_metadata.rs"]
 mod turn_metadata;
 
@@ -61,6 +63,13 @@ pub(crate) fn apply(
             Value::String(identity.session_id),
         );
     }
+}
+
+pub(crate) fn apply_synthetic_prewarm(
+    object: &mut Map<String, Value>,
+    headers: &mut HeaderMap,
+) -> Result<(), ()> {
+    prewarm::apply(object, headers)
 }
 
 pub(crate) fn apply_routing_hint(object: &Map<String, Value>, headers: &mut HeaderMap) {

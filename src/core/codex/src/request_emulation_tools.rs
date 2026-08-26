@@ -99,7 +99,13 @@ fn canonicalize_nested(object: &mut Map<String, Value>, kind: Option<&str>) {
         reorder(format, &["type", "syntax", "definition"]);
     }
     if let Some(filters) = object.get_mut("filters").and_then(Value::as_object_mut) {
-        canonicalize_filters(filters);
+        match kind {
+            Some("web_search" | "web_search_2025_08_26") => {
+                reorder(filters, &["allowed_domains"]);
+            }
+            Some("file_search") => canonicalize_file_search_filters(filters),
+            _ => {}
+        }
     }
     if let Some(ranking) = object
         .get_mut("ranking_options")
@@ -134,18 +140,15 @@ fn canonicalize_nested(object: &mut Map<String, Value>, kind: Option<&str>) {
     }
 }
 
-fn canonicalize_filters(filters: &mut Map<String, Value>) {
+fn canonicalize_file_search_filters(filters: &mut Map<String, Value>) {
     if let Some(children) = filters.get_mut("filters").and_then(Value::as_array_mut) {
         for child in children {
             if let Some(child) = child.as_object_mut() {
-                canonicalize_filters(child);
+                canonicalize_file_search_filters(child);
             }
         }
     }
-    reorder(
-        filters,
-        &["allowed_domains", "key", "type", "value", "filters"],
-    );
+    reorder(filters, &["key", "type", "value", "filters"]);
 }
 
 fn canonicalize_mcp_controls(object: &mut Map<String, Value>) {
@@ -251,7 +254,7 @@ fn fields_for_kind(kind: Option<&str>) -> &'static [&'static str] {
         ],
         Some("namespace") => &["type", "name", "description", "tools"],
         Some("tool_search") => &["type", "execution", "description", "parameters"],
-        Some("web_search" | "web_search_2025_08_26" | "web_search_preview") => &[
+        Some("web_search" | "web_search_2025_08_26") => &[
             "type",
             "external_web_access",
             "indexed_web_access",
@@ -259,6 +262,12 @@ fn fields_for_kind(kind: Option<&str>) -> &'static [&'static str] {
             "user_location",
             "search_context_size",
             "search_content_types",
+        ],
+        Some("web_search_preview") => &[
+            "type",
+            "search_context_size",
+            "search_content_types",
+            "user_location",
         ],
         Some("file_search") => &[
             "type",

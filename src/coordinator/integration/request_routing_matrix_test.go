@@ -207,7 +207,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				assertCodexOpenAIProfileCapture(t, capture)
 				if capture.Headers.Get("Originator") != "codex_exec" ||
 					capture.Headers.Get("Session-Id") != "api-key-session" ||
-					capture.Headers.Get("Version") != "9.9.9" ||
+					capture.Headers.Get("Version") != "0.149.0" ||
 					capture.Headers.Get("X-Openai-Subagent") != "review" ||
 					capture.Headers.Get("User-Agent") != "codex_cli_rs/9.9.9 routing-matrix" {
 					t.Fatalf("Codex API headers = %#v", capture.Headers)
