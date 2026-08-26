@@ -78,7 +78,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     assert!(value["input"][0].get("id").is_none());
     assert_eq!(value["input"][1]["role"], "developer");
     assert!(value["input"][1].get("id").is_none());
-    assert_eq!(value["input"][2]["role"], "system");
+    assert_eq!(value["input"][2]["role"], "developer");
     assert_eq!(
         value["input"][2]["content"],
         serde_json::json!([{"type":"input_text","text":"Follow system rules"}])
@@ -199,7 +199,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
     assert_eq!(value["tools"][0]["strict"], false);
     assert_eq!(value["tools"][0]["parameters"], serde_json::json!({}));
     assert_eq!(value["instructions"], "Be concise");
-    assert_eq!(value["input"][0]["role"], "system");
+    assert_eq!(value["input"][0]["role"], "developer");
     assert_eq!(value["input"][1]["role"], "user");
     assert_eq!(value["input"][1]["type"], "message");
     assert_eq!(value["parallel_tool_calls"], true);

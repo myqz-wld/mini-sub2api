@@ -82,6 +82,9 @@ pub(super) fn apply(
     } else {
         canonicalize_top_level_tools(object);
     }
+    if profile.uses_codex_subscription() {
+        rewrite_subscription_system_roles(object);
+    }
 
     request_defaults::merge_request_defaults(
         object,
@@ -244,6 +247,26 @@ fn normalize_input(object: &mut Map<String, Value>) -> Vec<String> {
     let synthesized_item_ids = responses_lite::assign_missing_item_ids(&mut items);
     *input = Value::Array(items);
     synthesized_item_ids
+}
+
+// The Subscription backend rejects the public Responses `system` role. Keep this exception at the
+// typed message layer so API-key profiles and opaque payload values remain untouched.
+fn rewrite_subscription_system_roles(object: &mut Map<String, Value>) {
+    let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        let Some(message) = item.as_object_mut() else {
+            continue;
+        };
+        if matches!(
+            message.get("type").and_then(Value::as_str),
+            None | Some("message")
+        ) && message.get("role").and_then(Value::as_str) == Some("system")
+        {
+            message.insert("role".to_string(), Value::String("developer".to_string()));
+        }
+    }
 }
 
 fn already_lite_shaped(object: &Map<String, Value>, transport: EmulationTransport) -> bool {

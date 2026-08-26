@@ -128,12 +128,13 @@ documented opaque/free-form containers such as metadata maps, JSON Schema, `prom
 function/custom tool-call argument/input/output payload values; structured tools and shell/computer
 outputs are still filtered. Web Search accepts only its domain-filter schema; File Search accepts
 its recursive attribute-filter schema.
-The overlay changes only required structure or absent defaults: explicit `system` and `developer`
-roles remain distinct, string message content becomes `input_text`, synthesized Lite instructions
-use `developer`, and historical assistant strings become `output_text`. It never generates an HTTP
-`previous_response_id`; an explicit one is forwarded unchanged. Non-Lite requests default omitted
-image detail to `high`; Responses Lite leaves omitted detail absent while preserving an explicit
-supported detail value.
+The overlay changes only required structure or absent defaults: API-key profiles keep explicit
+`system` and `developer` roles distinct, while `CodexSubscription149` maps message role `system` to
+the subscription-compatible `developer` role without changing content or ordering. String message
+content becomes `input_text`, synthesized Lite instructions use `developer`, and historical
+assistant strings become `output_text`. It never generates an HTTP `previous_response_id`; an
+explicit one is forwarded unchanged. Non-Lite requests default omitted image detail to `high`;
+Responses Lite leaves omitted detail absent while preserving an explicit supported detail value.
 
 For subscription upstreams, the core replaces the complete client identity with
 `User-Agent: codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,

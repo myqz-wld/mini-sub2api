@@ -329,6 +329,53 @@ fn bare_profile_and_mismatched_subscription_identity_fail_closed() {
     );
 }
 
+#[test]
+fn system_message_roles_are_rewritten_only_for_subscription() {
+    for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
+        let caller = serde_json::json!({
+            "type": "response.create",
+            "model": "gpt-5.4",
+            "input": [
+                {"role":"system","content":"system rules"},
+                {"type":"message","role":"developer","content":"developer rules"},
+                {"type":"function_call","call_id":"call_1","name":"lookup",
+                    "arguments":{"role":"system"}}
+            ]
+        });
+
+        let openai = prepare_openai(caller.clone(), transport);
+        assert_eq!(openai["input"][0]["role"], "system");
+        assert_eq!(openai["input"][1]["role"], "developer");
+        assert_eq!(openai["input"][2]["arguments"]["role"], "system");
+
+        let subscription = prepare_subscription(caller, transport);
+        assert_eq!(subscription["input"][0]["role"], "developer");
+        assert_eq!(subscription["input"][1]["role"], "developer");
+        assert_eq!(subscription["input"][2]["arguments"]["role"], "system");
+        assert_eq!(
+            subscription["input"][0]["content"][0]["text"],
+            "system rules"
+        );
+    }
+
+    let lite = prepare_subscription(
+        serde_json::json!({
+            "type":"response.create",
+            "model":"gpt-5.6-sol",
+            "previous_response_id":"resp_lite",
+            "input":[
+                {"type":"additional_tools","role":"developer","tools":[]},
+                {"type":"message","role":"system","content":[
+                    {"type":"input_text","text":"lite system rules"}
+                ]}
+            ]
+        }),
+        EmulationTransport::WebSocket,
+    );
+    assert_eq!(lite["input"][1]["role"], "developer");
+    assert_eq!(lite["input"][1]["content"][0]["text"], "lite system rules");
+}
+
 fn prepare_openai(caller: Value, transport: EmulationTransport) -> Value {
     prepare(UpstreamProfile::CodexOpenAi149, caller, transport, None)
 }
