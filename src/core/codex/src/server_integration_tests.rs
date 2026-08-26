@@ -322,7 +322,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     assert_eq!(normalized["input"][1]["role"], "developer");
     assert_eq!(normalized["input"][2]["role"], "user");
     assert_eq!(normalized["store"], false);
-    assert_eq!(normalized["max_output_tokens"], 32768);
+    assert!(normalized.get("max_output_tokens").is_none());
     assert!(
         normalized["client_metadata"]["x-codex-installation-id"].as_str()
             == Some(expected_device.as_str())

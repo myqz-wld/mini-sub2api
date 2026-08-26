@@ -45,6 +45,15 @@ const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
 
 const SUPPORTED_HTTP_FIELDS: &[&str] = &["background", "stream"];
 const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id"];
+const UNSUPPORTED_SUBSCRIPTION_FIELDS: &[&str] = &[
+    "max_output_tokens",
+    "max_completion_tokens",
+    "max_tokens",
+    "temperature",
+    "top_p",
+    "frequency_penalty",
+    "presence_penalty",
+];
 
 pub(super) fn apply(
     object: &mut Map<String, Value>,
@@ -83,6 +92,7 @@ pub(super) fn apply(
         canonicalize_top_level_tools(object);
     }
     if profile.uses_codex_subscription() {
+        strip_unsupported_subscription_fields(object);
         rewrite_subscription_system_roles(object);
     }
 
@@ -247,6 +257,14 @@ fn normalize_input(object: &mut Map<String, Value>) -> Vec<String> {
     let synthesized_item_ids = responses_lite::assign_missing_item_ids(&mut items);
     *input = Value::Array(items);
     synthesized_item_ids
+}
+
+// The fixed Subscription target rejects these public/legacy output-cap and sampling controls.
+// There is no evidence-backed equivalent, so only the Subscription profile drops them.
+fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) {
+    for field in UNSUPPORTED_SUBSCRIPTION_FIELDS {
+        object.remove(*field);
+    }
 }
 
 // The Subscription backend rejects the public Responses `system` role. Keep this exception at the

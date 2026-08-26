@@ -148,13 +148,16 @@ which downstream key is accepted.
 | Any source | Codex subscription | `CodexSubscription149`: Codex `0.149.0` Responses emulation with ChatGPT subscription authentication. HTTP uses zstd level 3; WebSocket application messages never use zstd. |
 
 The emulated profiles clone the caller object, retain only fields supported by OpenAI Responses or
-the fixed Codex capture, and apply missing `0.149.0` defaults. Explicit supported values remain
-authoritative on their transport, including `previous_response_id`, HTTP `background`, WS
+the fixed Codex capture, and apply missing `0.149.0` defaults. Except for documented target-specific
+compatibility exceptions, explicit supported values remain authoritative on their transport,
+including `previous_response_id`, HTTP `background`, WS
 `stream_id`, tools, sampling, and image detail. Unknown structured members are removed; documented
 free-form metadata, JSON Schema, prompt variables, and function/custom payloads remain opaque.
 Web and File Search use separate filter schemas. HTTP never synthesizes `previous_response_id`;
 non-Lite image detail defaults to `high`, while Lite leaves an omitted detail absent. Subscription
-emulation maps message role `system` to `developer`; API-key profiles preserve the explicit role.
+emulation maps message role `system` to `developer` and removes output-cap/sampling controls that
+the Subscription endpoint rejects: `max_output_tokens`, `temperature`, and `top_p`. API-key
+profiles preserve those explicit fields and roles.
 
 `CodexOpenAi149` pins `version: 0.149.0`. Subscription requests additionally use the fixed identity
 `codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,

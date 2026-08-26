@@ -152,11 +152,9 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	if normalized["tools"] != nil || normalized["instructions"] != nil || normalized["store"] != false {
 		t.Fatalf("normalization fields = %#v", normalized)
 	}
-	for field, expected := range map[string]any{
-		"max_output_tokens": float64(32768), "temperature": 0.2, "top_p": 0.9,
-	} {
-		if normalized[field] != expected {
-			t.Fatalf("explicit Responses field %s = %#v, want %#v", field, normalized[field], expected)
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p"} {
+		if _, exists := normalized[field]; exists {
+			t.Fatalf("unsupported Subscription field %s crossed upstream", field)
 		}
 	}
 	if normalized["parallel_tool_calls"] != false || normalized["tool_choice"] != "auto" ||
