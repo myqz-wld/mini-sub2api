@@ -194,7 +194,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	}
 	assertNormalizedMessages(t, input[1:], []any{
 		map[string]any{
-			"type": "message", "role": "system",
+			"type": "message", "role": "developer",
 			"content": []any{map[string]any{"type": "input_text", "text": "Follow system rules"}},
 		},
 		map[string]any{

@@ -153,7 +153,8 @@ authoritative on their transport, including `previous_response_id`, HTTP `backgr
 `stream_id`, tools, sampling, and image detail. Unknown structured members are removed; documented
 free-form metadata, JSON Schema, prompt variables, and function/custom payloads remain opaque.
 Web and File Search use separate filter schemas. HTTP never synthesizes `previous_response_id`;
-non-Lite image detail defaults to `high`, while Lite leaves an omitted detail absent.
+non-Lite image detail defaults to `high`, while Lite leaves an omitted detail absent. Subscription
+emulation maps message role `system` to `developer`; API-key profiles preserve the explicit role.
 
 `CodexOpenAi149` pins `version: 0.149.0`. Subscription requests additionally use the fixed identity
 `codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
