@@ -91,9 +91,9 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 			firstValue := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 			secondValue := decodeResponsesProfileWebSocketFrame(t, captures[1].Frame)
 			if !test.expectHiddenPrewarm {
-				assertResponsesProfileSurface(t, firstValue, test.lite, true)
+				assertResponsesProfileSurface(t, firstValue, test.lite, true, test.subscription)
 			}
-			assertResponsesProfileSurface(t, secondValue, test.lite, true)
+			assertResponsesProfileSurface(t, secondValue, test.lite, true, test.subscription)
 			assertResponsesProfileImageDetails(t, firstValue["input"], test.lite)
 			if test.expectHiddenPrewarm {
 				if firstValue["previous_response_id"] != hiddenResponseID {
@@ -131,7 +131,7 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	captures := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)
 	value := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 	assertWebSocketProfileCredentialBoundary(t, captures[0], true)
-	assertResponsesProfileSurface(t, value, false, true)
+	assertResponsesProfileSurface(t, value, false, true, true)
 	if value["previous_response_id"] != "caller-previous" || value["conversation"] != "caller-conversation" ||
 		value["generate"] != false || value["stream_id"] != "caller-stream" {
 		t.Fatal("explicit WebSocket continuation or state was not preserved")
@@ -348,7 +348,7 @@ func waitForResponsesProfileWebSocketCaptures(
 func assertResponsesProfilePrewarm(t *testing.T, capture responsesProfileWebSocketCapture, lite bool) {
 	t.Helper()
 	value := decodeResponsesProfileWebSocketFrame(t, capture.Frame)
-	assertResponsesProfileSurface(t, value, lite, true)
+	assertResponsesProfileSurface(t, value, lite, true, true)
 	if value["type"] != "response.create" || value["generate"] != false {
 		t.Fatal("synthetic prewarm did not use response.create generate=false")
 	}

@@ -117,8 +117,9 @@ headers reach only API-key upstreams. Both layers remove cookies, proxy authenti
 headers, content length, transfer encoding, connection-specific headers, unknown `X-Stainless-*`
 headers, and any unreviewed `X-Mini-Sub2Api-*` header.
 
-Codex emulation begins with the full caller object, not a top-level field whitelist. Explicit
-Responses fields—including `previous_response_id`, `conversation`, HTTP `background`, WS
+Codex emulation begins with the full caller object, not a top-level field whitelist. Except for the
+target-specific compatibility exceptions below, explicit Responses fields—including
+`previous_response_id`, `conversation`, HTTP `background`, WS
 `stream_id`,
 `context_management`, output/tool limits, metadata, moderation, prompt/cache settings, safety
 identifiers, sampling, truncation, tools, and image detail—remain authoritative. The supported
@@ -135,6 +136,9 @@ content becomes `input_text`, synthesized Lite instructions use `developer`, and
 assistant strings become `output_text`. It never generates an HTTP `previous_response_id`; an
 explicit one is forwarded unchanged. Non-Lite requests default omitted image detail to `high`;
 Responses Lite leaves omitted detail absent while preserving an explicit supported detail value.
+`CodexSubscription149` additionally removes `max_output_tokens`, `temperature`, and `top_p`, which
+are public Responses controls but are rejected by the fixed Subscription target. API-key profiles
+retain them.
 
 For subscription upstreams, the core replaces the complete client identity with
 `User-Agent: codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,

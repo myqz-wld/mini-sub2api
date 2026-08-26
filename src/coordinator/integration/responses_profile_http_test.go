@@ -69,7 +69,7 @@ func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
 					assertAPIKeyCapture(t, capture, body)
 					continue
 				}
-				assertResponsesProfileHTTPBody(t, capture.Body, test.lite, turn == 1)
+				assertResponsesProfileHTTPBody(t, capture.Body, test.lite, turn == 1, test.subscription)
 			}
 		})
 	}
@@ -241,10 +241,10 @@ func assertHTTPProfileCredentialBoundary(t *testing.T, capture routingMatrixCapt
 	}
 }
 
-func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicitPrevious bool) {
+func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicitPrevious, subscription bool) {
 	t.Helper()
 	value := decodeRequestObject(t, body)
-	assertResponsesProfileSurface(t, value, lite, false)
+	assertResponsesProfileSurface(t, value, lite, false, subscription)
 	if hasExplicitPrevious {
 		if value["previous_response_id"] != "explicit-profile-previous" ||
 			value["conversation"] != "explicit-profile-conversation" {
@@ -278,17 +278,22 @@ func responsesProfileShellBoundariesValid(input any) bool {
 	return false
 }
 
-func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, websocket bool) {
+func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, websocket, subscription bool) {
 	t.Helper()
 	for _, field := range []string{
 		"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store",
 		"stream_options", "include", "service_tier", "text", "context_management",
-		"max_output_tokens", "max_tool_calls", "metadata", "moderation", "prompt",
-		"prompt_cache_options", "prompt_cache_retention", "safety_identifier", "temperature",
-		"top_logprobs", "top_p", "truncation", "user",
+		"max_tool_calls", "metadata", "moderation", "prompt", "prompt_cache_options",
+		"prompt_cache_retention", "safety_identifier", "top_logprobs", "truncation", "user",
 	} {
 		if _, exists := value[field]; !exists {
 			t.Fatalf("Responses field %q was removed", field)
+		}
+	}
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p"} {
+		_, exists := value[field]
+		if exists == subscription {
+			t.Fatalf("Subscription-only field policy mismatch for %q", field)
 		}
 	}
 	if websocket {

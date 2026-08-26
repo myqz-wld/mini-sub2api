@@ -230,7 +230,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
 }
 
 #[test]
-fn preserves_supported_sampling_and_strips_unknown_subscription_fields() {
+fn strips_subscription_output_cap_sampling_and_unknown_fields() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.6-luna",
@@ -260,16 +260,12 @@ fn preserves_supported_sampling_and_strips_unknown_subscription_fields() {
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
 
-    for (field, expected) in [
-        ("max_output_tokens", serde_json::json!(32768)),
-        ("temperature", serde_json::json!(0.2)),
-        ("top_p", serde_json::json!(0.9)),
-    ] {
-        assert_eq!(value[field], expected, "field {field}");
-    }
     for field in [
+        "max_output_tokens",
         "max_completion_tokens",
         "max_tokens",
+        "temperature",
+        "top_p",
         "frequency_penalty",
         "presence_penalty",
         "future_request_field",
@@ -285,7 +281,7 @@ fn preserves_supported_sampling_and_strips_unknown_subscription_fields() {
 }
 
 #[test]
-fn preserves_explicit_fields_from_already_subscription_shaped_json() {
+fn filters_unsupported_fields_from_already_subscription_shaped_json() {
     let body = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true,"max_output_tokens":64,"prompt_cache_key":"session-test"}"#,
     );
@@ -300,7 +296,7 @@ fn preserves_explicit_fields_from_already_subscription_shaped_json() {
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("filtered JSON");
 
-    assert_eq!(value["max_output_tokens"], 64);
+    assert!(value.get("max_output_tokens").is_none());
     let cache_key = value["prompt_cache_key"].as_str().expect("cache key");
     assert_ne!(cache_key, "session-test");
     assert_eq!(

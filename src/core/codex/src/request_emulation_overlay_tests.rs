@@ -376,6 +376,31 @@ fn system_message_roles_are_rewritten_only_for_subscription() {
     assert_eq!(lite["input"][1]["content"][0]["text"], "lite system rules");
 }
 
+#[test]
+fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
+    for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
+        let caller = serde_json::json!({
+            "type":"response.create",
+            "model":"gpt-5.4",
+            "input":[],
+            "max_output_tokens":2048,
+            "max_tool_calls":3,
+            "temperature":0.2,
+            "top_p":0.9
+        });
+        let openai = prepare_openai(caller.clone(), transport);
+        assert_eq!(openai["max_output_tokens"], 2048);
+        assert_eq!(openai["temperature"], 0.2);
+        assert_eq!(openai["top_p"], 0.9);
+
+        let subscription = prepare_subscription(caller, transport);
+        for field in ["max_output_tokens", "temperature", "top_p"] {
+            assert!(subscription.get(field).is_none(), "field {field} crossed");
+        }
+        assert_eq!(subscription["max_tool_calls"], 3);
+    }
+}
+
 fn prepare_openai(caller: Value, transport: EmulationTransport) -> Value {
     prepare(UpstreamProfile::CodexOpenAi149, caller, transport, None)
 }

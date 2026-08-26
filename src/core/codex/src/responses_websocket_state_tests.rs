@@ -27,7 +27,6 @@ fn request(input: Vec<Value>) -> Value {
         "stream_options": {"include_usage": true},
         "include": ["reasoning.encrypted_content"],
         "service_tier": "priority",
-        "max_output_tokens": 128,
         "metadata": {"test_class": "state"},
         "prompt_cache_options": {"mode": "implicit", "ttl": "30m"},
         "safety_identifier": "test-safety-id",
@@ -207,7 +206,6 @@ fn every_retained_non_input_property_change_forces_a_full_frame() {
         ("tools", json!([{"type": "function", "name": "changed"}])),
         ("reasoning", json!({"effort": "high"})),
         ("service_tier", json!("default")),
-        ("max_output_tokens", json!(256)),
         ("metadata", json!({"test_class": "changed"})),
         (
             "prompt_cache_options",
