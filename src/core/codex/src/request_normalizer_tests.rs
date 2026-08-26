@@ -78,7 +78,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     assert!(value["input"][0].get("id").is_none());
     assert_eq!(value["input"][1]["role"], "developer");
     assert!(value["input"][1].get("id").is_none());
-    assert_eq!(value["input"][2]["role"], "developer");
+    assert_eq!(value["input"][2]["role"], "system");
     assert_eq!(
         value["input"][2]["content"],
         serde_json::json!([{"type":"input_text","text":"Follow system rules"}])
@@ -109,7 +109,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
                 .is_number()
         );
     }
-    assert_eq!(value["store"], false);
+    assert_eq!(value["store"], true);
     assert_eq!(value["stream"], true);
     assert_eq!(value["tool_choice"], "auto");
     assert_eq!(value["parallel_tool_calls"], false);
@@ -199,7 +199,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
     assert_eq!(value["tools"][0]["strict"], false);
     assert_eq!(value["tools"][0]["parameters"], serde_json::json!({}));
     assert_eq!(value["instructions"], "Be concise");
-    assert_eq!(value["input"][0]["role"], "developer");
+    assert_eq!(value["input"][0]["role"], "system");
     assert_eq!(value["input"][1]["role"], "user");
     assert_eq!(value["input"][1]["type"], "message");
     assert_eq!(value["parallel_tool_calls"], true);
@@ -230,7 +230,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
 }
 
 #[test]
-fn strips_unsupported_output_and_sampling_fields_from_subscription_requests() {
+fn preserves_supported_sampling_and_strips_unknown_subscription_fields() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.6-luna",
@@ -260,10 +260,22 @@ fn strips_unsupported_output_and_sampling_fields_from_subscription_requests() {
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
 
-    for field in UNSUPPORTED_SUBSCRIPTION_BODY_FIELDS {
-        assert!(value.get(*field).is_none(), "field {field} crossed");
+    for (field, expected) in [
+        ("max_output_tokens", serde_json::json!(32768)),
+        ("temperature", serde_json::json!(0.2)),
+        ("top_p", serde_json::json!(0.9)),
+    ] {
+        assert_eq!(value[field], expected, "field {field}");
     }
-    assert!(value.get("future_request_field").is_none());
+    for field in [
+        "max_completion_tokens",
+        "max_tokens",
+        "frequency_penalty",
+        "presence_penalty",
+        "future_request_field",
+    ] {
+        assert!(value.get(field).is_none(), "field {field} crossed");
+    }
     assert_eq!(
         value["stream_options"]["reasoning_summary_delivery"],
         "sequential_cutoff"
@@ -273,7 +285,7 @@ fn strips_unsupported_output_and_sampling_fields_from_subscription_requests() {
 }
 
 #[test]
-fn strips_unsupported_fields_from_already_subscription_shaped_json() {
+fn preserves_explicit_fields_from_already_subscription_shaped_json() {
     let body = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true,"max_output_tokens":64,"prompt_cache_key":"session-test"}"#,
     );
@@ -288,7 +300,7 @@ fn strips_unsupported_fields_from_already_subscription_shaped_json() {
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("filtered JSON");
 
-    assert!(value.get("max_output_tokens").is_none());
+    assert_eq!(value["max_output_tokens"], 64);
     let cache_key = value["prompt_cache_key"].as_str().expect("cache key");
     assert_ne!(cache_key, "session-test");
     assert_eq!(

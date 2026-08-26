@@ -16,7 +16,6 @@ use subtle::ConstantTimeEq;
 pub(crate) struct InternalRequestIdentity {
     pub(crate) account_ref: String,
     pub(crate) pseudonym_scope: String,
-    pub(crate) request_id: String,
 }
 
 pub(crate) fn validate_internal_request(
@@ -37,13 +36,12 @@ pub(crate) fn validate_internal_request(
     let pseudonym_scope = header_text(headers, PSEUDONYM_SCOPE_HEADER)
         .filter(|value| valid_pseudonym_scope(value))
         .ok_or(CoreFailure::InvalidRequest)?;
-    let request_id = header_text(headers, REQUEST_ID_HEADER)
+    header_text(headers, REQUEST_ID_HEADER)
         .filter(|value| value.starts_with("req_") && value.len() <= 132)
         .ok_or(CoreFailure::InvalidRequest)?;
     Ok(InternalRequestIdentity {
         account_ref,
         pseudonym_scope,
-        request_id,
     })
 }
 

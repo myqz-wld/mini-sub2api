@@ -1,64 +1,44 @@
 use crate::error::CoreFailure;
-use crate::fingerprint::FingerprintMode;
-use crate::fingerprint::FingerprintSnapshot;
+use crate::fingerprint::{FingerprintMode, FingerprintSnapshot};
 use crate::fingerprint_projection::project_device_headers;
-use crate::fingerprint_projection::project_websocket_device;
-use crate::request_normalizer::prepare_websocket_subscription_request;
+use crate::request_profile::{CallerKind, UpstreamProfile};
 use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket_deferred::DeferredOAuthContext;
-use crate::server::AppState;
-use crate::server::account_lock;
-use crate::server::header_text;
-use crate::server::resolve_auth;
-use crate::server::validate_internal_request;
+pub(crate) use crate::responses_websocket_emulation::prepare_client_text;
+use crate::responses_websocket_http::{copy_headers, filtered_upgrade_headers, rejection_response};
+use crate::responses_websocket_state::{EventDisposition, OperationPhase, ResponsesWebSocketState};
+use crate::server::{AppState, account_lock, header_text, resolve_auth, validate_internal_request};
 use crate::transport_registry::CredentialTransportContext;
-use crate::upstream_request::ResolvedAuth;
-use crate::upstream_request::build_websocket;
+use crate::upstream_request::{ResolvedAuth, build_websocket};
 use crate::vault::Vault;
-use crate::websocket_connector::WebSocketConnection as UpstreamWebSocket;
-use crate::websocket_connector::WebSocketHandshake;
-use crate::websocket_delivery::WebSocketDeliveryTracker;
-use crate::websocket_delivery::failure_close;
-use crate::websocket_delivery::internal_close;
-use crate::websocket_delivery::is_response_create;
-use crate::websocket_delivery::is_terminal_response_event;
+use crate::websocket_connector::{WebSocketConnection as UpstreamWebSocket, WebSocketHandshake};
+use crate::websocket_delivery::{
+    WebSocketDeliveryTracker, failure_close, internal_close, is_response_create,
+    is_terminal_response_event,
+};
 use axum::body::Body;
-use axum::extract::ConnectInfo;
-use axum::extract::State;
-use axum::extract::ws::CloseFrame as InternalCloseFrame;
-use axum::extract::ws::Message as InternalMessage;
-use axum::extract::ws::WebSocket;
-use axum::extract::ws::WebSocketUpgrade;
-use axum::http::HeaderMap;
-use axum::http::HeaderName;
-use axum::http::HeaderValue;
-use axum::http::Response;
-use axum::http::StatusCode;
+use axum::extract::ws::{
+    CloseFrame as InternalCloseFrame, Message as InternalMessage, WebSocket, WebSocketUpgrade,
+};
+use axum::extract::{ConnectInfo, State};
+use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
-use bytes::Bytes;
-use futures_util::SinkExt;
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
 use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::Instant;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamCloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as UpstreamCloseCode;
 
 pub(crate) const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_HANDSHAKE_REJECTION_BYTES: usize = 64 * 1024;
 
-const SAFE_UPGRADE_RESPONSE_HEADERS: &[&str] = &[
-    "openai-model",
-    "x-codex-turn-state",
-    "x-models-etag",
-    "x-reasoning-included",
-    "x-request-id",
-];
-
-const SAFE_REJECTION_RESPONSE_HEADERS: &[&str] = &["content-type", "retry-after", "x-request-id"];
+#[path = "responses_websocket_initial.rs"]
+mod initial;
 
 pub(crate) async fn responses_socket(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -80,12 +60,17 @@ async fn responses_socket_inner(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response<Body>, CoreFailure> {
     let identity = validate_internal_request(peer, &state, &headers)?;
+    let caller = CallerKind::from_headers(&headers);
     let account_lock = account_lock(&state, &identity.account_ref).await;
     let _guard = account_lock.lock().await;
     let resolved = resolve_auth(&state, &identity.account_ref, None).await?;
     drop(_guard);
-    if let ResolvedAuth::CodexOAuth { account_id, .. } = &resolved.auth {
-        let account_namespace = account_id.clone();
+    let profile = UpstreamProfile::select(caller, resolved.auth.credential_kind());
+    if profile.uses_codex_subscription() {
+        let account_namespace = match &resolved.auth {
+            ResolvedAuth::CodexOAuth { account_id, .. } => account_id.clone(),
+            ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
+        };
         let installation_id = RequestPseudonymizer::converged_installation_id(&account_namespace);
         let mut upstream_headers = headers;
         if resolved.fingerprint.mode() == FingerprintMode::Device {
@@ -98,7 +83,8 @@ async fn responses_socket_inner(
             account_ref: identity.account_ref,
             account_namespace,
             pseudonym_scope: identity.pseudonym_scope,
-            request_id: identity.request_id,
+            caller,
+            profile,
             resolved,
         };
         return Ok(upgrade
@@ -118,26 +104,27 @@ async fn responses_socket_inner(
         &upstream_headers,
         &resolved.upstream_url,
         &resolved.auth,
+        profile,
     )
     .await?;
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Ok(rejection_response(handshake).await);
     }
 
-    let response_headers = filtered_headers(handshake.headers(), SAFE_UPGRADE_RESPONSE_HEADERS);
+    let response_headers = filtered_upgrade_headers(handshake.headers());
     let upstream = match handshake {
         WebSocketHandshake::Connected { socket, .. } => *socket,
         WebSocketHandshake::Rejected(_) => return Err(CoreFailure::Internal),
     };
     let account_ref = identity.account_ref;
-    let request_id = identity.request_id;
     let relay_context = RelayContext {
         headers: upstream_headers,
         account_ref,
         account_namespace: None,
         pseudonym_scope: identity.pseudonym_scope,
-        request_id,
-        normalize_subscription: false,
+        profile,
+        continuation: ResponsesWebSocketState::new(caller, profile),
+        pending: VecDeque::new(),
         vault: state.vault.clone(),
         fingerprint,
     };
@@ -145,7 +132,7 @@ async fn responses_socket_inner(
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
         .on_upgrade(move |internal| async move {
-            relay(internal, upstream, relay_context, None, 0).await;
+            relay(internal, upstream, relay_context, None).await;
         })
         .into_response();
     copy_headers(response.headers_mut(), &response_headers);
@@ -160,9 +147,15 @@ pub(crate) async fn send_handshake(
     headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
+    profile: UpstreamProfile,
 ) -> Result<WebSocketHandshake, CoreFailure> {
-    let (request, config) =
-        build_websocket(headers, upstream_url, auth, MAX_WEBSOCKET_MESSAGE_BYTES)?;
+    let (request, config) = build_websocket(
+        headers,
+        upstream_url,
+        auth,
+        profile,
+        MAX_WEBSOCKET_MESSAGE_BYTES,
+    )?;
     transport
         .websocket_connector_for_url(upstream_url)
         .connect(request, config)
@@ -170,43 +163,14 @@ pub(crate) async fn send_handshake(
         .map_err(|_| CoreFailure::UpstreamConnectFailed)
 }
 
-async fn rejection_response(handshake: WebSocketHandshake) -> Response<Body> {
-    let WebSocketHandshake::Rejected(upstream) = handshake else {
-        return Response::new(Body::empty());
-    };
-    let status = upstream.status();
-    let headers = filtered_headers(upstream.headers(), SAFE_REJECTION_RESPONSE_HEADERS);
-    let preserve_body = headers
-        .get(http::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            let value = value.to_ascii_lowercase();
-            value.starts_with("application/json") || value.starts_with("text/")
-        });
-    let body = if preserve_body {
-        upstream
-            .into_body()
-            .filter(|body| body.len() <= MAX_HANDSHAKE_REJECTION_BYTES)
-            .map(Bytes::from)
-            .unwrap_or_default()
-    } else {
-        Bytes::new()
-    };
-    let mut response = Response::builder()
-        .status(status)
-        .body(Body::from(body))
-        .unwrap_or_else(|_| Response::new(Body::empty()));
-    copy_headers(response.headers_mut(), &headers);
-    response
-}
-
 pub(crate) struct RelayContext {
     pub(crate) headers: HeaderMap,
     pub(crate) account_ref: String,
     pub(crate) account_namespace: Option<String>,
     pub(crate) pseudonym_scope: String,
-    pub(crate) request_id: String,
-    pub(crate) normalize_subscription: bool,
+    pub(crate) profile: UpstreamProfile,
+    pub(crate) continuation: ResponsesWebSocketState,
+    pub(crate) pending: VecDeque<InternalMessage>,
     pub(crate) vault: Vault,
     pub(crate) fingerprint: FingerprintSnapshot,
 }
@@ -216,32 +180,51 @@ pub(crate) async fn relay(
     upstream: UpstreamWebSocket,
     context: RelayContext,
     initial: Option<UpstreamMessage>,
-    initial_create_sequence: u64,
 ) {
     let RelayContext {
-        headers,
+        mut headers,
         account_ref,
         account_namespace,
         pseudonym_scope,
-        request_id,
-        normalize_subscription,
+        profile,
+        continuation,
+        mut pending,
         vault,
         fingerprint,
     } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
     let delivery = WebSocketDeliveryTracker::default();
-    if let Some(initial) = initial {
-        delivery.mark_attempted();
-        if upstream_write.send(initial).await.is_err() {
-            let _ = internal_write.send(failure_close(delivery.failure())).await;
-            return;
-        }
-    }
+    let continuation = Arc::new(StdMutex::new(continuation));
     let exit = {
+        let client_continuation = Arc::clone(&continuation);
         let client_to_upstream = async {
-            let mut create_sequence = initial_create_sequence;
-            while let Some(message) = internal_read.next().await {
+            if let Some(initial) = initial {
+                if !fingerprint_is_current(&vault, &account_ref, &fingerprint).await {
+                    return RelayExit::StaleFingerprint;
+                }
+                if let Err(exit) = initial::send(
+                    &mut internal_read,
+                    &mut upstream_write,
+                    initial,
+                    &mut pending,
+                    &client_continuation,
+                    &delivery,
+                )
+                .await
+                {
+                    return exit;
+                }
+            }
+            loop {
+                let message = if let Some(message) = pending.pop_front() {
+                    Ok(message)
+                } else {
+                    let Some(message) = internal_read.next().await else {
+                        break;
+                    };
+                    message
+                };
                 let mut create_attempt = false;
                 let outbound = match message {
                     Ok(InternalMessage::Text(text)) => {
@@ -259,19 +242,26 @@ pub(crate) async fn relay(
                         {
                             return RelayExit::StaleFingerprint;
                         }
-                        match prepare_client_text(
-                            text,
-                            &headers,
-                            if normalize_subscription {
-                                account_namespace.as_deref()
-                            } else {
-                                None
-                            },
-                            &pseudonym_scope,
-                            &request_id,
-                            &fingerprint,
-                            &mut create_sequence,
-                        ) {
+                        if is_create && public_create_in_flight(&client_continuation) {
+                            return RelayExit::Policy;
+                        }
+                        let prepared = {
+                            let mut continuation = continuation_guard(&client_continuation);
+                            prepare_client_text(
+                                text,
+                                &mut headers,
+                                if profile.uses_codex_subscription() {
+                                    account_namespace.as_deref()
+                                } else {
+                                    None
+                                },
+                                profile,
+                                &pseudonym_scope,
+                                &fingerprint,
+                                &mut continuation,
+                            )
+                        };
+                        match prepared {
                             Ok(prepared) => {
                                 create_attempt = is_create;
                                 UpstreamMessage::Text(prepared.into())
@@ -297,9 +287,15 @@ pub(crate) async fn relay(
                 };
                 let terminal = matches!(outbound, UpstreamMessage::Close(_));
                 if create_attempt {
+                    if !continuation_guard(&client_continuation).mark_public_create_attempted() {
+                        return RelayExit::Policy;
+                    }
                     delivery.mark_attempted();
                 }
                 if upstream_write.send(outbound).await.is_err() {
+                    if create_attempt {
+                        continuation_guard(&client_continuation).fail_public_create();
+                    }
                     return if terminal {
                         RelayExit::Complete
                     } else {
@@ -315,11 +311,16 @@ pub(crate) async fn relay(
                 .await;
             RelayExit::Complete
         };
+        let server_continuation = Arc::clone(&continuation);
         let upstream_to_client = async {
             while let Some(message) = upstream_read.next().await {
                 let (outbound, terminal_event) = match message {
                     Ok(UpstreamMessage::Text(text)) => {
                         let text = text.to_string();
+                        let disposition = observe_server_text(&server_continuation, &text);
+                        if disposition == EventDisposition::ConsumeHiddenSetup {
+                            continue;
+                        }
                         delivery.mark_response_observed();
                         let terminal = is_terminal_response_event(&text);
                         (InternalMessage::Text(text.into()), terminal)
@@ -366,17 +367,33 @@ pub(crate) async fn relay(
         }
     };
     match exit {
-        RelayExit::Complete => {}
+        RelayExit::Complete => continuation_guard(&continuation).reset(),
         RelayExit::StaleFingerprint => {
+            continuation_guard(&continuation).reset();
             let _ = internal_write.send(internal_close(1012)).await;
             let _ = upstream_write
                 .send(upstream_close(UpstreamCloseCode::Restart))
                 .await;
         }
         RelayExit::Failure(metadata) => {
+            continuation_guard(&continuation).fail_public_create();
             let _ = internal_write.send(failure_close(metadata)).await;
             let _ = upstream_write
                 .send(upstream_close(UpstreamCloseCode::Restart))
+                .await;
+        }
+        RelayExit::Policy => {
+            continuation_guard(&continuation).reset();
+            let _ = internal_write.send(internal_close(1008)).await;
+            let _ = upstream_write
+                .send(upstream_close(UpstreamCloseCode::Policy))
+                .await;
+        }
+        RelayExit::TooLarge => {
+            continuation_guard(&continuation).reset();
+            let _ = internal_write.send(internal_close(1009)).await;
+            let _ = upstream_write
+                .send(upstream_close(UpstreamCloseCode::Size))
                 .await;
         }
     }
@@ -387,6 +404,8 @@ enum RelayExit {
     Complete,
     StaleFingerprint,
     Failure(mini_sub2api_protocol_v1::FailureMetadata),
+    Policy,
+    TooLarge,
 }
 
 pub(crate) async fn fingerprint_is_current(
@@ -400,54 +419,41 @@ pub(crate) async fn fingerprint_is_current(
     current.revision() == captured.revision() && current.mode() == captured.mode()
 }
 
-fn prepare_client_text(
-    text: String,
-    headers: &HeaderMap,
-    account_namespace: Option<&str>,
-    pseudonym_scope: &str,
-    request_id: &str,
-    fingerprint: &FingerprintSnapshot,
-    create_sequence: &mut u64,
-) -> Result<String, ()> {
-    let value: Value = serde_json::from_str(&text).map_err(|_| ())?;
-    let message_type = value
-        .as_object()
-        .and_then(|object| object.get("type"))
-        .and_then(Value::as_str)
-        .filter(|message_type| !message_type.is_empty())
-        .ok_or(())?;
-    if message_type != "response.create" {
-        return Ok(text);
+fn public_create_in_flight(continuation: &StdMutex<ResponsesWebSocketState>) -> bool {
+    matches!(
+        continuation_guard(continuation).public_phase(),
+        OperationPhase::Attempted | OperationPhase::ResponseObserved
+    )
+}
+
+fn observe_server_text(
+    continuation: &StdMutex<ResponsesWebSocketState>,
+    text: &str,
+) -> EventDisposition {
+    let mut continuation = continuation_guard(continuation);
+    match serde_json::from_str::<Value>(text) {
+        Ok(event) => continuation.observe_server_event(&event),
+        Err(_) if public_phase_in_flight(continuation.public_phase()) => {
+            continuation.fail_public_create();
+            EventDisposition::ForwardPublic
+        }
+        Err(_) => EventDisposition::Unassociated,
     }
-    let prepared = if let Some(account_namespace) = account_namespace {
-        *create_sequence = create_sequence.saturating_add(1);
-        let frame_request_id = format!("{request_id}-ws-{create_sequence}");
-        let prepared = prepare_websocket_subscription_request(
-            headers,
-            Bytes::from(text),
-            MAX_WEBSOCKET_MESSAGE_BYTES,
-            account_namespace,
-            pseudonym_scope,
-            &frame_request_id,
-        )?;
-        String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?
-    } else {
-        text
-    };
-    if fingerprint.mode() == FingerprintMode::Device
-        && let Some(account_namespace) = account_namespace
-    {
-        let installation_id = RequestPseudonymizer::converged_installation_id(account_namespace);
-        project_websocket_device(
-            prepared,
-            fingerprint,
-            &installation_id,
-            MAX_WEBSOCKET_MESSAGE_BYTES,
-        )
-        .map_err(|_| ())
-    } else {
-        Ok(prepared)
-    }
+}
+
+fn public_phase_in_flight(phase: OperationPhase) -> bool {
+    matches!(
+        phase,
+        OperationPhase::Attempted | OperationPhase::ResponseObserved
+    )
+}
+
+fn continuation_guard(
+    continuation: &StdMutex<ResponsesWebSocketState>,
+) -> MutexGuard<'_, ResponsesWebSocketState> {
+    continuation
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn upstream_close(code: UpstreamCloseCode) -> UpstreamMessage {
@@ -463,23 +469,6 @@ fn allowed_close_code(code: u16) -> UpstreamCloseCode {
         code
     } else {
         UpstreamCloseCode::Protocol
-    }
-}
-
-fn filtered_headers(source: &HeaderMap, allowed: &[&'static str]) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    for name in allowed {
-        let name = HeaderName::from_static(name);
-        for value in source.get_all(&name) {
-            headers.append(name.clone(), value.clone());
-        }
-    }
-    headers
-}
-
-fn copy_headers(destination: &mut HeaderMap, source: &HeaderMap) {
-    for (name, value) in source {
-        destination.append(name.clone(), value.clone());
     }
 }
 

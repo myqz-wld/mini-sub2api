@@ -322,7 +322,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     assert_eq!(normalized["input"][1]["role"], "developer");
     assert_eq!(normalized["input"][2]["role"], "user");
     assert_eq!(normalized["store"], false);
-    assert!(normalized.get("max_output_tokens").is_none());
+    assert_eq!(normalized["max_output_tokens"], 32768);
     assert!(
         normalized["client_metadata"]["x-codex-installation-id"].as_str()
             == Some(expected_device.as_str())
@@ -349,7 +349,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
             8
         );
     }
-    assert_eq!(body_turn["future"]["kept"], true);
+    assert!(body_turn.get("future").is_none());
     let captured_headers = capture.headers.lock().await.clone().expect("headers");
     assert_eq!(
         header_text(&captured_headers, http::header::AUTHORIZATION.as_str()).as_deref(),
@@ -380,7 +380,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     .expect("header turn JSON");
     assert!(header_turn["installation_id"].as_str() == Some(expected_device.as_str()));
     assert_ne!(header_turn["session_id"], "header-session-kept");
-    assert_eq!(header_turn["future"], 1);
+    assert!(header_turn.get("future").is_none());
     for (name, expected) in [
         ("originator", "codex_cli_rs"),
         ("x-openai-internal-codex-responses-lite", "true"),

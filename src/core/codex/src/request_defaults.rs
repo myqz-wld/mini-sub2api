@@ -78,65 +78,37 @@ const fn profile(
     }
 }
 
-pub(crate) fn normalize_optional_members(object: &mut Map<String, Value>) -> bool {
-    let mut removed = false;
-    for name in [
-        "instructions",
-        "tools",
-        "stream_options",
-        "service_tier",
-        "prompt_cache_key",
-        "previous_response_id",
-        "generate",
-        "text",
-    ] {
-        if object.get(name).is_some_and(Value::is_null) {
-            object.remove(name);
-            removed = true;
-        }
-    }
-    removed
-}
-
 pub(crate) fn merge_request_defaults(object: &mut Map<String, Value>, profile: ModelProfile) {
-    object.insert("store".to_string(), Value::Bool(false));
-    object.insert("stream".to_string(), Value::Bool(true));
-    if object.get("tool_choice").and_then(Value::as_str).is_none() {
-        object.insert("tool_choice".to_string(), Value::String("auto".to_string()));
-    }
-    if profile.responses_lite {
-        object.insert("parallel_tool_calls".to_string(), Value::Bool(false));
-    } else if !object
-        .get("parallel_tool_calls")
-        .is_some_and(Value::is_boolean)
-    {
-        object.insert("parallel_tool_calls".to_string(), Value::Bool(true));
-    }
+    object
+        .entry("store".to_string())
+        .or_insert(Value::Bool(false));
+    object
+        .entry("stream".to_string())
+        .or_insert(Value::Bool(true));
+    object
+        .entry("tool_choice".to_string())
+        .or_insert_with(|| Value::String("auto".to_string()));
+    object
+        .entry("parallel_tool_calls".to_string())
+        .or_insert(Value::Bool(!profile.responses_lite));
     merge_reasoning(object, profile);
     merge_text(object, profile);
     merge_include(object);
 }
 
 fn merge_reasoning(object: &mut Map<String, Value>, profile: ModelProfile) {
-    let reasoning = object
-        .entry("reasoning".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !reasoning.is_object() {
-        *reasoning = Value::Object(Map::new());
+    if !object.contains_key("reasoning") {
+        object.insert("reasoning".to_string(), Value::Object(Map::new()));
     }
-    let reasoning = reasoning.as_object_mut().expect("reasoning object");
-    let summary_explicitly_disabled =
-        reasoning.get("summary").and_then(Value::as_str) == Some("none");
-    remove_null_members(reasoning, &["effort", "summary", "context"]);
+    let Some(reasoning) = object.get_mut("reasoning").and_then(Value::as_object_mut) else {
+        return;
+    };
     if let Some(effort) = profile.reasoning_effort {
         reasoning
             .entry("effort".to_string())
             .or_insert_with(|| Value::String(effort.to_string()));
     }
-    if summary_explicitly_disabled {
-        reasoning.remove("summary");
-    }
-    if !summary_explicitly_disabled && let Some(summary) = profile.reasoning_summary {
+    if let Some(summary) = profile.reasoning_summary {
         reasoning
             .entry("summary".to_string())
             .or_insert_with(|| Value::String(summary.to_string()));
@@ -152,48 +124,22 @@ fn merge_text(object: &mut Map<String, Value>, profile: ModelProfile) {
     if object.get("text").is_none() && profile.verbosity.is_none() {
         return;
     }
-    let text = object
-        .entry("text".to_string())
-        .or_insert_with(|| Value::Object(Map::new()));
-    if !text.is_object() {
-        *text = Value::Object(Map::new());
+    if !object.contains_key("text") {
+        object.insert("text".to_string(), Value::Object(Map::new()));
     }
-    let text = text.as_object_mut().expect("text object");
-    remove_null_members(text, &["verbosity", "format"]);
+    let Some(text) = object.get_mut("text").and_then(Value::as_object_mut) else {
+        return;
+    };
     if let Some(verbosity) = profile.verbosity {
         text.entry("verbosity".to_string())
             .or_insert_with(|| Value::String(verbosity.to_string()));
     }
-    if text.is_empty() {
-        object.remove("text");
-    }
 }
 
 fn merge_include(object: &mut Map<String, Value>) {
-    match object.get_mut("include") {
-        Some(Value::Array(include)) => {
-            if !include
-                .iter()
-                .any(|item| item.as_str() == Some("reasoning.encrypted_content"))
-            {
-                include.push(Value::String("reasoning.encrypted_content".to_string()));
-            }
-        }
-        Some(_) | None => {
-            object.insert(
-                "include".to_string(),
-                serde_json::json!(["reasoning.encrypted_content"]),
-            );
-        }
-    }
-}
-
-fn remove_null_members(object: &mut Map<String, Value>, names: &[&str]) {
-    for name in names {
-        if object.get(*name).is_some_and(Value::is_null) {
-            object.remove(*name);
-        }
-    }
+    object
+        .entry("include".to_string())
+        .or_insert_with(|| serde_json::json!(["reasoning.encrypted_content"]));
 }
 
 #[cfg(test)]
@@ -224,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn effort_and_summary_defaults_are_independent_and_none_is_sticky() {
+    fn effort_and_summary_defaults_are_independent_and_explicit_none_is_preserved() {
         let mut explicit_effort = serde_json::json!({
             "reasoning": {"effort": "high"}
         });
@@ -242,8 +188,27 @@ mod tests {
             disabled_summary.as_object_mut().expect("object"),
             model_profile("gpt-5.2"),
         );
-        assert!(disabled_summary["reasoning"].get("summary").is_none());
+        assert_eq!(disabled_summary["reasoning"]["summary"], "none");
         assert_eq!(disabled_summary["reasoning"]["effort"], "medium");
+    }
+
+    #[test]
+    fn explicit_controls_and_nulls_are_never_replaced_by_defaults() {
+        let mut request = serde_json::json!({
+            "store": true,
+            "stream": false,
+            "tool_choice": null,
+            "parallel_tool_calls": true,
+            "reasoning": null,
+            "text": null,
+            "include": null
+        });
+        let expected = request.clone();
+        merge_request_defaults(
+            request.as_object_mut().expect("object"),
+            model_profile("gpt-5.6-sol"),
+        );
+        assert_eq!(request, expected);
     }
 
     #[test]

@@ -43,7 +43,7 @@ fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
 }
 
 #[test]
-fn gpt_5_2_defaults_reasoning_summary_and_omits_null_optionals() {
+fn gpt_5_2_preserves_explicit_null_public_members() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.2",
@@ -73,15 +73,23 @@ fn gpt_5_2_defaults_reasoning_summary_and_omits_null_optionals() {
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized request");
 
-    assert_eq!(value["reasoning"]["effort"], "medium");
-    assert_eq!(value["reasoning"]["summary"], "auto");
-    assert!(value["reasoning"].get("context").is_none());
-    assert_eq!(value["text"]["verbosity"], "low");
-    assert_eq!(value["tool_choice"], "auto");
-    assert_eq!(value["parallel_tool_calls"], true);
-    assert!(value.get("stream_options").is_none());
-    assert!(value.get("service_tier").is_none());
-    assert!(value.get("instructions").is_none());
+    assert!(value["reasoning"]["effort"].is_null());
+    assert!(value["reasoning"]["summary"].is_null());
+    assert!(value["reasoning"]["context"].is_null());
+    assert!(value["text"].is_null());
+    assert!(value["tool_choice"].is_null());
+    assert!(value["parallel_tool_calls"].is_null());
+    for name in [
+        "instructions",
+        "tools",
+        "stream_options",
+        "service_tier",
+        "prompt_cache_key",
+        "previous_response_id",
+        "include",
+    ] {
+        assert!(value[name].is_null(), "field {name}");
+    }
     assert!(
         uuid::Uuid::parse_str(
             value["client_metadata"]["x-codex-installation-id"]
@@ -89,10 +97,6 @@ fn gpt_5_2_defaults_reasoning_summary_and_omits_null_optionals() {
                 .expect("installation id")
         )
         .is_ok()
-    );
-    assert_eq!(
-        value["prompt_cache_key"],
-        value["client_metadata"]["session_id"]
     );
 }
 

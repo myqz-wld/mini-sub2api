@@ -76,7 +76,7 @@ impl RequestPseudonymizer {
         object: &mut Map<String, Value>,
     ) -> Result<(), ()> {
         self.apply_headers(headers)?;
-        self.apply_body(object)
+        self.apply_body_only(object)
     }
 
     fn apply_headers(&self, headers: &mut HeaderMap) -> Result<(), ()> {
@@ -95,7 +95,7 @@ impl RequestPseudonymizer {
         self.rewrite_serialized_header(headers, TURN_METADATA_HEADER)
     }
 
-    fn apply_body(&self, object: &mut Map<String, Value>) -> Result<(), ()> {
+    pub(crate) fn apply_body_only(&self, object: &mut Map<String, Value>) -> Result<(), ()> {
         if let Some(cache_key) = object.get_mut("prompt_cache_key") {
             self.rewrite_value(cache_key, IdentityDomain::PromptCache);
         }

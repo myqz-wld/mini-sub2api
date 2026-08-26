@@ -77,6 +77,7 @@ func TestWebSocketFirstFrameAndInterTurnTimeoutsAreCoordinatorOwned(t *testing.T
 
 func TestWebSocketClientDisconnectFinalizesActiveTurn(t *testing.T) {
 	coreServer, received, release := blockingCoreServer(t)
+	defer close(release)
 	store, _, key := setupHTTPTest(t)
 	core := &loopbackWebSocketCore{url: coreServer.URL}
 	_, publicServer := startPublicWebSocketServer(t, store, core)
@@ -87,7 +88,6 @@ func TestWebSocketClientDisconnectFinalizesActiveTurn(t *testing.T) {
 	writeWebSocketText(t, connection, `{"type":"response.create","model":"hold"}`)
 	waitSignal(t, received, "active create")
 	connection.CloseNow()
-	close(release)
 	history := waitForHistory(t, store, key.ID, 1)
 	if history[0].Status != storage.RequestDisconnected {
 		t.Fatalf("history = %#v", history)

@@ -46,7 +46,8 @@ func passthroughCoreClose(err error) (websocket.StatusCode, bool) {
 	code := websocket.CloseStatus(err)
 	switch code {
 	case websocket.StatusNormalClosure, websocket.StatusGoingAway, websocket.StatusProtocolError,
-		websocket.StatusUnsupportedData, websocket.StatusPolicyViolation, websocket.StatusServiceRestart:
+		websocket.StatusUnsupportedData, websocket.StatusPolicyViolation, websocket.StatusMessageTooBig,
+		websocket.StatusServiceRestart:
 		return code, true
 	default:
 		return 0, false

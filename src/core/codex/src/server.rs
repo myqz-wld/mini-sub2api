@@ -2,13 +2,18 @@ use crate::error::CoreFailure;
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_http_device;
+use crate::http_body::decode_emulated_request_body;
 use crate::inference_fingerprint::headers_for_retry;
 #[path = "server_internal_request.rs"]
 mod internal_request;
 use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
-use crate::request_normalizer::prepare_subscription_request;
+use crate::request_normalizer::EmulationTransport;
+use crate::request_normalizer::SubscriptionIdentity;
+use crate::request_normalizer::prepare_emulated_request;
+use crate::request_profile::CallerKind;
+use crate::request_profile::UpstreamProfile;
 use crate::request_pseudonym::RequestPseudonymizer;
 use crate::response_stream::build_streaming_response;
 use crate::response_stream::request_expects_sse;
@@ -133,9 +138,9 @@ async fn responses_inner(
     request: Request<Body>,
 ) -> std::result::Result<Response<Body>, CoreFailure> {
     let identity = validate_internal_request(peer, state, &headers)?;
+    let caller = CallerKind::from_headers(&headers);
     let account_ref = identity.account_ref;
     let pseudonym_scope = identity.pseudonym_scope;
-    let request_id = identity.request_id;
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
         .map_err(|_| CoreFailure::InvalidRequest)?;
@@ -144,23 +149,38 @@ async fn responses_inner(
     let _guard = account_lock.lock().await;
     let resolved = resolve_auth(state, &account_ref, None).await?;
     drop(_guard);
+    let profile = UpstreamProfile::select(caller, resolved.auth.credential_kind());
     let account_namespace = match &resolved.auth {
         ResolvedAuth::CodexOAuth { account_id, .. } => Some(account_id.clone()),
         ResolvedAuth::OpenAiApiKey { .. } => None,
     };
-    let (forward_headers, body) = if let Some(account_namespace) = account_namespace.as_deref() {
-        let prepared = prepare_subscription_request(
-            &headers,
+    let mut forward_headers = headers;
+    let body = if profile.emulates_codex() {
+        decode_emulated_request_body(&mut forward_headers, body, MAX_REQUEST_BYTES)
+            .map_err(|()| CoreFailure::InvalidRequest)?
+    } else {
+        body
+    };
+    let (forward_headers, body) = if profile.emulates_codex() {
+        let subscription_identity =
+            account_namespace
+                .as_deref()
+                .map(|account_namespace| SubscriptionIdentity {
+                    account_namespace,
+                    downstream_scope: &pseudonym_scope,
+                });
+        let prepared = prepare_emulated_request(
+            profile,
+            EmulationTransport::Http,
+            &forward_headers,
             body,
             MAX_REQUEST_BYTES,
-            account_namespace,
-            &pseudonym_scope,
-            &request_id,
+            subscription_identity,
         )
         .map_err(|()| CoreFailure::InvalidRequest)?;
         (prepared.headers, prepared.body)
     } else {
-        (headers, body)
+        (forward_headers, body)
     };
     let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device
         && let Some(account_namespace) = account_namespace.as_deref()
@@ -186,6 +206,7 @@ async fn responses_inner(
         &forward_headers,
         &resolved.upstream_url,
         &resolved.auth,
+        profile,
         body.clone(),
     )
     .await?;
@@ -205,6 +226,7 @@ async fn responses_inner(
             &retry_headers,
             &retry.upstream_url,
             &retry.auth,
+            profile,
             body,
         )
         .await?;
@@ -289,10 +311,12 @@ async fn send_upstream(
     inbound_headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
+    profile: UpstreamProfile,
     body: bytes::Bytes,
 ) -> std::result::Result<reqwest::Response, CoreFailure> {
     let client = transport.http_client_for_url(upstream_url);
-    let request = build_upstream_request(client, inbound_headers, upstream_url, auth, body)?;
+    let request =
+        build_upstream_request(client, inbound_headers, upstream_url, auth, profile, body)?;
     client.execute(request).await.map_err(|error| {
         if error.is_connect() {
             CoreFailure::UpstreamConnectFailed

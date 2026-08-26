@@ -316,7 +316,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         value["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"],
         turn_id
     );
-    assert!(value.get("max_output_tokens").is_none());
+    assert_eq!(value["max_output_tokens"], 1000);
     let reused: Value = serde_json::from_str(&frames[1]).expect("reused frame JSON");
     assert_eq!(reused["previous_response_id"], "resp_first");
     assert_eq!(reused["input"], serde_json::json!([]));

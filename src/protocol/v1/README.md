@@ -96,26 +96,50 @@ The coordinator may forward only these public-client headers to the core:
 - `session_id`
 - `conversation_id`
 
-The core constructs authoritative `Authorization` and `Host` headers. For subscription routes it
-also constructs `ChatGPT-Account-ID` and replaces `User-Agent`, `originator`, and `version` with one
-canonical identity. `OpenAI-Organization`,
-`OpenAI-Project`, and the explicitly reviewed `X-Stainless-*` headers reach only regular OpenAI
-API-key upstreams. Both layers remove cookies, proxy authentication, forwarding headers, content
-length, transfer encoding, connection-specific headers, unknown `X-Stainless-*` headers, and any
-unreviewed `X-Mini-Sub2Api-*` header.
+The core constructs authoritative `Authorization` and `Host` headers. It separately derives caller
+source from a syntactically valid, non-empty `Originator` and credential kind from the authenticated
+internal account reference:
 
-For subscription-backed plain Responses bodies, the core maps input messages with role `system` to
-role `developer`, preserving their content and instruction precedence for the internal Codex
-endpoint. Easy string content becomes `input_text` for input roles and `output_text` for historical
-`assistant` messages. Regular OpenAI API-key request bodies remain byte-transparent.
+| Caller source | Credential kind | Profile |
+| --- | --- | --- |
+| No valid `Originator` | OpenAI API key | `BareOpenAi` |
+| Valid `Originator` | OpenAI API key | `CodexOpenAi149` |
+| Any source | Codex subscription | `CodexSubscription149` |
+
+`Originator` selects formatting only. It never grants credential/account permissions or changes the
+selected credential. `BareOpenAi` preserves reviewed HTTP body and WebSocket text-frame bytes.
+Both Codex profiles make a minimal `0.149.0` overlay while retaining OpenAI API-key versus ChatGPT
+subscription authentication boundaries. Only `CodexSubscription149` constructs
+`ChatGPT-Account-ID` and replaces `User-Agent`, `originator`, and `version` with one canonical
+identity. `OpenAI-Organization`, `OpenAI-Project`, and the explicitly reviewed `X-Stainless-*`
+headers reach only API-key upstreams. Both layers remove cookies, proxy authentication, forwarding
+headers, content length, transfer encoding, connection-specific headers, unknown `X-Stainless-*`
+headers, and any unreviewed `X-Mini-Sub2Api-*` header.
+
+Codex emulation begins with the full caller object, not a top-level field whitelist. Explicit
+Responses fields—including `previous_response_id`, `conversation`, `background`,
+`context_management`, output/tool limits, metadata, moderation, prompt/cache settings, safety
+identifiers, sampling, truncation, tools, and image detail—remain authoritative. The supported
+surface is the union of documented OpenAI Responses fields and completed Codex `0.149.0`
+capture/source wire fields; other protocol members are removed. Arbitrary keys remain valid inside
+documented opaque/free-form containers such as metadata maps, JSON Schema, `prompt.variables`, and
+function/custom tool-call argument/input/output payload values; structured tools and shell/computer
+outputs are still filtered.
+The overlay changes only required structure or absent defaults: explicit `system` and `developer`
+roles remain distinct, string message content becomes `input_text`, synthesized Lite instructions
+use `developer`, and historical assistant strings become `output_text`. It never generates an HTTP
+`previous_response_id`; an explicit one is forwarded unchanged. Non-Lite requests default omitted
+image detail to `high`; Responses Lite leaves omitted detail absent while preserving an explicit
+supported detail value.
 
 For subscription upstreams, the core replaces the complete client identity with
 `User-Agent: codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
 `originator: codex_cli_rs`, and `version: 0.149.0`. The same normalization function feeds HTTP and
 WebSocket construction; no inbound product, platform suffix, originator, or version survives.
-OAuth HTTP additionally pins
-`Accept: text/event-stream`, `Content-Type: application/json`, and level-3 zstd. Regular OpenAI
-API-key routes retain the public client's reviewed `version` and `User-Agent` values unchanged.
+`CodexSubscription149` HTTP additionally pins `Accept: text/event-stream`,
+`Content-Type: application/json`, and level-3 zstd. `CodexOpenAi149` HTTP is deliberately not
+zstd-compressed and retains API-key authentication; it must not inherit subscription-only account
+or identity permissions.
 
 The reviewed optional Codex request names `x-openai-internal-codex-residency`,
 `x-responsesapi-include-timing-metrics`, `x-codex-inference-call-id`, `x-oai-attestation`, and
@@ -124,7 +148,7 @@ call IDs HTTP-only on OAuth routes, with the conditional raw order captured from
 
 ## Stateless pseudonymization and optional device convergence
 
-Subscription identity is projected in two independent layers. First, every parseable OAuth request
+Subscription identity is projected in two independent layers. First, every parseable subscription request
 uses HMAC-SHA256 over the stable ChatGPT account namespace, downstream pseudonym scope, field domain,
 and original identifier. The first 128 bits are emitted as UUIDv8. This rewrites installation,
 session, thread, turn/root/parent-turn, window/parent-thread, client-request, item turn metadata, and
@@ -136,8 +160,9 @@ compaction state, subagent state, timestamps, and upstream response/item IDs are
 Second, `device` replaces only the already-pseudonymized installation carrier with an account-level
 UUIDv8 derived solely from the ChatGPT account namespace. `off` keeps the one-to-one installation
 pseudonym instead. The fingerprint sidecar stores only mode and revision; no installation ID or
-random pseudonym seed is persisted. New sidecars default to `device`. Regular OpenAI API-key HTTP
-bodies and WebSocket application frames remain byte-exact in both modes.
+random pseudonym seed is persisted. New sidecars default to `device`. `BareOpenAi` HTTP bodies and
+WebSocket application frames remain byte-exact in both modes; `CodexOpenAi149` is emulated without
+subscription identity projection.
 
 One credential owns independent HTTP and WebSocket connection pools. HTTP uses transport-default
 TLS; provider WebSocket uses AWS-LC rustls with native roots, a PQ-first key-group list, and an
@@ -189,10 +214,11 @@ for the first `response.create` so its model and service tier can drive the prov
   overlap policy, first-frame/inter-turn/write timeouts, and shutdown lifecycle.
 - Application messages are UTF-8 JSON text and are limited to 16 MiB. The core relays valid
   non-create events without semantic translation.
-- Regular API-key text frames are byte-transparent in `off`, and remain byte-transparent in
-  `device` when they have no recognized body carrier. For subscription credentials, the core
-  applies the pinned request normalizer only to `response.create`, preserving `type`, `generate`,
-  `previous_response_id`, and client metadata. An existing non-empty
+- `BareOpenAi` text frames are byte-transparent. Both Codex profiles apply the pinned request
+  overlay only to `response.create`, preserving explicit supported `type`, `generate`,
+  `previous_response_id`, `conversation`, and current Responses fields while removing unsupported
+  protocol members. Arbitrary keys remain valid only in documented opaque/free-form containers. An
+  existing non-empty
   `x-codex-ws-stream-request-start-ms` remains the CLI send time; only a missing or empty value is
   generated. After pseudonymization and any required device convergence, the complete native
   `0.149.0` prewarm shape
@@ -213,6 +239,13 @@ for the first `response.create` so its model and service tier can drive the prov
   loopback hop does not request WebSocket compression.
 - Ping, pong, close, cancellation, and backpressure remain connection-scoped. Neither layer
   reconnects or replays an active turn.
+- A bare subscription socket may use one internal `generate=false` prewarm only when no explicit
+  `generate`, `previous_response_id`, or `conversation` carrier exists. Codex callers never
+  receive this duplicate setup. Reuse emits a delta plus the completed response id only when every
+  semantic property in the Codex `0.149.0` reuse projection and the completed input/output prefix
+  match; volatile transport/client metadata and generated item identity do not prevent reuse.
+  Tool-output continuation and any true semantic mismatch emit a full frame without an inferred
+  previous id. WebSocket application messages never use zstd.
 - Gateway failures after upgrade use application close code `4500`. Its reason is compact JSON with
   exactly `retryAdvice`, `phase`, and `deliveryState`. Protocol, policy, normal lifecycle, and stale
   fingerprint closes retain their standard WebSocket codes.
