@@ -11,6 +11,7 @@ struct ReconnectOAuthState {
     new_access: String,
     new_id: String,
     authorizations: Arc<Mutex<Vec<String>>>,
+    accepted_headers: Arc<Mutex<Vec<HeaderMap>>>,
     accepted: Arc<AtomicUsize>,
     refreshes: Arc<AtomicUsize>,
     frames: Arc<Mutex<Vec<String>>>,
@@ -24,6 +25,7 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
         new_access: test_jwt(None, 7200),
         new_id: test_jwt(Some(account_id), 7200),
         authorizations: Arc::new(Mutex::new(Vec::new())),
+        accepted_headers: Arc::new(Mutex::new(Vec::new())),
         accepted: Arc::new(AtomicUsize::new(0)),
         refreshes: Arc::new(AtomicUsize::new(0)),
         frames: Arc::new(Mutex::new(Vec::new())),
@@ -110,6 +112,34 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
     let public: Value = serde_json::from_str(&frames[1]).expect("public frame");
     assert_eq!(hidden["generate"], false);
     assert!(public.get("previous_response_id").is_none());
+    let headers = state.accepted_headers.lock().await;
+    assert_eq!(headers.len(), 2);
+    let hidden_header = turn_metadata(&headers[0]);
+    let public_header = turn_metadata(&headers[1]);
+    let hidden_body = turn_metadata_from_body(&hidden);
+    let public_body = turn_metadata_from_body(&public);
+    assert_eq!(hidden_header["request_kind"], "prewarm");
+    assert_eq!(public_header["request_kind"], "turn");
+    assert_eq!(hidden_header, hidden_body);
+    assert_eq!(public_header, public_body);
+}
+
+fn turn_metadata(headers: &HeaderMap) -> Value {
+    serde_json::from_str(
+        header_text(headers, "x-codex-turn-metadata")
+            .as_deref()
+            .expect("turn metadata header"),
+    )
+    .expect("turn metadata header JSON")
+}
+
+fn turn_metadata_from_body(body: &Value) -> Value {
+    serde_json::from_str(
+        body["client_metadata"]["x-codex-turn-metadata"]
+            .as_str()
+            .expect("body turn metadata"),
+    )
+    .expect("body turn metadata JSON")
 }
 
 async fn reconnect_oauth_upstream(
@@ -131,6 +161,7 @@ async fn reconnect_oauth_upstream(
         )
             .into_response();
     }
+    state.accepted_headers.lock().await.push(headers);
     let connection = state.accepted.fetch_add(1, Ordering::SeqCst);
     upgrade
         .on_upgrade(move |mut socket| async move {
