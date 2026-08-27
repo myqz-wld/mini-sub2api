@@ -139,6 +139,19 @@ Responses Lite leaves omitted detail absent while preserving an explicit support
 are public Responses controls but are rejected by the fixed Subscription target. API-key profiles
 retain them.
 
+The base prompt is also a fixed part of both Codex-emulated profiles. The core resolves the
+model-specific effective default from the Codex `0.149.0` catalog (including its empty default
+personality substitution), using longest-prefix and single-namespace matching plus the pinned
+fallback for an unknown model. For normal Responses, the canonical prompt replaces top-level
+`instructions`; a non-empty caller value that is not a known pinned prompt is preserved as a
+leading `developer` message. For Responses Lite, top-level `instructions` is absent and the input
+prefix is `additional_tools`, canonical base-prompt `developer` message, optional caller-custom
+`developer` message, then caller input. Known pinned prompts already present in either carrier are
+replaced and deduplicated. A Lite WebSocket delta with `previous_response_id` retains its incremental
+shape and does not resend the base prompt. An invalid input shape that cannot carry a caller
+customization fails closed, and the final expanded body remains subject to the configured size
+limit. `BareOpenAi` is not parsed or prompted.
+
 For both Codex-emulated profiles, the core replaces the complete client identity with
 `User-Agent: codex_cli_rs/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal>`,
 `originator: codex_cli_rs`, and `version: 0.149.0`. OS, architecture, and terminal are captured on

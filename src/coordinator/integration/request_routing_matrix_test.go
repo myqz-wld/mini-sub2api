@@ -217,6 +217,11 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertCodexOpenAIProfileCapture(t, capture)
 				assertSharedRuntimeUserAgent(t, capture)
+				value := decodeRequestObject(t, capture.Body)
+				assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4")
+				input := value["input"].([]any)
+				assertDeveloperMessageText(t, input[0], "Use the available tools only when needed.")
+				assertNormalizedMessages(t, input[1:], messages)
 				if capture.Headers.Get("Session-Id") != "api-key-session" ||
 					capture.Headers.Get("Version") != "0.149.0" ||
 					capture.Headers.Get("X-Openai-Subagent") != "review" {

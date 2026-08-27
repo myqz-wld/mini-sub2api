@@ -2,7 +2,9 @@ package integration
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -137,25 +139,120 @@ func assertRuntimeCodexUserAgent(t *testing.T, value string) {
 	}
 }
 
+func assertCodexBaseInstructions(t *testing.T, value any, model string) {
+	t.Helper()
+	instructions, ok := value.(string)
+	if !ok {
+		t.Fatalf("Codex base instructions are not text for model %q", model)
+	}
+	got := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
+	if want := expectedCodexInstructionsHash(model); got != want {
+		t.Fatalf("Codex base instructions hash for %q = %s, want %s", model, got, want)
+	}
+}
+
+func assertCodexBaseDeveloperMessage(t *testing.T, input any, model string) {
+	t.Helper()
+	items, ok := input.([]any)
+	if !ok {
+		t.Fatalf("Codex input is not an array for model %q", model)
+	}
+	matches := 0
+	for _, item := range items {
+		if text, ok := developerMessageText(item); ok {
+			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
+			if hash == expectedCodexInstructionsHash(model) {
+				matches++
+			}
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("Codex base developer message count for %q = %d, want 1", model, matches)
+	}
+}
+
+func assertDeveloperMessageText(t *testing.T, item any, want string) {
+	t.Helper()
+	got, ok := developerMessageText(item)
+	if !ok || got != want {
+		t.Fatalf("developer message text = %q, want %q", got, want)
+	}
+}
+
+func developerMessageText(item any) (string, bool) {
+	message, ok := item.(map[string]any)
+	if !ok || message["type"] != "message" || message["role"] != "developer" {
+		return "", false
+	}
+	content, ok := message["content"].([]any)
+	if !ok || len(content) != 1 {
+		return "", false
+	}
+	part, ok := content[0].(map[string]any)
+	if !ok || part["type"] != "input_text" {
+		return "", false
+	}
+	text, ok := part["text"].(string)
+	return text, ok
+}
+
+func expectedCodexInstructionsHash(model string) string {
+	if slash := strings.IndexByte(model, '/'); slash >= 0 {
+		namespace, suffix := model[:slash], model[slash+1:]
+		validNamespace := namespace != "" && !strings.Contains(suffix, "/")
+		for _, character := range namespace {
+			validNamespace = validNamespace && (character >= 'a' && character <= 'z' ||
+				character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' ||
+				character == '_' || character == '-')
+		}
+		if validNamespace {
+			model = suffix
+		}
+	}
+	switch {
+	case strings.HasPrefix(model, "gpt-5.6-sol"),
+		strings.HasPrefix(model, "gpt-5.6-terra"),
+		strings.HasPrefix(model, "gpt-5.6-luna"):
+		return "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265"
+	case strings.HasPrefix(model, "gpt-5.5"):
+		return "e58c21f9377e946e2e10f886fcbf6f030e1c6fd9067241c637a56e9e998d3c31"
+	case strings.HasPrefix(model, "gpt-5.4-mini"):
+		return "9109777dc7f3bc9ee9a0d187982b13538c53e0572de2959300f7226e9c59855e"
+	case strings.HasPrefix(model, "gpt-5.4"), strings.HasPrefix(model, "codex-auto-review"):
+		return "9721f7a86edc261996e628fe14fade8d66ec60e6cc727274a8da6a03e15464de"
+	case strings.HasPrefix(model, "gpt-5.2"):
+		return "c9b2fa097ac69cae82c3d2ae12271083890a96521c55ad8dc14cae5168ad3f39"
+	case model == "exp-codex-personality":
+		return "4cf5dd6317a9920b3f0398f6fa7ca49310b57961f6dd076eb2141acd4f963843"
+	default:
+		return "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807"
+	}
+}
+
 func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any) {
 	t.Helper()
 	value := decodeRequestObject(t, body)
 	input, ok := value["input"].([]any)
-	if !ok || len(input) != len(messages)+2 {
-		t.Fatalf("lite input = %#v", value["input"])
+	if !ok || len(input) != len(messages)+3 {
+		t.Fatalf("lite input count = %d, want %d", len(input), len(messages)+3)
 	}
 	additional, ok := input[0].(map[string]any)
 	if !ok || additional["type"] != "additional_tools" ||
 		!jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
 		t.Fatalf("lite additional tools = %#v", input[0])
 	}
-	developer, ok := input[1].(map[string]any)
-	if !ok || developer["role"] != "developer" {
-		t.Fatalf("lite developer message = %#v", input[1])
+	assertCodexBaseDeveloperMessage(t, input, "gpt-5.6-sol")
+	baseText, baseOK := developerMessageText(input[1])
+	if !baseOK {
+		t.Fatal("Lite canonical base is not the first developer message after tools")
 	}
-	assertNormalizedMessages(t, input[2:], messages)
-	if additional["id"] != nil || developer["id"] != nil {
-		t.Fatalf("synthetic lite items received ids: additional=%#v developer=%#v", additional, developer)
+	assertCodexBaseInstructions(t, baseText, "gpt-5.6-sol")
+	assertDeveloperMessageText(t, input[2], "Answer both user messages.")
+	assertNormalizedMessages(t, input[3:], messages)
+	base := input[1].(map[string]any)
+	custom := input[2].(map[string]any)
+	if additional["id"] != nil || base["id"] != nil || custom["id"] != nil {
+		t.Fatal("synthetic Lite tools/base/custom items received ids")
 	}
 	if value["tools"] != nil || value["instructions"] != nil || value["store"] != false ||
 		value["stream"] != false || value["parallel_tool_calls"] != false {
@@ -170,11 +267,16 @@ func assertNonLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []
 	if !ok {
 		t.Fatalf("non-lite input = %#v", value["input"])
 	}
-	assertNormalizedMessages(t, input, messages)
+	if len(input) != len(messages)+1 {
+		t.Fatalf("non-lite input count = %d, want %d", len(input), len(messages)+1)
+	}
+	assertDeveloperMessageText(t, input[0], "Look up the requested order.")
+	assertNormalizedMessages(t, input[1:], messages)
 	if !jsonEqual(value["tools"], canonicalExpectedTools(tools)) {
 		t.Fatalf("non-lite messages/tools = %#v", value)
 	}
-	if value["instructions"] != "Look up the requested order." || value["store"] != false ||
+	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4-mini")
+	if value["store"] != false ||
 		value["stream"] != false || value["parallel_tool_calls"] != true ||
 		value["tool_choice"] != "auto" {
 		t.Fatalf("non-lite controls = %#v", value)
@@ -191,8 +293,13 @@ func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	if !ok {
 		t.Fatalf("native subscription input = %#v", value["input"])
 	}
-	assertMessageSemantics(t, input, messages)
-	if value["model"] != "gpt-5.4" || value["instructions"] != "Continue the existing turn." ||
+	if len(input) != len(messages)+1 {
+		t.Fatalf("native subscription input count = %d, want %d", len(input), len(messages)+1)
+	}
+	assertDeveloperMessageText(t, input[0], "Continue the existing turn.")
+	assertMessageSemantics(t, input[1:], messages)
+	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4")
+	if value["model"] != "gpt-5.4" ||
 		value["store"] != false || value["stream"] != false || value["tool_choice"] != "auto" ||
 		value["parallel_tool_calls"] != true || !isUUIDv8(value["prompt_cache_key"]) {
 		t.Fatalf("native subscription controls = %#v", value)

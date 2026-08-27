@@ -1,4 +1,5 @@
 use super::EmulationTransport;
+use crate::codex_instructions;
 use crate::request_defaults;
 use crate::request_identity;
 use crate::request_identity::IdentityContext;
@@ -60,7 +61,7 @@ pub(super) fn apply(
     headers: &mut HeaderMap,
     transport: EmulationTransport,
     profile: UpstreamProfile,
-) -> Vec<String> {
+) -> Result<Vec<String>, ()> {
     object.retain(|name, _| {
         SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
             || match transport {
@@ -77,16 +78,19 @@ pub(super) fn apply(
         .map(request_defaults::model_profile)
         .unwrap_or_else(|| request_defaults::model_profile(""));
     model_profile.responses_lite |= responses_lite_requested(object);
-    let already_lite = model_profile.responses_lite && already_lite_shaped(object, transport);
+    let lite_incremental = model_profile.responses_lite && lite_incremental(object, transport);
+    let already_lite =
+        model_profile.responses_lite && (responses_lite_requested(object) || lite_incremental);
 
     let synthesized_item_ids = if already_lite {
         Vec::new()
     } else {
         normalize_input(object)
     };
+    codex_instructions::apply(object, model_profile.responses_lite, lite_incremental)?;
     if model_profile.responses_lite {
         if !already_lite {
-            relocate_lite_fields(object);
+            relocate_lite_tools(object);
         }
     } else {
         canonicalize_top_level_tools(object);
@@ -120,7 +124,7 @@ pub(super) fn apply(
         (!model_profile.responses_lite).then_some("high"),
     );
     canonicalize_request_order(object, transport);
-    synthesized_item_ids
+    Ok(synthesized_item_ids)
 }
 
 fn canonicalize_structured_request_members(object: &mut Map<String, Value>) {
@@ -180,7 +184,7 @@ fn retain_object_member(object: &mut Map<String, Value>, name: &str, fields: &[&
     }
 }
 
-fn relocate_lite_fields(object: &mut Map<String, Value>) {
+fn relocate_lite_tools(object: &mut Map<String, Value>) {
     let Some(mut input) = object.get("input").and_then(Value::as_array).cloned() else {
         return;
     };
@@ -189,22 +193,12 @@ fn relocate_lite_fields(object: &mut Map<String, Value>) {
         None => Vec::new(),
         Some(_) => return,
     };
-    let instructions = match object.get("instructions") {
-        Some(Value::String(instructions)) => Some(instructions.clone()),
-        None => None,
-        Some(_) => return,
-    };
-
     object.remove("tools");
-    object.remove("instructions");
     let mut relocated = vec![serde_json::json!({
         "type": "additional_tools",
         "role": "developer",
         "tools": responses_lite::group_tools(tools),
     })];
-    if let Some(instructions) = instructions.filter(|instructions| !instructions.is_empty()) {
-        relocated.push(developer_message(instructions));
-    }
     relocated.append(&mut input);
     object.insert("input".to_string(), Value::Array(relocated));
 }
@@ -287,10 +281,7 @@ fn rewrite_subscription_system_roles(object: &mut Map<String, Value>) {
     }
 }
 
-fn already_lite_shaped(object: &Map<String, Value>, transport: EmulationTransport) -> bool {
-    if responses_lite_requested(object) {
-        return true;
-    }
+fn lite_incremental(object: &Map<String, Value>, transport: EmulationTransport) -> bool {
     transport == EmulationTransport::WebSocket
         && object.get("tools").is_none()
         && object.get("instructions").is_none()
@@ -306,14 +297,6 @@ fn responses_lite_requested(object: &Map<String, Value>) -> bool {
         .and_then(|item| item.get("type"))
         .and_then(Value::as_str)
         == Some("additional_tools")
-}
-
-fn developer_message(text: String) -> Value {
-    serde_json::json!({
-        "type": "message",
-        "role": "developer",
-        "content": [{"type": "input_text", "text": text}],
-    })
 }
 
 fn user_message(text: String) -> Value {

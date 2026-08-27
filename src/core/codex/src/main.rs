@@ -3,6 +3,7 @@ mod build_info;
 mod cli;
 mod cloudflare_cookies;
 mod codex_auth_import;
+mod codex_instructions;
 mod codex_user_agent;
 mod error;
 mod fingerprint;

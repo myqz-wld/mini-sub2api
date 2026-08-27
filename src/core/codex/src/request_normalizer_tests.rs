@@ -79,11 +79,18 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     assert_eq!(value["input"][1]["role"], "developer");
     assert!(value["input"][1].get("id").is_none());
     assert_eq!(value["input"][2]["role"], "developer");
+    assert!(value["input"][2].get("id").is_none());
     assert_eq!(
-        value["input"][2]["content"],
+        value["input"][1]["content"][0]["text"],
+        crate::codex_instructions::for_model("gpt-5.6-sol")
+    );
+    assert_eq!(value["input"][2]["content"][0]["text"], "Be concise");
+    assert_eq!(value["input"][3]["role"], "developer");
+    assert_eq!(
+        value["input"][3]["content"],
         serde_json::json!([{"type":"input_text","text":"Follow system rules"}])
     );
-    assert_eq!(value["input"][3]["role"], "user");
+    assert_eq!(value["input"][4]["role"], "user");
     let turn_id = value["client_metadata"]["turn_id"]
         .as_str()
         .expect("turn id");
@@ -94,7 +101,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
             .get_version_num(),
         8
     );
-    for index in [2, 3] {
+    for index in [3, 4] {
         assert!(
             value["input"][index]["id"]
                 .as_str()
@@ -198,10 +205,15 @@ fn normalizes_non_lite_with_current_model_defaults() {
     assert_eq!(value["tools"][0]["description"], "");
     assert_eq!(value["tools"][0]["strict"], false);
     assert_eq!(value["tools"][0]["parameters"], serde_json::json!({}));
-    assert_eq!(value["instructions"], "Be concise");
+    assert_eq!(
+        value["instructions"],
+        crate::codex_instructions::for_model("gpt-5.4")
+    );
     assert_eq!(value["input"][0]["role"], "developer");
-    assert_eq!(value["input"][1]["role"], "user");
-    assert_eq!(value["input"][1]["type"], "message");
+    assert_eq!(value["input"][0]["content"][0]["text"], "Be concise");
+    assert_eq!(value["input"][1]["role"], "developer");
+    assert_eq!(value["input"][2]["role"], "user");
+    assert_eq!(value["input"][2]["type"], "message");
     assert_eq!(value["parallel_tool_calls"], true);
     assert_eq!(value["reasoning"]["effort"], "medium");
     assert!(value["reasoning"].get("context").is_none());
@@ -288,7 +300,7 @@ fn filters_unsupported_fields_from_already_subscription_shaped_json() {
     let prepared = prepare_subscription_request(
         &HeaderMap::new(),
         body,
-        16 * 1024,
+        64 * 1024,
         "acct_test",
         PSEUDONYM_SCOPE,
         "req_test",
@@ -306,6 +318,10 @@ fn filters_unsupported_fields_from_already_subscription_shaped_json() {
         8
     );
     assert_eq!(value["input"][0]["type"], "additional_tools");
+    assert_eq!(
+        value["input"][1]["content"][0]["text"],
+        crate::codex_instructions::for_model("gpt-5.6-sol")
+    );
 }
 
 #[test]

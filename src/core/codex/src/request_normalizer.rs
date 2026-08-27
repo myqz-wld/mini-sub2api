@@ -105,7 +105,7 @@ fn prepare_emulated_request_inner(
     }
 
     let synthesized_item_ids =
-        overlay::apply(object, &mut prepared_headers, transport, upstream_profile);
+        overlay::apply(object, &mut prepared_headers, transport, upstream_profile)?;
     let encoded = serde_json::to_vec(&value).map_err(|_| ())?;
     if encoded.len() > max_bytes {
         return Err(());
@@ -199,3 +199,7 @@ mod emulation_overlay_tests;
 #[cfg(test)]
 #[path = "request_emulation_protocol_tests.rs"]
 mod emulation_protocol_tests;
+
+#[cfg(test)]
+#[path = "request_instructions_tests.rs"]
+mod instructions_tests;

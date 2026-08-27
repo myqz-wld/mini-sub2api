@@ -280,6 +280,7 @@ func responsesProfileShellBoundariesValid(input any) bool {
 
 func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, websocket, subscription bool) {
 	t.Helper()
+	model, _ := value["model"].(string)
 	for _, field := range []string{
 		"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store",
 		"stream_options", "include", "service_tier", "text", "context_management",
@@ -355,6 +356,7 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 		if _, exists := value["instructions"]; exists {
 			t.Fatal("Lite profile kept top-level instructions")
 		}
+		assertCodexBaseDeveloperMessage(t, value["input"], model)
 		return
 	}
 	for _, field := range []string{"instructions", "tools", "prompt_cache_key", "client_metadata"} {
@@ -362,6 +364,7 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 			t.Fatalf("normal profile removed Responses field %q", field)
 		}
 	}
+	assertCodexBaseInstructions(t, value["instructions"], model)
 }
 
 func responsesProfileToolBoundariesValid(value any) bool {

@@ -159,6 +159,15 @@ emulation maps message role `system` to `developer` and removes output-cap/sampl
 the Subscription endpoint rejects: `max_output_tokens`, `temperature`, and `top_p`. API-key
 profiles preserve those explicit fields and roles.
 
+Both emulated profiles pin the model-specific Codex `0.149.0` default base prompt. Normal Responses
+replaces top-level `instructions` with that prompt and moves a non-empty caller customization into
+a leading `developer` input message. Responses Lite emits `additional_tools`, the canonical base
+prompt as a `developer` message, then the caller customization and original input; its top-level
+`instructions` remains absent. Existing known `0.149.0` prompts are replaced rather than duplicated,
+and an incremental Lite WebSocket frame does not repeat the established prompt. Model prefix and
+single-namespace lookup follows the pinned catalog, with its bundled fallback for unknown models.
+`BareOpenAi` remains byte-transparent and does not receive these prompts.
+
 `CodexOpenAi149` and `CodexSubscription149` both replace caller identity with
 `codex_cli_rs/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal>`,
 `originator: codex_cli_rs`, and `version: 0.149.0`. The runtime platform snapshot is captured on
@@ -286,3 +295,9 @@ boundary from the stock CLI client.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.
+
+## Disclaimer
+
+This project is intended solely for personal learning and research. It is not an official OpenAI
+product and is not intended for commercial or production use. Users are responsible for complying
+with applicable laws and the terms of any services they access.
