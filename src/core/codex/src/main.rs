@@ -30,6 +30,7 @@ mod responses_websocket_projection;
 mod responses_websocket_reuse;
 mod responses_websocket_state;
 mod server;
+mod terminal_detection;
 #[cfg(test)]
 mod test_support;
 mod transport_registry;

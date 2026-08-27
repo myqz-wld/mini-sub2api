@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +89,11 @@ func assertCodexOpenAIProfileCapture(t *testing.T, capture routingMatrixCapture)
 		capture.Headers.Get("X-Codex-Routing-Hint") != "" {
 		t.Fatal("Codex API-key profile crossed a subscription credential boundary")
 	}
+	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+		capture.Headers.Get("Version") != "0.149.0" {
+		t.Fatalf("Codex API-key identity headers = %#v", capture.Headers)
+	}
+	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
 }
 
 func assertSubscriptionCapture(
@@ -101,10 +107,10 @@ func assertSubscriptionCapture(
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
-		capture.Headers.Get("Version") != "0.149.0" ||
-		capture.Headers.Get("User-Agent") != canonicalSubscriptionUserAgent {
+		capture.Headers.Get("Version") != "0.149.0" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
+	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
 	if capture.Headers.Get("OpenAI-Organization") != "" ||
 		capture.Headers.Get("OpenAI-Project") != "" ||
 		capture.Headers.Get("X-Stainless-Lang") != "" {
@@ -120,6 +126,14 @@ func assertSubscriptionCapture(
 	}
 	if capture.Headers.Get("X-Codex-Routing-Hint") == "" {
 		t.Fatalf("subscription routing hint is missing: %#v", capture.Headers)
+	}
+}
+
+func assertRuntimeCodexUserAgent(t *testing.T, value string) {
+	t.Helper()
+	if !strings.HasPrefix(value, "codex_cli_rs/0.149.0 (") ||
+		!strings.Contains(value, "; ") || !strings.Contains(value, ") ") {
+		t.Fatalf("runtime Codex User-Agent = %q", value)
 	}
 }
 

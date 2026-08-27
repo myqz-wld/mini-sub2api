@@ -1,6 +1,7 @@
 use crate::codex_auth_import;
 use crate::fingerprint::FingerprintMode;
 use crate::http_client::apply_loopback_proxy_policy;
+use crate::http_client::native_tls_builder;
 use crate::oauth;
 use crate::oauth::LoginFlow;
 use crate::oauth::OAuthConfig;
@@ -14,7 +15,6 @@ use anyhow::Result;
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
-use reqwest::Client;
 use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -243,7 +243,7 @@ impl CredentialCommand {
                     }
                 };
                 let client = apply_loopback_proxy_policy(
-                    Client::builder()
+                    native_tls_builder()
                         .connect_timeout(Duration::from_secs(15))
                         .redirect(reqwest::redirect::Policy::none()),
                     &issuer,

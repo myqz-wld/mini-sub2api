@@ -159,10 +159,11 @@ emulation maps message role `system` to `developer` and removes output-cap/sampl
 the Subscription endpoint rejects: `max_output_tokens`, `temperature`, and `top_p`. API-key
 profiles preserve those explicit fields and roles.
 
-`CodexOpenAi149` pins `version: 0.149.0`. Subscription requests additionally use the fixed identity
-`codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
-`originator: codex_cli_rs`, and `version: 0.149.0`. Subscription identifiers are isolated with
-account/key-scoped UUIDv8 pseudonyms; `device` converges installation per account.
+`CodexOpenAi149` and `CodexSubscription149` both replace caller identity with
+`codex_cli_rs/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal>`,
+`originator: codex_cli_rs`, and `version: 0.149.0`. The runtime platform snapshot is captured on
+first use and shared for the life of the core process. Subscription identifiers are additionally
+isolated with account/key-scoped UUIDv8 pseudonyms; `device` converges installation per account.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
@@ -270,10 +271,11 @@ Operational boundaries:
   and `deliveryState`; mid-stream HTTP failures use trailers and upgraded WebSockets use close code
   `4500` with the same JSON tuple. Treat `ambiguous` as possibly delivered and never auto-retry it.
 
-Connection pools are credential-isolated. HTTP uses platform TLS; provider WebSockets use the
-pinned `0.149.0` AWS-LC/native-root stack, fork revisions, compression offer, header order, and
-fresh TLS state. OAuth routes exclude API-key organization/SDK headers and retain only allowlisted
-Cloudflare infrastructure cookies.
+Connection pools are credential-isolated. Every provider HTTP client explicitly selects
+reqwest/native-tls so its ClientHello follows the deployment runtime; provider WebSockets retain the
+pinned `0.149.0` AWS-LC/native-root stack, PQ-first groups, absent ALPN, fork revisions, compression
+offer, header order, and fresh TLS state. OAuth routes exclude API-key organization/SDK headers and
+retain only allowlisted Cloudflare infrastructure cookies.
 
 Compatibility is exact for request state that a `0.149.0` client supplies or the gateway can derive.
 The gateway does not fabricate absent caller workspace, sandbox, thread-source, trace, attestation,
