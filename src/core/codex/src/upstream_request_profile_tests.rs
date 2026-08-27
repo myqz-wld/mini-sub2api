@@ -68,8 +68,13 @@ fn codex_openai_profile_keeps_http_body_uncompressed() {
 }
 
 #[test]
-fn codex_openai_profile_pins_version_and_fills_other_missing_identity_headers() {
+fn codex_openai_profile_replaces_the_complete_client_identity() {
     let mut inbound = HeaderMap::new();
+    inbound.insert(
+        http::header::USER_AGENT,
+        HeaderValue::from_static("codex_exec/9.9.9 (Mac OS 15.0.0; arm64) Apple_Terminal"),
+    );
+    inbound.insert("originator", HeaderValue::from_static("codex_exec"));
     inbound.insert(
         CODEX_VERSION_HEADER,
         HeaderValue::from_static("caller-version-must-not-survive"),
@@ -118,6 +123,20 @@ fn codex_openai_profile_pins_version_and_fills_other_missing_identity_headers() 
         1024,
     )
     .expect("Codex OpenAI WebSocket request");
+    assert_eq!(
+        websocket
+            .headers()
+            .get(http::header::USER_AGENT)
+            .and_then(|value| value.to_str().ok()),
+        Some(crate::codex_user_agent::canonical_value().as_str())
+    );
+    assert_eq!(
+        websocket
+            .headers()
+            .get("originator")
+            .and_then(|value| value.to_str().ok()),
+        Some(DEFAULT_CODEX_ORIGINATOR)
+    );
     assert_eq!(
         websocket
             .headers()

@@ -16,8 +16,6 @@ import (
 	"mini-sub2api/src/coordinator/internal/storage"
 )
 
-const canonicalSubscriptionUserAgent = "codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color"
-
 type routingMatrixCapture struct {
 	Headers http.Header
 	Body    []byte
@@ -120,6 +118,19 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 		functionTools[0],
 		map[string]any{"type": "web_search_preview", "search_context_size": "low"},
 	}
+	var runtimeCodexUserAgent string
+	assertSharedRuntimeUserAgent := func(t *testing.T, capture routingMatrixCapture) {
+		t.Helper()
+		value := capture.Headers.Get("User-Agent")
+		assertRuntimeCodexUserAgent(t, value)
+		if runtimeCodexUserAgent == "" {
+			runtimeCodexUserAgent = value
+			return
+		}
+		if value != runtimeCodexUserAgent {
+			t.Fatalf("runtime Codex User-Agent changed: got %q want %q", value, runtimeCodexUserAgent)
+		}
+	}
 
 	pureAPIBody := mustRequestJSON(t, map[string]any{
 		"model": "gpt-5.4", "input": messages, "tools": []any{}, "stream": false,
@@ -205,11 +216,10 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			wantRoute: "Codex OpenAI 0.149",
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertCodexOpenAIProfileCapture(t, capture)
-				if capture.Headers.Get("Originator") != "codex_exec" ||
-					capture.Headers.Get("Session-Id") != "api-key-session" ||
+				assertSharedRuntimeUserAgent(t, capture)
+				if capture.Headers.Get("Session-Id") != "api-key-session" ||
 					capture.Headers.Get("Version") != "0.149.0" ||
-					capture.Headers.Get("X-Openai-Subagent") != "review" ||
-					capture.Headers.Get("User-Agent") != "codex_cli_rs/9.9.9 routing-matrix" {
+					capture.Headers.Get("X-Openai-Subagent") != "review" {
 					t.Fatalf("Codex API headers = %#v", capture.Headers)
 				}
 			},
@@ -226,6 +236,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			wantRoute: "Codex Sub lite",
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertSubscriptionCapture(t, capture, oauthAccessToken, accountID)
+				assertSharedRuntimeUserAgent(t, capture)
 				assertLiteSubscriptionBody(t, capture.Body, messages, mixedTools)
 				if capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "true" {
 					t.Fatalf("missing lite header: %#v", capture.Headers)
@@ -240,6 +251,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			wantRoute: "Codex Sub non-lite",
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertSubscriptionCapture(t, capture, oauthAccessToken, accountID)
+				assertSharedRuntimeUserAgent(t, capture)
 				assertNonLiteSubscriptionBody(t, capture.Body, messages, functionTools)
 				if capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "" {
 					t.Fatalf("unexpected lite header: %#v", capture.Headers)
@@ -258,11 +270,11 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			wantRoute: "Codex Sub native",
 			assert: func(t *testing.T, capture routingMatrixCapture) {
 				assertSubscriptionCapture(t, capture, oauthAccessToken, accountID)
+				assertSharedRuntimeUserAgent(t, capture)
 				assertNativeSubscriptionBody(t, capture.Body, messages)
 				if capture.Headers.Get("Originator") != "codex_cli_rs" ||
 					!isUUIDv8(capture.Headers.Get("Session-Id")) ||
-					capture.Headers.Get("X-Openai-Subagent") != "review" ||
-					capture.Headers.Get("User-Agent") != canonicalSubscriptionUserAgent {
+					capture.Headers.Get("X-Openai-Subagent") != "review" {
 					t.Fatalf("native subscription headers = %#v", capture.Headers)
 				}
 			},

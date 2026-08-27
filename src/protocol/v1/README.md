@@ -109,13 +109,12 @@ internal account reference:
 `Originator` selects formatting only. It never grants credential/account permissions or changes the
 selected credential. `BareOpenAi` preserves reviewed HTTP body and WebSocket text-frame bytes.
 Both Codex profiles make a minimal `0.149.0` overlay while retaining OpenAI API-key versus ChatGPT
-subscription authentication boundaries. `CodexOpenAi149` pins `version: 0.149.0` while filling
-other missing Codex identity defaults. Only `CodexSubscription149` constructs
-`ChatGPT-Account-ID` and replaces `User-Agent`, `originator`, and `version` with one canonical
-identity. `OpenAI-Organization`, `OpenAI-Project`, and the explicitly reviewed `X-Stainless-*`
-headers reach only API-key upstreams. Both layers remove cookies, proxy authentication, forwarding
-headers, content length, transfer encoding, connection-specific headers, unknown `X-Stainless-*`
-headers, and any unreviewed `X-Mini-Sub2Api-*` header.
+subscription authentication boundaries. They replace `User-Agent`, `originator`, and `version` with
+one runtime-derived canonical identity. Only `CodexSubscription149` constructs
+`ChatGPT-Account-ID`. `OpenAI-Organization`, `OpenAI-Project`, and the explicitly reviewed
+`X-Stainless-*` headers reach only API-key upstreams. Both layers remove cookies, proxy
+authentication, forwarding headers, content length, transfer encoding, connection-specific
+headers, unknown `X-Stainless-*` headers, and any unreviewed `X-Mini-Sub2Api-*` header.
 
 Codex emulation begins with the full caller object, not a top-level field whitelist. Except for the
 target-specific compatibility exceptions below, explicit Responses fields—including
@@ -140,11 +139,12 @@ Responses Lite leaves omitted detail absent while preserving an explicit support
 are public Responses controls but are rejected by the fixed Subscription target. API-key profiles
 retain them.
 
-For subscription upstreams, the core replaces the complete client identity with
-`User-Agent: codex_cli_rs/0.149.0 (Ubuntu 22.4.0; x86_64) xterm-256color`,
-`originator: codex_cli_rs`, and `version: 0.149.0`. The same normalization function feeds HTTP and
-WebSocket construction; no inbound product, platform suffix, originator, or version survives.
-`CodexSubscription149` HTTP additionally pins `Accept: text/event-stream`,
+For both Codex-emulated profiles, the core replaces the complete client identity with
+`User-Agent: codex_cli_rs/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal>`,
+`originator: codex_cli_rs`, and `version: 0.149.0`. OS, architecture, and terminal are captured on
+first use once per core process. The same normalization function feeds HTTP and WebSocket construction; no inbound
+product, platform suffix, originator, or version survives. `CodexSubscription149` HTTP additionally
+pins `Accept: text/event-stream`,
 `Content-Type: application/json`, and level-3 zstd. `CodexOpenAi149` HTTP is deliberately not
 zstd-compressed and retains API-key authentication; it must not inherit subscription-only account
 or identity permissions.
@@ -172,8 +172,9 @@ random pseudonym seed is persisted. New sidecars default to `device`. `BareOpenA
 WebSocket application frames remain byte-exact in both modes; `CodexOpenAi149` is emulated without
 subscription identity projection.
 
-One credential owns independent HTTP and WebSocket connection pools. HTTP uses transport-default
-TLS; provider WebSocket uses AWS-LC rustls with native roots, a PQ-first key-group list, and an
+One credential owns independent HTTP and WebSocket connection pools. HTTP explicitly selects
+reqwest/native-tls from the deployment runtime; provider WebSocket uses AWS-LC rustls with native
+roots, a PQ-first key-group list, and an
 HTTP/1 handshake without an ALPN offer. These fixed builders are the Codex `0.149.0` compatibility
 split and do not vary by credential; TLS session state is fresh for every provider WebSocket.
 Provider WebSockets use the same pinned OpenAI
@@ -248,7 +249,8 @@ for the first `response.create` so its model and service tier can drive the prov
   Other valid application events do not trigger this stale-policy check; only simulated
   `response.inject` receives schema filtering instead of byte-exact relay.
 - Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
-  `ChatGPT-Account-ID` and the canonical fixed identity triplet. OAuth header emission retains the
+  `ChatGPT-Account-ID`; both Codex profiles use the runtime-derived canonical identity triplet.
+  OAuth header emission retains the
   reviewed provider/extra/default/auth construction with one default-originator layout.
 - The public coordinator and provider hops may negotiate per-message deflate. The provider sends
   the Codex `0.149.0` offer `permessage-deflate; client_max_window_bits`; the authenticated internal

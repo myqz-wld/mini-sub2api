@@ -1,5 +1,6 @@
 use crate::cloudflare_cookies;
 use crate::http_client::has_literal_loopback_host;
+use crate::http_client::native_tls_builder;
 use crate::websocket_connector::WebSocketConnector;
 use anyhow::Context;
 use anyhow::Result;
@@ -149,11 +150,12 @@ impl TransportFactory {
         })
     }
 
-    /// Deliberately leaves reqwest on its platform transport-default TLS backend.
+    /// Match Codex HTTP with the deployment platform's native TLS backend. WebSocket TLS remains
+    /// on its separate explicit AWS-LC rustls configuration below.
     fn http_builder(&self) -> ClientBuilder {
         cloudflare_cookies::apply(
             self.apply_explicit_test_proxy(
-                Client::builder()
+                native_tls_builder()
                     .connect_timeout(CONNECT_TIMEOUT)
                     .read_timeout(HTTP_READ_TIMEOUT)
                     .redirect(reqwest::redirect::Policy::none()),

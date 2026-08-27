@@ -128,9 +128,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 		capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "true" {
 		t.Fatalf("subscription markers = %#v", capture.Headers)
 	}
-	if capture.Headers.Get("User-Agent") != canonicalSubscriptionUserAgent {
-		t.Fatalf("subscription User-Agent = %q", capture.Headers.Get("User-Agent"))
-	}
+	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
 	if capture.Headers.Get("Content-Encoding") != "zstd" {
 		t.Fatalf("subscription Content-Encoding = %q", capture.Headers.Get("Content-Encoding"))
 	}

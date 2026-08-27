@@ -383,7 +383,6 @@ fn authenticated_headers(
             for name in ["x-codex-installation-id", "session_id", "conversation_id"] {
                 headers.remove(name);
             }
-            crate::codex_user_agent::pin_subscription(&mut headers)?;
             token
         }
         ResolvedAuth::OpenAiApiKey { token } => token,
@@ -448,25 +447,10 @@ fn apply_profile_identity(
     headers: &mut HeaderMap,
     profile: UpstreamProfile,
 ) -> Result<(), CoreFailure> {
-    if profile != UpstreamProfile::CodexOpenAi149 {
+    if !profile.emulates_codex() {
         return Ok(());
     }
-    if !headers.contains_key("originator") {
-        headers.insert(
-            "originator",
-            HeaderValue::from_static(DEFAULT_CODEX_ORIGINATOR),
-        );
-    }
-    headers.insert(
-        CODEX_VERSION_HEADER,
-        HeaderValue::from_static(CODEX_COMPATIBILITY_VERSION),
-    );
-    if !headers.contains_key(http::header::USER_AGENT) {
-        let value = HeaderValue::from_str(crate::codex_user_agent::canonical_value().as_str())
-            .map_err(|_| CoreFailure::Internal)?;
-        headers.insert(http::header::USER_AGENT, value);
-    }
-    Ok(())
+    crate::codex_user_agent::pin_codex_identity(headers)
 }
 
 fn forwarded_headers(source: &HeaderMap, auth: &ResolvedAuth) -> HeaderMap {

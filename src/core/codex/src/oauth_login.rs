@@ -1,5 +1,6 @@
 use crate::http_body::decode_auth_json;
 use crate::http_client::apply_loopback_proxy_policy;
+use crate::http_client::native_tls_builder;
 use crate::oauth::LoginFlow;
 use crate::oauth::OAuthConfig;
 use crate::oauth::Pkce;
@@ -58,7 +59,7 @@ pub(crate) async fn login(
     validate_auth_url(&config.issuer)?;
     validate_auth_url(&config.upstream_url)?;
     let client = apply_loopback_proxy_policy(
-        Client::builder()
+        native_tls_builder()
             .connect_timeout(Duration::from_secs(15))
             .redirect(reqwest::redirect::Policy::none()),
         &config.issuer,
