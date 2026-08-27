@@ -79,8 +79,11 @@ fn gpt_5_2_preserves_explicit_null_public_members() {
     assert!(value["text"].is_null());
     assert!(value["tool_choice"].is_null());
     assert!(value["parallel_tool_calls"].is_null());
+    assert_eq!(
+        value["instructions"],
+        crate::codex_instructions::for_model("gpt-5.2")
+    );
     for name in [
-        "instructions",
         "tools",
         "stream_options",
         "service_tier",

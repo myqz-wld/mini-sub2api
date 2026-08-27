@@ -1,0 +1,5 @@
+# These compatibility prompts are byte-exact copies from Codex 0.149.0 and intentionally retain
+# upstream line endings and trailing spaces protected by SHA-256 tests.
+src/core/codex/prompts/codex-0.149.0/gpt-*.md whitespace=-trailing-space
+src/core/codex/prompts/codex-0.149.0/fallback.md whitespace=-trailing-space
+src/core/codex/prompts/codex-0.149.0/exp-codex-personality.md whitespace=-trailing-space

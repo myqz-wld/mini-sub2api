@@ -53,10 +53,24 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
         .as_object()
         .expect("caller object")
         .iter()
-        .filter(|(name, _)| !matches!(name.as_str(), "future_top_level" | "tools"))
+        .filter(|(name, _)| {
+            !matches!(
+                name.as_str(),
+                "future_top_level" | "instructions" | "input" | "tools"
+            )
+        })
     {
         assert_eq!(&normalized[name], expected, "explicit field {name}");
     }
+    assert_eq!(
+        normalized["instructions"],
+        crate::codex_instructions::for_model("gpt-5.4")
+    );
+    assert_eq!(normalized["input"][0]["role"], "developer");
+    assert_eq!(
+        normalized["input"][0]["content"][0]["text"],
+        "caller instructions"
+    );
     assert!(normalized.get("future_top_level").is_none());
     assert_eq!(normalized["metadata"]["public"], "metadata");
     assert!(
@@ -201,7 +215,16 @@ fn lite_relocation_preserves_controls_and_filters_structured_tools() {
             .is_none()
     );
     assert_eq!(namespace["tools"][1]["format"]["definition"], "start: WORD");
-    assert_eq!(normalized["input"][1]["role"], "developer");
+    assert_eq!(
+        normalized["input"][1]["content"][0]["text"],
+        crate::codex_instructions::for_model("gpt-5.6-sol")
+    );
+    assert_eq!(normalized["input"][2]["role"], "developer");
+    assert_eq!(
+        normalized["input"][2]["content"][0]["text"],
+        "developer guidance"
+    );
+    assert_eq!(normalized["input"][3]["role"], "user");
     assert_eq!(normalized["store"], true);
     assert_eq!(normalized["stream"], false);
     assert_eq!(normalized["parallel_tool_calls"], true);

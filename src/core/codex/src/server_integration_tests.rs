@@ -320,7 +320,13 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     );
     assert_eq!(normalized["input"][0]["tools"][1], tools[1]);
     assert_eq!(normalized["input"][1]["role"], "developer");
-    assert_eq!(normalized["input"][2]["role"], "user");
+    assert_eq!(
+        normalized["input"][1]["content"][0]["text"],
+        crate::codex_instructions::for_model("gpt-5.6-sol")
+    );
+    assert_eq!(normalized["input"][2]["role"], "developer");
+    assert_eq!(normalized["input"][2]["content"][0]["text"], "Be concise");
+    assert_eq!(normalized["input"][3]["role"], "user");
     assert_eq!(normalized["store"], false);
     assert!(normalized.get("max_output_tokens").is_none());
     assert!(
