@@ -124,7 +124,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 		capture.Headers.Get("ChatGPT-Account-ID") != accountID {
 		t.Fatal("subscription authorization was not rebuilt")
 	}
-	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+	if capture.Headers.Get("Originator") != "codex-tui" ||
 		capture.Headers.Get("X-OpenAI-Internal-Codex-Responses-Lite") != "true" {
 		t.Fatalf("subscription markers = %#v", capture.Headers)
 	}

@@ -153,8 +153,8 @@ customization fails closed, and the final expanded body remains subject to the c
 limit. `BareOpenAi` is not parsed or prompted.
 
 For both Codex-emulated profiles, the core replaces the complete client identity with
-`User-Agent: codex_cli_rs/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal>`,
-`originator: codex_cli_rs`, and `version: 0.149.0`. OS, architecture, and terminal are captured on
+`User-Agent: codex-tui/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal> (codex-tui; 0.149.0)`,
+`originator: codex-tui`, and `version: 0.149.0`. OS, architecture, and terminal are captured on
 first use once per core process. The same normalization function feeds HTTP and WebSocket construction; no inbound
 product, platform suffix, originator, or version survives. `CodexSubscription149` HTTP additionally
 pins `Accept: text/event-stream`,

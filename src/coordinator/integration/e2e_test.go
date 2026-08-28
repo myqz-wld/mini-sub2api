@@ -278,7 +278,7 @@ func (m *mockUpstream) assertAuthBoundaries(t *testing.T, downstreamSecrets []st
 		}
 		if capture.Authorization == "Bearer "+m.oldAccess ||
 			capture.Authorization == "Bearer "+m.newAccess {
-			if capture.AccountID != "chatgpt-e2e-account" || capture.Originator != "codex_cli_rs" ||
+			if capture.AccountID != "chatgpt-e2e-account" || capture.Originator != "codex-tui" ||
 				capture.Encoding != "zstd" {
 				t.Fatalf("OAuth headers = %#v", capture)
 			}

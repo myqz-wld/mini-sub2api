@@ -388,7 +388,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     assert_ne!(header_turn["session_id"], "header-session-kept");
     assert!(header_turn.get("future").is_none());
     for (name, expected) in [
-        ("originator", "codex_cli_rs"),
+        ("originator", "codex-tui"),
         ("x-openai-internal-codex-responses-lite", "true"),
     ] {
         assert_eq!(

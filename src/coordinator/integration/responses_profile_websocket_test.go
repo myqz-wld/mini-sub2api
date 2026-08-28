@@ -385,7 +385,7 @@ func assertWebSocketProfileCredentialBoundary(
 		t.Fatal("WebSocket application frames used HTTP zstd compression")
 	}
 	if subscription {
-		if capture.Headers.Get("ChatGPT-Account-ID") == "" || capture.Headers.Get("Originator") != "codex_cli_rs" {
+		if capture.Headers.Get("ChatGPT-Account-ID") == "" || capture.Headers.Get("Originator") != "codex-tui" {
 			t.Fatal("subscription WebSocket profile lost canonical credential identity")
 		}
 		return

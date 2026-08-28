@@ -91,7 +91,7 @@ func assertCodexOpenAIProfileCapture(t *testing.T, capture routingMatrixCapture)
 		capture.Headers.Get("X-Codex-Routing-Hint") != "" {
 		t.Fatal("Codex API-key profile crossed a subscription credential boundary")
 	}
-	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+	if capture.Headers.Get("Originator") != "codex-tui" ||
 		capture.Headers.Get("Version") != "0.149.0" {
 		t.Fatalf("Codex API-key identity headers = %#v", capture.Headers)
 	}
@@ -108,7 +108,7 @@ func assertSubscriptionCapture(
 		capture.Headers.Get("ChatGPT-Account-ID") != wantAccountID {
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
-	if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+	if capture.Headers.Get("Originator") != "codex-tui" ||
 		capture.Headers.Get("Version") != "0.149.0" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
@@ -133,8 +133,9 @@ func assertSubscriptionCapture(
 
 func assertRuntimeCodexUserAgent(t *testing.T, value string) {
 	t.Helper()
-	if !strings.HasPrefix(value, "codex_cli_rs/0.149.0 (") ||
-		!strings.Contains(value, "; ") || !strings.Contains(value, ") ") {
+	if !strings.HasPrefix(value, "codex-tui/0.149.0 (") ||
+		!strings.Contains(value, "; ") || !strings.Contains(value, ") ") ||
+		!strings.HasSuffix(value, " (codex-tui; 0.149.0)") {
 		t.Fatalf("runtime Codex User-Agent = %q", value)
 	}
 }
