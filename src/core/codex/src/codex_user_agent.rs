@@ -17,9 +17,13 @@ static PLATFORM_SUFFIX: LazyLock<String> = LazyLock::new(|| {
 });
 
 pub(crate) fn canonical_value() -> String {
+    canonical_value_for_platform(PLATFORM_SUFFIX.as_str())
+}
+
+fn canonical_value_for_platform(platform_suffix: &str) -> String {
     sanitize_header_value(format!(
-        "{DEFAULT_CODEX_ORIGINATOR}/{CODEX_COMPATIBILITY_VERSION} {}",
-        PLATFORM_SUFFIX.as_str()
+        "{DEFAULT_CODEX_ORIGINATOR}/{CODEX_COMPATIBILITY_VERSION} {platform_suffix} \
+         ({DEFAULT_CODEX_ORIGINATOR}; {CODEX_COMPATIBILITY_VERSION})"
     ))
 }
 
@@ -65,6 +69,15 @@ mod tests {
         assert_eq!(
             platform_suffix("Ubuntu", "24.4.0", "aarch64", "unknown"),
             "(Ubuntu 24.4.0; aarch64) unknown"
+        );
+    }
+
+    #[test]
+    fn formats_the_codex_tui_identity_like_codex_0149() {
+        assert_eq!(
+            canonical_value_for_platform("(Mac OS 15.6.1; arm64) Apple_Terminal"),
+            "codex-tui/0.149.0 (Mac OS 15.6.1; arm64) Apple_Terminal \
+             (codex-tui; 0.149.0)"
         );
     }
 

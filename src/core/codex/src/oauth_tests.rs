@@ -71,6 +71,8 @@ fn refresh_and_revoke_requests_use_codex_identity_headers() {
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("codex_cli_rs/0.149.0 ("))
+            .is_some_and(|value| {
+                value.starts_with("codex-tui/0.149.0 (") && value.ends_with(" (codex-tui; 0.149.0)")
+            })
     );
 }

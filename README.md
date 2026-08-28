@@ -169,8 +169,8 @@ single-namespace lookup follows the pinned catalog, with its bundled fallback fo
 `BareOpenAi` remains byte-transparent and does not receive these prompts.
 
 `CodexOpenAi149` and `CodexSubscription149` both replace caller identity with
-`codex_cli_rs/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal>`,
-`originator: codex_cli_rs`, and `version: 0.149.0`. The runtime platform snapshot is captured on
+`codex-tui/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal> (codex-tui; 0.149.0)`,
+`originator: codex-tui`, and `version: 0.149.0`. The runtime platform snapshot is captured on
 first use and shared for the life of the core process. Subscription identifiers are additionally
 isolated with account/key-scoped UUIDv8 pseudonyms; `device` converges installation per account.
 

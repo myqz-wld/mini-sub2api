@@ -19,7 +19,7 @@ pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.149.0";
 pub(crate) const CODEX_VERSION_HEADER: &str = "version";
 pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
 pub(crate) const CODEX_ROUTING_HINT_HEADER: &str = "x-codex-routing-hint";
-pub(crate) const DEFAULT_CODEX_ORIGINATOR: &str = "codex_cli_rs";
+pub(crate) const DEFAULT_CODEX_ORIGINATOR: &str = "codex-tui";
 
 const COMMON_ALLOWED: &[&str] = &[
     CODEX_VERSION_HEADER,

@@ -136,14 +136,16 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
             .headers()
             .get("originator")
             .and_then(|value| value.to_str().ok()),
-        Some("codex_cli_rs")
+        Some("codex-tui")
     );
     assert!(
         request
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("codex_cli_rs/0.149.0 ("))
+            .is_some_and(|value| {
+                value.starts_with("codex-tui/0.149.0 (") && value.ends_with(" (codex-tui; 0.149.0)")
+            })
     );
     assert_eq!(
         request

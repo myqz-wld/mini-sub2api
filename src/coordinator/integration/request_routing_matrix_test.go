@@ -277,7 +277,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				assertSubscriptionCapture(t, capture, oauthAccessToken, accountID)
 				assertSharedRuntimeUserAgent(t, capture)
 				assertNativeSubscriptionBody(t, capture.Body, messages)
-				if capture.Headers.Get("Originator") != "codex_cli_rs" ||
+				if capture.Headers.Get("Originator") != "codex-tui" ||
 					!isUUIDv8(capture.Headers.Get("Session-Id")) ||
 					capture.Headers.Get("X-Openai-Subagent") != "review" {
 					t.Fatalf("native subscription headers = %#v", capture.Headers)
