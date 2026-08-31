@@ -77,7 +77,10 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
                             header_text(&headers, "chatgpt-account-id").as_deref(),
                             Some("chatgpt-server-test")
                         );
-                        (StatusCode::OK, "refreshed response")
+                        (
+                            StatusCode::OK,
+                            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refreshed\",\"object\":\"response\"}}\n\n",
+                        )
                     },
                 ),
             )
@@ -132,7 +135,10 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
     let body = to_bytes(response.into_body(), 1024)
         .await
         .expect("response body");
-    assert_eq!(body, Bytes::from_static(b"refreshed response"));
+    assert_eq!(
+        body,
+        Bytes::from_static(br#"{"id":"resp_refreshed","object":"response"}"#)
+    );
     assert_eq!(mock_state.inference_calls.load(Ordering::SeqCst), 2);
     assert_eq!(mock_state.refresh_calls.load(Ordering::SeqCst), 1);
     let fingerprint_headers = mock_state.fingerprint_headers.lock().await;
@@ -157,6 +163,8 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
     let decoded = zstd::stream::decode_all(std::io::Cursor::new(bodies[0].as_ref()))
         .expect("decompress replay body");
     let decoded: serde_json::Value = serde_json::from_slice(&decoded).expect("request JSON");
+    assert_eq!(decoded["store"], false);
+    assert_eq!(decoded["stream"], true);
     assert_eq!(
         decoded["client_metadata"]["x-codex-installation-id"].as_str(),
         Some(expected_device.as_str())
@@ -207,7 +215,10 @@ async fn concurrent_oauth_401s_share_one_forced_refresh() {
                         }
                         let expected = format!("Bearer {}", state.new_access);
                         assert_eq!(auth.as_deref(), Some(expected.as_str()));
-                        (StatusCode::OK, "refreshed response")
+                        (
+                            StatusCode::OK,
+                            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refreshed\",\"object\":\"response\"}}\n\n",
+                        )
                     },
                 ),
             )

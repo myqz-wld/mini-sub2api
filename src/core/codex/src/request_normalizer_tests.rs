@@ -116,7 +116,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
                 .is_number()
         );
     }
-    assert_eq!(value["store"], true);
+    assert_eq!(value["store"], false);
     assert_eq!(value["stream"], true);
     assert_eq!(value["tool_choice"], "auto");
     assert_eq!(value["parallel_tool_calls"], false);

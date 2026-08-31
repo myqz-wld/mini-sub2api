@@ -27,7 +27,7 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     assert!(http.value.get("stream_id").is_none());
     assert!(http.value.get("state").is_none());
     assert_eq!(http.value["background"], true);
-    assert_eq!(http.value["stream"], false);
+    assert_eq!(http.value["stream"], true);
     assert!(http.headers.get("x-codex-routing-hint").is_none());
 
     let websocket = prepare_value(

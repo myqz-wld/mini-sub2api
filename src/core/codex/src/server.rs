@@ -15,7 +15,7 @@ use crate::request_normalizer::prepare_emulated_request;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
 use crate::request_pseudonym::RequestPseudonymizer;
-use crate::response_stream::build_streaming_response;
+use crate::response_stream::build_http_response;
 use crate::response_stream::request_expects_sse;
 use crate::responses_websocket::responses_socket;
 use crate::transport_registry::CredentialTransportContext;
@@ -144,6 +144,7 @@ async fn responses_inner(
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
         .map_err(|_| CoreFailure::InvalidRequest)?;
+    let downstream_expects_sse = request_expects_sse(&body);
     let account_lock = account_lock(state, &account_ref).await;
 
     let _guard = account_lock.lock().await;
@@ -198,8 +199,6 @@ async fn responses_inner(
     } else {
         (forward_headers, body)
     };
-    let expects_sse = request_expects_sse(&body);
-
     let started = Instant::now();
     let mut upstream = send_upstream(
         &resolved.transport,
@@ -235,7 +234,7 @@ async fn responses_inner(
         }
     }
     let ttfb_ms = started.elapsed().as_millis();
-    build_streaming_response(upstream, ttfb_ms, expects_sse)
+    build_http_response(upstream, ttfb_ms, downstream_expects_sse, profile).await
 }
 
 pub(crate) async fn resolve_auth(

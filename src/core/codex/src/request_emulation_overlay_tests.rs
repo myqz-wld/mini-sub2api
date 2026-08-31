@@ -56,7 +56,7 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
         .filter(|(name, _)| {
             !matches!(
                 name.as_str(),
-                "future_top_level" | "instructions" | "input" | "tools"
+                "future_top_level" | "instructions" | "input" | "tools" | "store" | "stream"
             )
         })
     {
@@ -73,6 +73,8 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
     );
     assert!(normalized.get("future_top_level").is_none());
     assert_eq!(normalized["metadata"]["public"], "metadata");
+    assert_eq!(normalized["store"], false);
+    assert_eq!(normalized["stream"], true);
     assert!(
         normalized["tools"][0]
             .get("unsupported_tool_member")
@@ -101,7 +103,7 @@ fn explicit_previous_response_id_survives_http_and_websocket_for_both_profiles()
 }
 
 #[test]
-fn codex_defaults_only_fill_absent_members() {
+fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
     let explicit = serde_json::json!({
         "model": "gpt-5.6-sol",
         "input": [],
@@ -118,8 +120,6 @@ fn codex_defaults_only_fill_absent_members() {
     });
     let normalized = prepare_openai(explicit.clone(), EmulationTransport::Http);
     for name in [
-        "store",
-        "stream",
         "tool_choice",
         "parallel_tool_calls",
         "reasoning",
@@ -131,6 +131,8 @@ fn codex_defaults_only_fill_absent_members() {
     ] {
         assert_eq!(normalized[name], explicit[name], "explicit field {name}");
     }
+    assert_eq!(normalized["store"], false);
+    assert_eq!(normalized["stream"], true);
 
     let defaults = prepare_openai(
         serde_json::json!({"model":"gpt-5.4","input":[]}),
@@ -225,8 +227,8 @@ fn lite_relocation_preserves_controls_and_filters_structured_tools() {
         "developer guidance"
     );
     assert_eq!(normalized["input"][3]["role"], "user");
-    assert_eq!(normalized["store"], true);
-    assert_eq!(normalized["stream"], false);
+    assert_eq!(normalized["store"], false);
+    assert_eq!(normalized["stream"], true);
     assert_eq!(normalized["parallel_tool_calls"], true);
     assert!(normalized.get("future_top_level").is_none());
 }

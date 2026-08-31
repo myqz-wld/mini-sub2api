@@ -159,6 +159,13 @@ emulation maps message role `system` to `developer` and removes output-cap/sampl
 the Subscription endpoint rejects: `max_output_tokens`, `temperature`, and `top_p`. API-key
 profiles preserve those explicit fields and roles.
 
+Both emulated HTTP profiles always send `store: false`, `stream: true`, and
+`Accept: text/event-stream` upstream. The gateway reads the caller's original `stream` preference
+before applying that wire override: `stream: true` remains an SSE response, while an omitted or
+false value is assembled from the terminal upstream SSE event and returned as an ordinary
+`application/json` Responses object, with a 64 MiB aggregation limit. `BareOpenAi` remains
+byte-transparent and keeps the public OpenAI request/response behavior unchanged.
+
 Both emulated profiles pin the model-specific Codex `0.149.0` default base prompt. Normal Responses
 replaces top-level `instructions` with that prompt and moves a non-empty caller customization into
 a leading `developer` input message. Responses Lite emits `additional_tools`, the canonical base

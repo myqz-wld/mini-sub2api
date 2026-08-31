@@ -139,6 +139,14 @@ Responses Lite leaves omitted detail absent while preserving an explicit support
 are public Responses controls but are rejected by the fixed Subscription target. API-key profiles
 retain them.
 
+For HTTP, both Codex-emulated profiles override caller transport controls with `store: false` and
+`stream: true`, and send `Accept: text/event-stream`. The core records the caller's original stream
+preference before normalization. It passes SSE through for `stream: true`, but for an omitted or
+false value it extracts the terminal `response.completed`, `response.failed`, or
+`response.incomplete` response object and returns `application/json`. The bare API-key profile is
+not parsed or converted. Aggregated SSE input is capped at 64 MiB and fails closed when the cap or
+terminal-event contract is violated.
+
 The base prompt is also a fixed part of both Codex-emulated profiles. The core resolves the
 model-specific effective default from the Codex `0.149.0` catalog (including its empty default
 personality substitution), using longest-prefix and single-namespace matching plus the pinned

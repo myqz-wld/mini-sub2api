@@ -206,11 +206,13 @@ pub(crate) fn build(
     validate_profile(auth, profile)?;
     let mut headers = authenticated_headers(inbound_headers, auth)?;
     apply_profile_identity(&mut headers, profile)?;
-    if profile.uses_codex_subscription() {
+    if profile.emulates_codex() {
         headers.insert(
             http::header::ACCEPT,
             HeaderValue::from_static("text/event-stream"),
         );
+    }
+    if profile.uses_codex_subscription() {
         headers.insert(
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
