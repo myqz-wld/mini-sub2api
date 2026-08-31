@@ -1,5 +1,6 @@
 use crate::error::CoreFailure;
 use crate::error::failure;
+use crate::request_profile::UpstreamProfile;
 use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::http::HeaderName;
@@ -19,7 +20,21 @@ use mini_sub2api_protocol_v1::RetryAdvice;
 use std::collections::HashSet;
 use std::convert::Infallible;
 
-pub(crate) fn build_streaming_response(
+const MAX_NON_STREAMING_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+
+pub(crate) async fn build_http_response(
+    upstream: reqwest::Response,
+    ttfb_ms: u128,
+    downstream_expects_sse: bool,
+    profile: UpstreamProfile,
+) -> Result<Response<Body>, CoreFailure> {
+    if profile.emulates_codex() && !downstream_expects_sse && upstream.status().is_success() {
+        return build_non_streaming_response(upstream, ttfb_ms).await;
+    }
+    build_streaming_response(upstream, ttfb_ms, downstream_expects_sse)
+}
+
+fn build_streaming_response(
     upstream: reqwest::Response,
     ttfb_ms: u128,
     expects_sse: bool,
@@ -71,6 +86,82 @@ pub(crate) fn build_streaming_response(
     builder
         .body(Body::new(StreamBody::new(stream)))
         .map_err(|_| CoreFailure::UpstreamResponseFailed)
+}
+
+async fn build_non_streaming_response(
+    upstream: reqwest::Response,
+    ttfb_ms: u128,
+) -> Result<Response<Body>, CoreFailure> {
+    let mut builder = Response::builder().status(upstream.status());
+    let connection_headers = nominated_connection_headers(upstream.headers());
+    for (name, value) in upstream.headers() {
+        if name != http::header::CONTENT_TYPE
+            && name != http::header::CONTENT_ENCODING
+            && is_safe_response_header(name)
+            && !connection_headers.contains(name.as_str())
+        {
+            builder = builder.header(name, value);
+        }
+    }
+    let mut bytes = Vec::new();
+    let mut stream = upstream.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+        append_bounded(&mut bytes, &chunk, MAX_NON_STREAMING_RESPONSE_BYTES)?;
+    }
+    let response = terminal_response_from_sse(&bytes)?;
+    let body = serde_json::to_vec(&response).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    builder
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(CORE_TTFB_HEADER, ttfb_ms.to_string())
+        .body(Body::from(body))
+        .map_err(|_| CoreFailure::UpstreamResponseFailed)
+}
+
+fn append_bounded(
+    destination: &mut Vec<u8>,
+    chunk: &[u8],
+    max_bytes: usize,
+) -> Result<(), CoreFailure> {
+    if destination
+        .len()
+        .checked_add(chunk.len())
+        .is_none_or(|length| length > max_bytes)
+    {
+        return Err(CoreFailure::UpstreamResponseFailed);
+    }
+    destination.extend_from_slice(chunk);
+    Ok(())
+}
+
+fn terminal_response_from_sse(bytes: &[u8]) -> Result<serde_json::Value, CoreFailure> {
+    let text = std::str::from_utf8(bytes).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    let mut data = Vec::new();
+    let mut terminal = None;
+    for line in text.lines().chain(std::iter::once("")) {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if line.is_empty() {
+            if !data.is_empty() {
+                let payload = data.join("\n");
+                data.clear();
+                if payload != "[DONE]" {
+                    let event: serde_json::Value = serde_json::from_str(&payload)
+                        .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+                    if matches!(
+                        event.get("type").and_then(serde_json::Value::as_str),
+                        Some("response.completed" | "response.failed" | "response.incomplete")
+                    ) {
+                        terminal = event.get("response").cloned();
+                    }
+                }
+            }
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("data:") {
+            data.push(value.strip_prefix(' ').unwrap_or(value));
+        }
+    }
+    terminal.ok_or(CoreFailure::UpstreamResponseFailed)
 }
 
 pub(crate) fn request_expects_sse(body: &[u8]) -> bool {
@@ -126,4 +217,37 @@ fn is_safe_response_header(name: &HeaderName) -> bool {
             | "transfer-encoding"
             | "upgrade"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_sse_response_is_extracted_across_standard_line_endings() {
+        let body = b": keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\r\ndata: \"delta\":\"ok\"}\r\n\r\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\ndata: [DONE]\n\n";
+        assert_eq!(
+            terminal_response_from_sse(body).expect("terminal response"),
+            serde_json::json!({"id":"resp_test","output":[]})
+        );
+    }
+
+    #[test]
+    fn missing_terminal_sse_response_fails_closed() {
+        let result = terminal_response_from_sse(
+            b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+        );
+        assert!(matches!(result, Err(CoreFailure::UpstreamResponseFailed)));
+    }
+
+    #[test]
+    fn non_streaming_response_buffer_is_bounded() {
+        let mut bytes = vec![1, 2, 3];
+        append_bounded(&mut bytes, &[4], 4).expect("at limit");
+        assert!(matches!(
+            append_bounded(&mut bytes, &[5], 4),
+            Err(CoreFailure::UpstreamResponseFailed)
+        ));
+        assert_eq!(bytes, vec![1, 2, 3, 4]);
+    }
 }

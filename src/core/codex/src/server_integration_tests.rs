@@ -155,6 +155,85 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
 }
 
 #[tokio::test]
+async fn codex_api_key_route_streams_upstream_and_aggregates_for_non_streaming_caller() {
+    let capture = ApiCapture::default();
+    let app = Router::new()
+        .route(
+            "/responses",
+            axum_post(
+                |AxumState(capture): AxumState<ApiCapture>,
+                 headers: HeaderMap,
+                 body: Bytes| async move {
+                    *capture.headers.lock().await = Some(headers);
+                    *capture.body.lock().await = Some(body);
+                    AxumResponse::builder()
+                        .status(StatusCode::OK)
+                        .header(http::header::CONTENT_TYPE, "text/event-stream")
+                        .body(Body::from(
+                            "event: response.output_text.delta\r\n\
+                             data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\r\n\r\n\
+                             event: response.completed\r\n\
+                             data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_api_key\",\"object\":\"response\",\"output\":[]}}\r\n\r\n",
+                        ))
+                        .expect("mock response")
+                },
+            ),
+        )
+        .with_state(capture.clone());
+    let mock = spawn_loopback(app).await;
+    let (state, account_ref, _temp) = api_key_state(&mock.base_url).await;
+    let mut headers = HeaderMap::new();
+    headers.insert("originator", HeaderValue::from_static("codex_exec"));
+
+    let response = call_core_with_headers(
+        &state,
+        &account_ref,
+        Bytes::from_static(br#"{"model":"gpt-5.4","input":[],"store":true}"#),
+        headers,
+    )
+    .await
+    .expect("core response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("response body")
+        .to_bytes();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).expect("response JSON"),
+        serde_json::json!({"id":"resp_api_key","object":"response","output":[]})
+    );
+
+    let upstream: serde_json::Value =
+        serde_json::from_slice(capture.body.lock().await.as_deref().expect("captured body"))
+            .expect("upstream JSON");
+    assert_eq!(upstream["store"], false);
+    assert_eq!(upstream["stream"], true);
+    assert_eq!(
+        header_text(
+            capture
+                .headers
+                .lock()
+                .await
+                .as_ref()
+                .expect("captured headers"),
+            "accept",
+        )
+        .as_deref(),
+        Some("text/event-stream")
+    );
+}
+
+#[tokio::test]
 async fn upstream_stream_failure_becomes_delivery_trailers() {
     let app = Router::new().route(
         "/responses",
@@ -328,6 +407,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     assert_eq!(normalized["input"][2]["content"][0]["text"], "Be concise");
     assert_eq!(normalized["input"][3]["role"], "user");
     assert_eq!(normalized["store"], false);
+    assert_eq!(normalized["stream"], true);
     assert!(normalized.get("max_output_tokens").is_none());
     assert!(
         normalized["client_metadata"]["x-codex-installation-id"].as_str()

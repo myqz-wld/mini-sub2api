@@ -3,7 +3,6 @@ package integration
 import (
 	"bytes"
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,8 +33,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			return
 		}
 		captures <- routingMatrixCapture{Headers: request.Header.Clone(), Body: body}
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(writer, `{"id":"resp_matrix","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+		writeLoopbackResponsesResult(writer, body, "resp_matrix")
 	}))
 	defer upstream.Close()
 	assertLoopbackURL(t, upstream.URL)

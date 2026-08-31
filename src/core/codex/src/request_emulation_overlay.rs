@@ -105,6 +105,7 @@ pub(super) fn apply(
         model_profile,
         transport == EmulationTransport::Http,
     );
+    enforce_upstream_transport_controls(object, transport);
     if profile.uses_codex_subscription() {
         request_identity::apply_routing_hint(object, headers);
     } else {
@@ -125,6 +126,16 @@ pub(super) fn apply(
     );
     canonicalize_request_order(object, transport);
     Ok(synthesized_item_ids)
+}
+
+fn enforce_upstream_transport_controls(
+    object: &mut Map<String, Value>,
+    transport: EmulationTransport,
+) {
+    object.insert("store".to_string(), Value::Bool(false));
+    if transport == EmulationTransport::Http {
+        object.insert("stream".to_string(), Value::Bool(true));
+    }
 }
 
 fn canonicalize_structured_request_members(object: &mut Map<String, Value>) {

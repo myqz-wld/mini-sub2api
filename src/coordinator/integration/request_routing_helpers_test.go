@@ -5,9 +5,30 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 )
+
+func writeLoopbackResponsesResult(writer http.ResponseWriter, body []byte, responseID string) {
+	var request map[string]any
+	if err := json.Unmarshal(body, &request); err != nil {
+		http.Error(writer, "invalid captured request", http.StatusInternalServerError)
+		return
+	}
+	response := fmt.Sprintf(
+		`{"id":%q,"object":"response","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`,
+		responseID,
+	)
+	if request["stream"] == true {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(writer, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/json")
+	_, _ = io.WriteString(writer, response)
+}
 
 func canonicalExpectedTools(tools []any) []any {
 	canonical := make([]any, 0, len(tools))
@@ -92,7 +113,8 @@ func assertCodexOpenAIProfileCapture(t *testing.T, capture routingMatrixCapture)
 		t.Fatal("Codex API-key profile crossed a subscription credential boundary")
 	}
 	if capture.Headers.Get("Originator") != "codex-tui" ||
-		capture.Headers.Get("Version") != "0.149.0" {
+		capture.Headers.Get("Version") != "0.149.0" ||
+		capture.Headers.Get("Accept") != "text/event-stream" {
 		t.Fatalf("Codex API-key identity headers = %#v", capture.Headers)
 	}
 	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
@@ -256,7 +278,7 @@ func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any
 		t.Fatal("synthetic Lite tools/base/custom items received ids")
 	}
 	if value["tools"] != nil || value["instructions"] != nil || value["store"] != false ||
-		value["stream"] != false || value["parallel_tool_calls"] != false {
+		value["stream"] != true || value["parallel_tool_calls"] != false {
 		t.Fatalf("lite controls = %#v", value)
 	}
 }
@@ -278,7 +300,7 @@ func assertNonLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []
 	}
 	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4-mini")
 	if value["store"] != false ||
-		value["stream"] != false || value["parallel_tool_calls"] != true ||
+		value["stream"] != true || value["parallel_tool_calls"] != true ||
 		value["tool_choice"] != "auto" {
 		t.Fatalf("non-lite controls = %#v", value)
 	}
@@ -301,7 +323,7 @@ func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	assertMessageSemantics(t, input[1:], messages)
 	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4")
 	if value["model"] != "gpt-5.4" ||
-		value["store"] != false || value["stream"] != false || value["tool_choice"] != "auto" ||
+		value["store"] != false || value["stream"] != true || value["tool_choice"] != "auto" ||
 		value["parallel_tool_calls"] != true || !isUUIDv8(value["prompt_cache_key"]) {
 		t.Fatalf("native subscription controls = %#v", value)
 	}

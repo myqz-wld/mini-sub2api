@@ -2,7 +2,6 @@ package integration
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,8 +87,7 @@ func newResponsesProfileHTTPFixture(t *testing.T) responsesProfileHTTPFixture {
 			return
 		}
 		captures <- routingMatrixCapture{Headers: request.Header.Clone(), Body: body}
-		writer.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(writer, `{"id":"resp_profile","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+		writeLoopbackResponsesResult(writer, body, "resp_profile")
 	}))
 	t.Cleanup(upstream.Close)
 	assertLoopbackURL(t, upstream.URL)
@@ -308,6 +306,9 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 			if _, exists := value[field]; !exists {
 				t.Fatalf("HTTP Responses field %q was removed", field)
 			}
+		}
+		if value["store"] != false || value["stream"] != true {
+			t.Fatal("HTTP Codex profile did not pin store=false and stream=true")
 		}
 	}
 	if _, exists := value["unsupported_profile_sentinel"]; exists {
