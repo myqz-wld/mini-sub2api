@@ -242,7 +242,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
 }
 
 #[test]
-fn strips_subscription_output_cap_sampling_and_unknown_fields() {
+fn strips_subscription_incompatible_and_codex_unemitted_fields() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.6-luna",
@@ -256,7 +256,12 @@ fn strips_subscription_output_cap_sampling_and_unknown_fields() {
             "frequency_penalty": 0.1,
             "presence_penalty": 0.1,
             "future_request_field": true,
+            "metadata": {"caller": "value"},
+            "user": "caller-user",
+            "prompt_cache_retention": "24h",
+            "safety_identifier": "caller-safety",
             "stream_options": {"reasoning_summary_delivery": "sequential_cutoff"},
+            "truncation": "disabled",
             "service_tier": "auto"
         }))
         .expect("request"),
@@ -281,13 +286,15 @@ fn strips_subscription_output_cap_sampling_and_unknown_fields() {
         "frequency_penalty",
         "presence_penalty",
         "future_request_field",
+        "metadata",
+        "user",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "stream_options",
+        "truncation",
     ] {
         assert!(value.get(field).is_none(), "field {field} crossed");
     }
-    assert_eq!(
-        value["stream_options"]["reasoning_summary_delivery"],
-        "sequential_cutoff"
-    );
     assert_eq!(value["service_tier"], "auto");
     assert_eq!(value["reasoning"]["effort"], "medium");
 }

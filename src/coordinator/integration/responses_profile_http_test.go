@@ -281,15 +281,14 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 	model, _ := value["model"].(string)
 	for _, field := range []string{
 		"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store",
-		"stream_options", "include", "service_tier", "text", "context_management",
-		"max_tool_calls", "metadata", "moderation", "prompt", "prompt_cache_options",
-		"prompt_cache_retention", "safety_identifier", "top_logprobs", "truncation", "user",
+		"include", "service_tier", "text", "context_management", "max_tool_calls",
+		"moderation", "prompt", "prompt_cache_options", "top_logprobs",
 	} {
 		if _, exists := value[field]; !exists {
 			t.Fatalf("Responses field %q was removed", field)
 		}
 	}
-	for _, field := range []string{"max_output_tokens", "temperature", "top_p"} {
+	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "stream_options"} {
 		_, exists := value[field]
 		if exists == subscription {
 			t.Fatalf("Subscription-only field policy mismatch for %q", field)
@@ -314,9 +313,12 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 	if _, exists := value["unsupported_profile_sentinel"]; exists {
 		t.Fatal("unsupported top-level field was not stripped")
 	}
-	metadata, ok := value["metadata"].(map[string]any)
-	if !ok || metadata["opaque_metadata_sentinel"] != "retain" {
-		t.Fatal("metadata free-form key did not round trip")
+	for _, field := range []string{
+		"metadata", "user", "prompt_cache_retention", "safety_identifier", "truncation",
+	} {
+		if _, exists := value[field]; exists {
+			t.Fatalf("Codex-incompatible field %q crossed upstream", field)
+		}
 	}
 	prompt, ok := value["prompt"].(map[string]any)
 	if !ok || !jsonEqual(prompt["variables"], map[string]any{"opaque_prompt_sentinel": "retain"}) {

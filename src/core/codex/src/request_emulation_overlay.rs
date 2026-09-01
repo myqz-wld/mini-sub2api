@@ -46,6 +46,14 @@ const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
 
 const SUPPORTED_HTTP_FIELDS: &[&str] = &["background", "stream"];
 const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id"];
+// Codex 0.149.0 does not expose these public Responses fields in its request builder.
+const UNSUPPORTED_CODEX_EMULATION_FIELDS: &[&str] = &[
+    "metadata",
+    "prompt_cache_retention",
+    "safety_identifier",
+    "truncation",
+    "user",
+];
 const UNSUPPORTED_SUBSCRIPTION_FIELDS: &[&str] = &[
     "max_output_tokens",
     "max_completion_tokens",
@@ -54,6 +62,7 @@ const UNSUPPORTED_SUBSCRIPTION_FIELDS: &[&str] = &[
     "top_p",
     "frequency_penalty",
     "presence_penalty",
+    "stream_options",
 ];
 
 pub(super) fn apply(
@@ -71,6 +80,7 @@ pub(super) fn apply(
                 }
             }
     });
+    strip_unsupported_codex_emulation_fields(object);
     canonicalize_structured_request_members(object);
     let mut model_profile = object
         .get("model")
@@ -126,6 +136,12 @@ pub(super) fn apply(
     );
     canonicalize_request_order(object, transport);
     Ok(synthesized_item_ids)
+}
+
+fn strip_unsupported_codex_emulation_fields(object: &mut Map<String, Value>) {
+    for field in UNSUPPORTED_CODEX_EMULATION_FIELDS {
+        object.remove(*field);
+    }
 }
 
 fn enforce_upstream_transport_controls(
@@ -264,8 +280,8 @@ fn normalize_input(object: &mut Map<String, Value>) -> Vec<String> {
     synthesized_item_ids
 }
 
-// The fixed Subscription target rejects these public/legacy output-cap and sampling controls.
-// There is no evidence-backed equivalent, so only the Subscription profile drops them.
+// The fixed Subscription target rejects these public/legacy output-cap, sampling, and stream
+// delivery controls. There is no evidence-backed equivalent, so only that profile drops them.
 fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) {
     for field in UNSUPPORTED_SUBSCRIPTION_FIELDS {
         object.remove(*field);
