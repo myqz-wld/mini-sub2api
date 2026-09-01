@@ -120,11 +120,11 @@ Codex emulation begins with the full caller object, not a top-level field whitel
 target-specific compatibility exceptions below, explicit Responses fields—including
 `previous_response_id`, `conversation`, HTTP `background`, WS
 `stream_id`,
-`context_management`, output/tool limits, metadata, moderation, prompt/cache settings, safety
-identifiers, sampling, truncation, tools, and image detail—remain authoritative. The supported
+`context_management`, output/tool limits, moderation, supported prompt/cache settings, sampling,
+tools, and image detail—remain authoritative. The supported
 surface is the union of documented OpenAI Responses fields and completed Codex `0.149.0`
 capture/source wire fields; other protocol members are removed. Arbitrary keys remain valid inside
-documented opaque/free-form containers such as metadata maps, JSON Schema, `prompt.variables`, and
+documented opaque/free-form containers such as JSON Schema, `prompt.variables`, and
 function/custom tool-call argument/input/output payload values; structured tools and shell/computer
 outputs are still filtered. Web Search accepts only its domain-filter schema; File Search accepts
 its recursive attribute-filter schema.
@@ -135,9 +135,14 @@ content becomes `input_text`, synthesized Lite instructions use `developer`, and
 assistant strings become `output_text`. It never generates an HTTP `previous_response_id`; an
 explicit one is forwarded unchanged. Non-Lite requests default omitted image detail to `high`;
 Responses Lite leaves omitted detail absent while preserving an explicit supported detail value.
-`CodexSubscription149` additionally removes `max_output_tokens`, `temperature`, and `top_p`, which
-are public Responses controls but are rejected by the fixed Subscription target. API-key profiles
-retain them.
+`CodexSubscription149` additionally removes `max_output_tokens`, `temperature`, `top_p`, and
+`stream_options`, which are rejected by the fixed Subscription target. `CodexOpenAi149` retains
+them; Codex `0.149.0` can emit
+`stream_options.reasoning_summary_delivery=sequential_cutoff` on the API-key path when concurrent
+reasoning summaries are enabled. Both Codex-emulated profiles remove caller `metadata`, `user`,
+`prompt_cache_retention`, `safety_identifier`, and `truncation`; the pinned Codex request type has
+no caller-facing carrier for these values. Codex routing and identity metadata use
+`client_metadata`. `BareOpenAi` remains byte-transparent and does not apply this filter.
 
 For HTTP, both Codex-emulated profiles override caller transport controls with `store: false` and
 `stream: true`, and send `Accept: text/event-stream`. The core records the caller's original stream

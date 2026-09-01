@@ -152,12 +152,17 @@ the fixed Codex capture, and apply missing `0.149.0` defaults. Except for docume
 compatibility exceptions, explicit supported values remain authoritative on their transport,
 including `previous_response_id`, HTTP `background`, WS
 `stream_id`, tools, sampling, and image detail. Unknown structured members are removed; documented
-free-form metadata, JSON Schema, prompt variables, and function/custom payloads remain opaque.
+JSON Schema, prompt variables, and function/custom payloads remain opaque.
 Web and File Search use separate filter schemas. HTTP never synthesizes `previous_response_id`;
 non-Lite image detail defaults to `high`, while Lite leaves an omitted detail absent. Subscription
 emulation maps message role `system` to `developer` and removes output-cap/sampling controls that
-the Subscription endpoint rejects: `max_output_tokens`, `temperature`, and `top_p`. API-key
-profiles preserve those explicit fields and roles.
+the Subscription endpoint rejects: `max_output_tokens`, `temperature`, `top_p`, and
+`stream_options`. `CodexOpenAi149` preserves those explicit fields; Codex `0.149.0` can emit
+`stream_options.reasoning_summary_delivery=sequential_cutoff` on the API-key path when concurrent
+reasoning summaries are enabled. Both Codex-emulated profiles remove caller `metadata`, `user`,
+`prompt_cache_retention`, `safety_identifier`, and `truncation`; Codex identity remains available
+through `client_metadata`. `BareOpenAi` continues to forward those public OpenAI fields
+byte-for-byte.
 
 Both emulated HTTP profiles always send `store: false`, `stream: true`, and
 `Accept: text/event-stream` upstream. The gateway reads the caller's original `stream` preference
@@ -200,7 +205,7 @@ WebSocket policy is intentionally small and split across the coordinator and cor
   prewarm identity; explicit/provider item IDs remain semantic during reuse, while temporary wire
   IDs do not. Incompatible continuation falls back to a full frame.
 - Simulated WS `response.create` removes HTTP-only `background` and implicit `stream`, while
-  preserving WS-only `stream_id`. `stream_options` remains an explicit supported control.
+  preserving WS-only `stream_id`. It also applies the Codex-emulation field filter described above.
 
 ## Administration
 

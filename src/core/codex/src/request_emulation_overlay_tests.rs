@@ -56,7 +56,17 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
         .filter(|(name, _)| {
             !matches!(
                 name.as_str(),
-                "future_top_level" | "instructions" | "input" | "tools" | "store" | "stream"
+                "future_top_level"
+                    | "instructions"
+                    | "input"
+                    | "metadata"
+                    | "prompt_cache_retention"
+                    | "safety_identifier"
+                    | "store"
+                    | "stream"
+                    | "tools"
+                    | "truncation"
+                    | "user"
             )
         })
     {
@@ -72,7 +82,15 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
         "caller instructions"
     );
     assert!(normalized.get("future_top_level").is_none());
-    assert_eq!(normalized["metadata"]["public"], "metadata");
+    for name in [
+        "metadata",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "truncation",
+        "user",
+    ] {
+        assert!(normalized.get(name).is_none(), "field {name} crossed");
+    }
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
     assert!(
@@ -292,7 +310,6 @@ fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque()
     ] {
         assert!(path.is_none());
     }
-    assert_eq!(normalized["metadata"]["arbitrary_metadata"]["keep"], true);
     assert_eq!(
         normalized["prompt"]["variables"]["arbitrary_variable"]["keep"],
         true
