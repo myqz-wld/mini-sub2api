@@ -1,12 +1,13 @@
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_websocket_device;
+use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_normalizer::EmulationTransport;
-use crate::request_normalizer::SubscriptionIdentity;
+use crate::request_normalizer::SubscriptionStateContext;
 use crate::request_normalizer::prepare_emulated_request;
-use crate::request_normalizer::prepare_projected_subscription_websocket_turn;
+use crate::request_normalizer::prepare_stateful_subscription_request;
 use crate::request_profile::UpstreamProfile;
-use crate::request_pseudonym::RequestPseudonymizer;
+use crate::request_state_store::RequestStateStore;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket_inject;
 use crate::responses_websocket_state::PublicCreateMode;
@@ -14,17 +15,32 @@ use crate::responses_websocket_state::ResponsesWebSocketState;
 use bytes::Bytes;
 use http::HeaderMap;
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn prepare_client_text(
+pub(crate) struct PreparedClientText {
+    pub(crate) text: String,
+    pub(crate) create_value: Option<Value>,
+    pub(crate) synthesized_item_ids: Vec<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn prepare_client_text(
     text: String,
     headers: &mut HeaderMap,
+    account_ref: &str,
     account_namespace: Option<&str>,
     profile: UpstreamProfile,
     pseudonym_scope: &str,
     fingerprint: &FingerprintSnapshot,
-    continuation: &mut ResponsesWebSocketState,
-) -> Result<String, ()> {
+    state_store: &RequestStateStore,
+    identity_binding: &mut Option<ResolvedRequestIdentity>,
+) -> Result<PreparedClientText, ()> {
+    let text = if profile.uses_codex_subscription() {
+        seed_socket_identity(text, identity_binding.as_ref())?
+    } else {
+        text
+    };
     let value: Value = serde_json::from_str(&text).map_err(|_| ())?;
     let message_type = value
         .as_object()
@@ -33,35 +49,116 @@ pub(crate) fn prepare_client_text(
         .filter(|message_type| !message_type.is_empty())
         .ok_or(())?;
     if message_type == "response.inject" {
-        return responses_websocket_inject::prepare(
+        if profile.uses_codex_subscription() {
+            let account_namespace = account_namespace.ok_or(())?;
+            let filtered = responses_websocket_inject::prepare_without_identity(
+                text,
+                value,
+                profile,
+                MAX_WEBSOCKET_MESSAGE_BYTES,
+            )?;
+            let mut filtered = serde_json::from_str::<Value>(&filtered).map_err(|_| ())?;
+            let filtered = state_store
+                .edit(
+                    account_namespace,
+                    account_ref,
+                    pseudonym_scope,
+                    move |editor| {
+                        let object = filtered
+                            .as_object_mut()
+                            .ok_or_else(|| anyhow::anyhow!("inject frame is not an object"))?;
+                        crate::request_wire_ids::translate_request_ids(
+                            editor,
+                            object,
+                            &BTreeSet::new(),
+                        )?;
+                        Ok(filtered)
+                    },
+                )
+                .await
+                .map_err(|_| ())?;
+            let text = encode_frame_bounded(&filtered, MAX_WEBSOCKET_MESSAGE_BYTES)?;
+            return Ok(PreparedClientText {
+                text,
+                create_value: None,
+                synthesized_item_ids: Vec::new(),
+            });
+        }
+        let text =
+            responses_websocket_inject::prepare(text, value, profile, MAX_WEBSOCKET_MESSAGE_BYTES)?;
+        return Ok(PreparedClientText {
             text,
-            value,
-            account_namespace,
-            profile,
-            pseudonym_scope,
-            MAX_WEBSOCKET_MESSAGE_BYTES,
-        );
+            create_value: None,
+            synthesized_item_ids: Vec::new(),
+        });
     }
     if message_type != "response.create" {
-        return Ok(text);
+        if profile.uses_codex_subscription() {
+            let account_namespace = account_namespace.ok_or(())?;
+            let original = value.clone();
+            let translated = state_store
+                .edit(
+                    account_namespace,
+                    account_ref,
+                    pseudonym_scope,
+                    move |editor| {
+                        let mut value = value;
+                        let object = value
+                            .as_object_mut()
+                            .ok_or_else(|| anyhow::anyhow!("control frame is not an object"))?;
+                        crate::request_wire_ids::translate_request_ids(
+                            editor,
+                            object,
+                            &BTreeSet::new(),
+                        )?;
+                        Ok(value)
+                    },
+                )
+                .await
+                .map_err(|_| ())?;
+            let text = if translated == original {
+                text
+            } else {
+                encode_frame_bounded(&translated, MAX_WEBSOCKET_MESSAGE_BYTES)?
+            };
+            return Ok(PreparedClientText {
+                text,
+                create_value: None,
+                synthesized_item_ids: Vec::new(),
+            });
+        }
+        return Ok(PreparedClientText {
+            text,
+            create_value: None,
+            synthesized_item_ids: Vec::new(),
+        });
     }
     if profile == UpstreamProfile::BareOpenAi {
-        continuation.plan_public_create(&value);
-        return Ok(text);
+        return Ok(PreparedClientText {
+            text,
+            create_value: Some(value),
+            synthesized_item_ids: Vec::new(),
+        });
     }
     let (prepared, synthesized_item_ids) = {
-        let subscription_identity =
-            account_namespace.map(|account_namespace| SubscriptionIdentity {
-                account_namespace,
-                downstream_scope: pseudonym_scope,
-            });
-        let prepared = if let Some(identity) = subscription_identity {
-            prepare_projected_subscription_websocket_turn(
+        let prepared = if profile.uses_codex_subscription() {
+            let account_namespace = account_namespace.ok_or(())?;
+            prepare_stateful_subscription_request(
+                EmulationTransport::WebSocket,
                 headers,
                 Bytes::from(text),
                 MAX_WEBSOCKET_MESSAGE_BYTES,
-                identity,
-            )?
+                SubscriptionStateContext {
+                    account_ref,
+                    account_namespace,
+                    downstream_scope: pseudonym_scope,
+                    fingerprint_mode: fingerprint.mode(),
+                    store: state_store,
+                },
+                true,
+            )
+            .await
+            .map_err(|_| ())?
         } else {
             prepare_emulated_request(
                 profile,
@@ -74,32 +171,94 @@ pub(crate) fn prepare_client_text(
         };
         let synthesized_item_ids = prepared.synthesized_item_ids;
         *headers = prepared.headers;
+        if prepared.resolved_identity.is_some() {
+            identity_binding.clone_from(&prepared.resolved_identity);
+        }
         (
             String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?,
             synthesized_item_ids,
         )
     };
-    let prepared = if fingerprint.mode() == FingerprintMode::Device
-        && let Some(account_namespace) = account_namespace
-    {
-        let installation_id = RequestPseudonymizer::converged_installation_id(account_namespace);
-        project_websocket_device(
-            prepared,
-            fingerprint,
-            &installation_id,
-            MAX_WEBSOCKET_MESSAGE_BYTES,
-        )
-        .map_err(|_| ())
-    } else {
-        Ok(prepared)
-    }?;
+    let prepared =
+        if fingerprint.mode() == FingerprintMode::Device && profile.uses_codex_subscription() {
+            let installation_id = identity_binding
+                .as_ref()
+                .map(|identity| identity.installation_id.as_str())
+                .ok_or(())?;
+            project_websocket_device(
+                prepared,
+                fingerprint,
+                installation_id,
+                MAX_WEBSOCKET_MESSAGE_BYTES,
+            )
+            .map_err(|_| ())
+        } else {
+            Ok(prepared)
+        }?;
     let value = serde_json::from_str::<Value>(&prepared).map_err(|_| ())?;
-    plan_public_text_with_synthesized_ids(
-        continuation,
-        &value,
-        &synthesized_item_ids,
-        MAX_WEBSOCKET_MESSAGE_BYTES,
-    )
+    Ok(PreparedClientText {
+        text: prepared,
+        create_value: Some(value),
+        synthesized_item_ids,
+    })
+}
+
+fn seed_socket_identity(
+    text: String,
+    binding: Option<&ResolvedRequestIdentity>,
+) -> Result<String, ()> {
+    let Some(binding) = binding else {
+        return Ok(text);
+    };
+    let mut value = serde_json::from_str::<Value>(&text).map_err(|_| ())?;
+    let object = value.as_object_mut().ok_or(())?;
+    if object.get("type").and_then(Value::as_str) != Some("response.create") {
+        return Ok(text);
+    }
+    let has_user_input = object
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.get("role").and_then(Value::as_str) == Some("user"))
+        });
+    let metadata = object
+        .entry("client_metadata".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !metadata.is_object() {
+        *metadata = Value::Object(serde_json::Map::new());
+    }
+    let metadata = metadata.as_object_mut().ok_or(())?;
+    metadata
+        .entry("session_id".to_string())
+        .or_insert_with(|| Value::String(binding.session_id.clone()));
+    metadata
+        .entry("thread_id".to_string())
+        .or_insert_with(|| Value::String(binding.thread_id.clone()));
+    if let Some(parent_thread_id) = binding.parent_thread_id.as_ref() {
+        metadata
+            .entry("parent_thread_id".to_string())
+            .or_insert_with(|| Value::String(parent_thread_id.clone()));
+    }
+    if let Some(forked_from_thread_id) = binding.forked_from_thread_id.as_ref() {
+        metadata
+            .entry("forked_from_thread_id".to_string())
+            .or_insert_with(|| Value::String(forked_from_thread_id.clone()));
+    }
+    if !has_user_input {
+        if let Some(turn_id) = binding.turn_id.as_ref() {
+            metadata
+                .entry("turn_id".to_string())
+                .or_insert_with(|| Value::String(turn_id.clone()));
+        }
+        if let Some(root_turn_id) = binding.root_turn_id.as_ref() {
+            metadata
+                .entry("root_turn_id".to_string())
+                .or_insert_with(|| Value::String(root_turn_id.clone()));
+        }
+    }
+    serde_json::to_string(&value).map_err(|_| ())
 }
 
 #[cfg(test)]

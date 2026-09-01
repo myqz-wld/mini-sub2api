@@ -10,13 +10,15 @@ use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
 use crate::request_normalizer::EmulationTransport;
-use crate::request_normalizer::SubscriptionIdentity;
+use crate::request_normalizer::StatefulPrepareError;
+use crate::request_normalizer::SubscriptionStateContext;
 use crate::request_normalizer::prepare_emulated_request;
+use crate::request_normalizer::prepare_stateful_subscription_request;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
-use crate::request_pseudonym::RequestPseudonymizer;
 use crate::response_stream::build_http_response;
 use crate::response_stream::request_expects_sse;
+use crate::response_translation::ResponseStateContext;
 use crate::responses_websocket::responses_socket;
 use crate::transport_registry::CredentialTransportContext;
 use crate::transport_registry::CredentialTransportPolicy;
@@ -162,36 +164,55 @@ async fn responses_inner(
     } else {
         body
     };
-    let (forward_headers, body) = if profile.emulates_codex() {
-        let subscription_identity =
-            account_namespace
-                .as_deref()
-                .map(|account_namespace| SubscriptionIdentity {
+    let (forward_headers, body, resolved_identity) = if profile.emulates_codex() {
+        let prepared = if profile.uses_codex_subscription() {
+            let account_namespace = account_namespace.as_deref().ok_or(CoreFailure::Internal)?;
+            prepare_stateful_subscription_request(
+                EmulationTransport::Http,
+                &forward_headers,
+                body,
+                MAX_REQUEST_BYTES,
+                SubscriptionStateContext {
+                    account_ref: &account_ref,
                     account_namespace,
                     downstream_scope: &pseudonym_scope,
-                });
-        let prepared = prepare_emulated_request(
-            profile,
-            EmulationTransport::Http,
-            &forward_headers,
-            body,
-            MAX_REQUEST_BYTES,
-            subscription_identity,
-        )
-        .map_err(|()| CoreFailure::InvalidRequest)?;
-        (prepared.headers, prepared.body)
+                    fingerprint_mode: resolved.fingerprint.mode(),
+                    store: state.vault.request_state(),
+                },
+                false,
+            )
+            .await
+            .map_err(|error| match error {
+                StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
+                StatefulPrepareError::StateUnavailable => CoreFailure::UnknownAccount,
+            })?
+        } else {
+            prepare_emulated_request(
+                profile,
+                EmulationTransport::Http,
+                &forward_headers,
+                body,
+                MAX_REQUEST_BYTES,
+                None,
+            )
+            .map_err(|()| CoreFailure::InvalidRequest)?
+        };
+        (prepared.headers, prepared.body, prepared.resolved_identity)
     } else {
-        (forward_headers, body)
+        (forward_headers, body, None)
     };
     let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device
-        && let Some(account_namespace) = account_namespace.as_deref()
+        && profile.uses_codex_subscription()
     {
-        let installation_id = RequestPseudonymizer::converged_installation_id(account_namespace);
+        let installation_id = resolved_identity
+            .as_ref()
+            .map(|identity| identity.installation_id.as_str())
+            .ok_or(CoreFailure::Internal)?;
         let projected = project_http_device(
             forward_headers,
             body,
             &resolved.fingerprint,
-            &installation_id,
+            installation_id,
             MAX_REQUEST_BYTES,
         )
         .map_err(|_| CoreFailure::InvalidRequest)?;
@@ -234,7 +255,24 @@ async fn responses_inner(
         }
     }
     let ttfb_ms = started.elapsed().as_millis();
-    build_http_response(upstream, ttfb_ms, downstream_expects_sse, profile).await
+    let response_state = account_namespace.as_deref().and_then(|namespace| {
+        profile.uses_codex_subscription().then(|| {
+            ResponseStateContext::new(
+                &account_ref,
+                namespace,
+                &pseudonym_scope,
+                state.vault.request_state(),
+            )
+        })
+    });
+    build_http_response(
+        upstream,
+        ttfb_ms,
+        downstream_expects_sse,
+        profile,
+        response_state,
+    )
+    .await
 }
 
 pub(crate) async fn resolve_auth(

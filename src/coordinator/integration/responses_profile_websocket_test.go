@@ -132,9 +132,12 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	value := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 	assertWebSocketProfileCredentialBoundary(t, captures[0], true)
 	assertResponsesProfileSurface(t, value, false, true, true)
-	if value["previous_response_id"] != "caller-previous" || value["conversation"] != "caller-conversation" ||
-		value["generate"] != false || value["stream_id"] != "caller-stream" {
-		t.Fatal("explicit WebSocket continuation or state was not preserved")
+	previous, previousOK := value["previous_response_id"].(string)
+	conversation, conversationOK := value["conversation"].(string)
+	stream, streamOK := value["stream_id"].(string)
+	if !previousOK || !conversationOK || !streamOK || previous == "caller-previous" ||
+		conversation == "caller-conversation" || stream == "caller-stream" || value["generate"] != false {
+		t.Fatal("explicit WebSocket state was not retained through pseudonymization")
 	}
 }
 
@@ -317,14 +320,17 @@ func mustRequestJSONValue(value any) []byte {
 	return encoded
 }
 
-func readResponsesProfileTerminalEvents(t *testing.T, connection *websocket.Conn) {
+func readResponsesProfileTerminalEvents(t *testing.T, connection *websocket.Conn) []string {
 	t.Helper()
+	events := make([]string, 0, 3)
 	for index := 0; index < 3; index++ {
 		message := readE2EWebSocketText(t, connection)
+		events = append(events, message)
 		if index == 2 && !bytes.Contains([]byte(message), []byte("response.completed")) {
 			t.Fatal("WebSocket turn did not complete")
 		}
 	}
+	return events
 }
 
 func waitForResponsesProfileWebSocketCaptures(

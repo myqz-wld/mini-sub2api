@@ -69,9 +69,11 @@ build/bin/mini-sub2api --state-dir ./state \
 Paste the key and finish with EOF. The secret is not placed in arguments, environment variables,
 or SQLite.
 
-Every credential defaults to `--fingerprint-mode device`: subscription installation identity
-converges per ChatGPT account, while `off` keeps one-to-one pseudonyms. Other subscription IDs are
-pseudonymized in both modes; OpenAI API-key payloads remain transparent.
+Every credential defaults to `--fingerprint-mode device`: subscription installation identity uses
+one persisted UUIDv4 per ChatGPT account, while `off` uses scoped persisted UUIDv4 values. Root
+conversation/thread and ordinary turn identities use stable UUIDv7 values. Subscription Responses
+correlation IDs are translated bidirectionally, so caller IDs are restored on responses and
+provider IDs receive stable downstream aliases. OpenAI API-key payloads remain transparent.
 
 ### 2. Create a downstream API key
 
@@ -162,7 +164,8 @@ the Subscription endpoint rejects: `max_output_tokens`, `temperature`, `top_p`, 
 reasoning summaries are enabled. Both Codex-emulated profiles remove caller `metadata`, `user`,
 `prompt_cache_retention`, `safety_identifier`, and `truncation`; Codex identity remains available
 through `client_metadata`. `BareOpenAi` continues to forward those public OpenAI fields
-byte-for-byte.
+byte-for-byte. On the subscription profile, supported correlation values remain semantically
+authoritative but are replaced by persistent upstream pseudonyms at the wire boundary.
 
 Both emulated HTTP profiles always send `store: false`, `stream: true`, and
 `Accept: text/event-stream` upstream. The gateway reads the caller's original `stream` preference
@@ -183,8 +186,10 @@ single-namespace lookup follows the pinned catalog, with its bundled fallback fo
 `CodexOpenAi149` and `CodexSubscription149` both replace caller identity with
 `codex-tui/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal> (codex-tui; 0.149.0)`,
 `originator: codex-tui`, and `version: 0.149.0`. The runtime platform snapshot is captured on
-first use and shared for the life of the core process. Subscription identifiers are additionally
-isolated with account/key-scoped UUIDv8 pseudonyms; `device` converges installation per account.
+first use and shared for the life of the core process. Subscription identity is resolved before
+projection: conflicting root carriers converge on one persisted UUIDv7, explicit
+parent/fork/subagent lineage receives a distinct child UUIDv7, and installation is a genuine
+persisted UUIDv4. HMAC-SHA256 is used only for private lookup keys, never to forge UUID bits.
 
 WebSocket policy is intentionally small and split across the coordinator and core:
 
@@ -192,8 +197,9 @@ WebSocket policy is intentionally small and split across the coordinator and cor
   overlapping `response.create` closes the connection with a policy violation.
 - `BareOpenAi` keeps every valid Responses v2 JSON application event byte-exact. Simulated
   `response.inject` events retain only documented `type`, `input`, and `response_id` carriers and
-  apply the same structured-item filtering as create input; other typed non-create events pass
-  through while a response is active.
+  apply the same structured-item filtering as create input. Subscription create/inject/control
+  frames translate only enumerated lifecycle IDs; a typed non-create frame with no such ID remains
+  byte-exact.
 - Mode changes fence existing sockets before their next `response.create`.
 - A key may hold at most eight live sockets. The first application frame must arrive within 30
   seconds, an idle connection between turns closes after five minutes, each write is bounded to
@@ -274,15 +280,21 @@ HTTP/1.1 Upgrade/Connection headers without buffering the upgraded connection.
 Operational boundaries:
 
 - Run only one coordinator/core pair per state directory.
-- The service is not active-active: SQLite, the credential vault, OAuth refresh locking, policy
-  sidecars, revocation state, and usage history are node-local. Stateless identity projection alone
-  is multi-machine safe; horizontal deployment first requires shared storage and distributed locks.
+- The service is not active-active: SQLite, the credential vault, OAuth refresh locking, request
+  identity state, policy sidecars, revocation state, and usage history are node-local. Horizontal
+  deployment first requires shared storage and distributed locks.
 - Stop the service before backing up or restoring the complete state directory.
 - Provider secrets live in a private `0600` vault and are not encrypted at rest.
-- Credential fingerprint sidecars are private `0600` core-vault state containing only mode and
-  revision. Installation IDs and pseudonym seeds are not persisted. The coordinator/core protocol
-  carries a stateless downstream pseudonym scope that is removed before upstream send and is never
-  written to usage records or logs.
+- Credential fingerprint sidecars remain private `0600` state containing only mode and revision.
+  Subscription request identity lives separately in one versioned
+  `rs_<account-digest>.request-state.json` per upstream ChatGPT account. The filename hides the
+  account ID; the file is `0600`, atomically replaced, limited to 16 MiB, and shared by duplicate
+  local credentials until the last owner is removed. It stores generated UUIDv4/v7 assignments,
+  relationships, windows, timestamps, and bounded schema-recognized raw ID pairs needed for
+  transparent reversal—never request/response bodies, content, workspace values, credentials,
+  opaque values, or tool arguments. Completed turn/item/compaction/wire detail becomes eligible for
+  LRU pruning after 30 days; conversation identity is capacity-LRU only. Corrupt or unsupported
+  state is preserved and the affected account fails before upstream delivery.
 - SQLite stores credential metadata, downstream-key hashes, timing, status, and token counts. It
   does not store prompts, request bodies, response bodies, tool arguments, or generated content.
 - Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or
@@ -299,11 +311,15 @@ offer, header order, and fresh TLS state. OAuth routes exclude API-key organizat
 retain only allowlisted Cloudflare infrastructure cookies.
 
 Compatibility is exact for request state that a `0.149.0` client supplies or the gateway can derive.
-The gateway does not fabricate absent caller workspace, sandbox, thread-source, trace, attestation,
-or tool-inventory state, and it preserves explicit supported Responses controls plus arbitrary
-keys inside documented opaque/free-form containers. Its provider HTTP clients also refuse redirects
-so credentials cannot be replayed to a redirected authority; this is an intentional security
-boundary from the stock CLI client.
+Standard turn, prewarm, and compaction metadata always contains `sandbox_mode` plus a sandbox family
+derived from the sidecar OS: restricted macOS/Linux/Windows requests use
+`seatbelt`/`seccomp`/`windows_sandbox`, unrestricted uses `none`, and external uses `external`.
+Legal permission semantics are retained; invalid or missing pairs become
+`danger-full-access`/`none`. Caller `workspaces` values are preserved unchanged. Other absent
+thread-source, trace, attestation, or tool-inventory state is not fabricated, and arbitrary keys
+remain valid inside documented opaque/free-form containers. Provider HTTP clients also refuse
+redirects so credentials cannot be replayed to a redirected authority; this is an intentional
+security boundary from the stock CLI client.
 
 OAuth issuer/client and upstream URL overrides are available for controlled compatibility testing.
 Plain HTTP overrides are accepted only for literal loopback IPs.

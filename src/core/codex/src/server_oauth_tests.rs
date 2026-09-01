@@ -116,8 +116,6 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
         .await
         .expect("OAuth record");
     let state = app_state(vault);
-    let expected_device =
-        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let mut request_headers = HeaderMap::new();
     request_headers.insert(
         "x-codex-inference-call-id",
@@ -135,9 +133,20 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
     let body = to_bytes(response.into_body(), 1024)
         .await
         .expect("response body");
+    let downstream_response: serde_json::Value =
+        serde_json::from_slice(&body).expect("downstream response JSON");
+    let downstream_response_id = downstream_response["id"]
+        .as_str()
+        .expect("downstream response id");
+    assert_ne!(downstream_response_id, "resp_refreshed");
+    let (_, response_uuid) = downstream_response_id
+        .split_once('_')
+        .expect("prefixed response id");
     assert_eq!(
-        body,
-        Bytes::from_static(br#"{"id":"resp_refreshed","object":"response"}"#)
+        uuid::Uuid::parse_str(response_uuid)
+            .expect("response UUID")
+            .get_version_num(),
+        7
     );
     assert_eq!(mock_state.inference_calls.load(Ordering::SeqCst), 2);
     assert_eq!(mock_state.refresh_calls.load(Ordering::SeqCst), 1);
@@ -166,8 +175,14 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
     assert_eq!(decoded["store"], false);
     assert_eq!(decoded["stream"], true);
     assert_eq!(
-        decoded["client_metadata"]["x-codex-installation-id"].as_str(),
-        Some(expected_device.as_str())
+        uuid::Uuid::parse_str(
+            decoded["client_metadata"]["x-codex-installation-id"]
+                .as_str()
+                .expect("installation")
+        )
+        .expect("installation UUID")
+        .get_version_num(),
+        4
     );
 }
 

@@ -11,7 +11,7 @@ use uuid::Uuid;
 #[path = "request_identity_prewarm.rs"]
 mod prewarm;
 #[path = "request_identity_turn_metadata.rs"]
-mod turn_metadata;
+pub(crate) mod turn_metadata;
 
 use turn_metadata::bounded_turn_metadata;
 use turn_metadata::complete_turn_metadata;
@@ -156,6 +156,9 @@ fn resolve_identity(
     let body_turn_metadata = body_turn_metadata
         .and_then(|raw| complete_turn_metadata(&raw, &generated))
         .unwrap_or_else(|| generated.clone());
+    let body_turn_metadata =
+        crate::sandbox_projection::normalize_serialized(&body_turn_metadata, &request_kind)
+            .unwrap_or(body_turn_metadata);
     let bounded_generated = bounded_turn_metadata(&generated).unwrap_or_else(|| generated.clone());
     let header_turn_metadata = if context.transport == SubscriptionTransport::WebSocket {
         bounded_turn_metadata(&body_turn_metadata).unwrap_or(bounded_generated)
@@ -165,6 +168,9 @@ fn resolve_identity(
             .or_else(|| bounded_turn_metadata(&body_turn_metadata))
             .unwrap_or(bounded_generated)
     };
+    let header_turn_metadata =
+        crate::sandbox_projection::normalize_serialized(&header_turn_metadata, &request_kind)
+            .unwrap_or(header_turn_metadata);
     RequestIdentity {
         session_id,
         thread_id,

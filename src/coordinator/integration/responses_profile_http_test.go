@@ -244,9 +244,16 @@ func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicit
 	value := decodeRequestObject(t, body)
 	assertResponsesProfileSurface(t, value, lite, false, subscription)
 	if hasExplicitPrevious {
-		if value["previous_response_id"] != "explicit-profile-previous" ||
+		if subscription {
+			previous, previousOK := value["previous_response_id"].(string)
+			conversation, conversationOK := value["conversation"].(string)
+			if !previousOK || !conversationOK || previous == "explicit-profile-previous" ||
+				conversation == "explicit-profile-conversation" {
+				t.Fatal("subscription HTTP continuation IDs were not pseudonymized")
+			}
+		} else if value["previous_response_id"] != "explicit-profile-previous" ||
 			value["conversation"] != "explicit-profile-conversation" {
-			t.Fatal("explicit HTTP continuation state was not preserved")
+			t.Fatal("API-key HTTP continuation state was not preserved")
 		}
 		if !containsResponseProfileItem(value["input"], "function_call") ||
 			!containsResponseProfileItem(value["input"], "function_call_output") ||

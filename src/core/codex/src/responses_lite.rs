@@ -116,6 +116,10 @@ pub(crate) fn assign_missing_item_ids(items: &mut [Value]) -> Vec<String> {
     synthesized
 }
 
+pub(crate) fn item_id_prefix(kind: &str) -> Option<&'static str> {
+    items::item_id_prefix(kind)
+}
+
 pub(crate) fn canonicalize_request_items(
     request: &mut Map<String, Value>,
     default_image_detail: Option<&str>,

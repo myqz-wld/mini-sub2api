@@ -52,8 +52,7 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
         )
         .await
         .expect("OAuth record");
-    let installation_id =
-        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
+    let installation_id = "downstream-installation-native";
     let core = spawn_internal(app_state(vault)).await;
     let handshake = internal_handshake(&core.base_url, &metadata.account_ref)
         .upgrade()
@@ -78,7 +77,17 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
         .await
         .expect("completion")
         .expect("valid event");
-    assert!(matches!(completion, DownstreamMessage::Text(_)));
+    let downstream_previous_response_id = match completion {
+        DownstreamMessage::Text(text) => {
+            let event: Value = serde_json::from_str(&text).expect("completion JSON");
+            event["response"]["id"]
+                .as_str()
+                .expect("response alias")
+                .to_string()
+        }
+        other => panic!("expected text completion, got {other:?}"),
+    };
+    assert_ne!(downstream_previous_response_id, "resp_first");
     let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
     assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 1);
@@ -91,7 +100,16 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
     assert_ne!(metadata["session_id"], "session-native");
     assert_ne!(metadata["thread_id"], "thread-native");
     assert_eq!(metadata["turn_id"], "");
-    assert_eq!(metadata["x-codex-installation-id"], installation_id);
+    let projected_installation = metadata["x-codex-installation-id"]
+        .as_str()
+        .expect("projected installation");
+    assert_ne!(projected_installation, installation_id);
+    assert_eq!(
+        uuid::Uuid::parse_str(projected_installation)
+            .expect("installation UUID")
+            .get_version_num(),
+        4
+    );
     assert_eq!(
         metadata["x-codex-ws-stream-request-start-ms"],
         "1700000000123"
@@ -105,6 +123,17 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
     assert_eq!(projected_turn["session_id"], metadata["session_id"]);
     assert_eq!(projected_turn["thread_id"], metadata["thread_id"]);
     assert_eq!(projected_turn["turn_id"], "");
+    assert_eq!(projected_turn["installation_id"], projected_installation);
+    assert_eq!(projected_turn["sandbox_mode"], "workspace-write");
+    assert_eq!(
+        projected_turn["sandbox"],
+        match std::env::consts::OS {
+            "macos" => "seatbelt",
+            "linux" | "android" => "seccomp",
+            "windows" => "windows_sandbox",
+            _ => "none",
+        }
+    );
     drop(frames);
     let headers = state.headers.lock().await;
     assert_eq!(
@@ -164,8 +193,6 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         )
         .await
         .expect("OAuth record");
-    let expected_device =
-        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let vault_after_refresh = vault.clone();
     let core = spawn_internal(app_state(vault)).await;
 
@@ -216,14 +243,24 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         .await
         .expect("completion")
         .expect("valid event");
-    assert!(matches!(completion, DownstreamMessage::Text(_)));
+    let downstream_previous_response_id = match completion {
+        DownstreamMessage::Text(text) => {
+            let event: Value = serde_json::from_str(&text).expect("completion JSON");
+            event["response"]["id"]
+                .as_str()
+                .expect("response alias")
+                .to_string()
+        }
+        other => panic!("expected text completion, got {other:?}"),
+    };
+    assert_ne!(downstream_previous_response_id, "resp_first");
 
     socket
         .send(DownstreamMessage::Text(
             serde_json::json!({
                 "type": "response.create",
                 "model": "gpt-5.6-sol",
-                "previous_response_id": "resp_first",
+                "previous_response_id": downstream_previous_response_id,
                 "input": [],
                 "tool_choice": "auto",
                 "parallel_tool_calls": false,
@@ -257,9 +294,19 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert_eq!(frames.len(), 2);
     let frame = &frames[0];
     let value: Value = serde_json::from_str(frame).expect("normalized JSON");
+    let expected_device = value["client_metadata"]["x-codex-installation-id"]
+        .as_str()
+        .expect("installation")
+        .to_string();
+    assert_eq!(
+        uuid::Uuid::parse_str(&expected_device)
+            .expect("installation UUID")
+            .get_version_num(),
+        4
+    );
     assert_eq!(value["type"], "response.create");
     assert_eq!(value["generate"], false);
-    assert_eq!(value["previous_response_id"], "resp_previous");
+    assert_ne!(value["previous_response_id"], "resp_previous");
     assert_eq!(value["client_metadata"]["custom"], "kept");
     assert_eq!(
         value["client_metadata"]["ws_request_header_x_openai_internal_codex_responses_lite"],
@@ -288,23 +335,14 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
         uuid::Uuid::parse_str(thread_id)
             .expect("thread pseudonym")
             .get_version_num(),
-        8
+        7
     );
     assert_eq!(turn_metadata["request_kind"], "prewarm");
     assert_eq!(turn_metadata["agent_name"], "/root");
     let turn_id = turn_metadata["turn_id"].as_str().expect("turn id");
-    assert_eq!(turn_metadata["root_turn_id"], turn_id);
-    assert_eq!(
-        uuid::Uuid::parse_str(turn_id)
-            .expect("turn UUID")
-            .get_version_num(),
-        7
-    );
-    assert!(
-        turn_metadata["turn_started_at_unix_ms"]
-            .as_i64()
-            .is_some_and(|value| value > 0)
-    );
+    assert_eq!(turn_id, "");
+    assert!(turn_metadata.get("root_turn_id").is_none());
+    assert!(turn_metadata.get("turn_started_at_unix_ms").is_none());
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert!(value["input"][0].get("id").is_none());
     assert_eq!(
@@ -419,16 +457,25 @@ async fn oauth_upstream(
     let capture = state.clone();
     let mut response = upgrade
         .on_upgrade(move |mut socket| async move {
-            for _ in 0..2 {
+            for index in 0..2 {
                 let Some(Ok(InternalMessage::Text(frame))) = socket.next().await else {
                     return;
                 };
                 capture.frames.lock().await.push(frame.to_string());
+                let response_id = if index == 0 {
+                    "resp_first"
+                } else {
+                    "resp_second"
+                };
+                let event = serde_json::json!({
+                    "type":"response.completed",
+                    "response":{
+                        "id":response_id,
+                        "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+                    }
+                });
                 let _ = socket
-                    .send(InternalMessage::Text(
-                        r#"{"type":"response.completed","response":{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}"#
-                            .into(),
-                    ))
+                    .send(InternalMessage::Text(event.to_string().into()))
                     .await;
             }
         })
