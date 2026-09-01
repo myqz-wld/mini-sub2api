@@ -180,23 +180,47 @@ The reviewed optional Codex request names `x-openai-internal-codex-residency`,
 `x-openai-memgen-request` cross both Go filters. The core keeps timing WebSocket-only and inference
 call IDs HTTP-only on OAuth routes, with the conditional raw order captured from `0.149.0`.
 
-## Stateless pseudonymization and optional device convergence
+## Persistent relationship-aware pseudonymization
 
-Subscription identity is projected in two independent layers. First, every parseable subscription request
-uses HMAC-SHA256 over the stable ChatGPT account namespace, downstream pseudonym scope, field domain,
-and original identifier. The first 128 bits are emitted as UUIDv8. This rewrites installation,
-session, thread, turn/root/parent-turn, window/parent-thread, client-request, item turn metadata, and
-prompt-cache carriers consistently across headers, `client_metadata`, and serialized turn metadata.
-The same account, downstream key, field, and source ID therefore produce the same result on every
-machine; changing the account or downstream key produces a different namespace. Unknown metadata,
-compaction state, subagent state, timestamps, and upstream response/item IDs are preserved.
+Every parseable subscription request is resolved into a relationship graph before projection. A
+root request selects one canonical conversation carrier, then writes the same persisted UUIDv7 to
+session, root thread, prompt-cache, client-request, window-prefix, header, flat metadata, and
+serialized metadata copies. Conflicting root carriers do not create unrelated identities. Only an
+explicit parent, fork, or subagent relationship creates a distinct child-thread UUIDv7 while the
+session continues to reference the root. Ordinary turns are persisted UUIDv7 values; tool loops
+reuse the active thread turn and a new logical user message creates a new one. Prewarm retains its
+official empty turn ID.
 
-Second, `device` replaces only the already-pseudonymized installation carrier with an account-level
-UUIDv8 derived solely from the ChatGPT account namespace. `off` keeps the one-to-one installation
-pseudonym instead. The fingerprint sidecar stores only mode and revision; no installation ID or
-random pseudonym seed is persisted. New sidecars default to `device`. `BareOpenAi` HTTP bodies and
-WebSocket application frames remain byte-exact in both modes; `CodexOpenAi149` is emulated without
-subscription identity projection.
+Installation is a genuine persisted UUIDv4. `device` uses one UUIDv4 per upstream ChatGPT account;
+`off` uses a scoped UUIDv4 mapping. HMAC-SHA256 derives only private lookup keys from the account
+namespace, downstream pseudonym scope, identity domain, and raw value. It is not encoded as a UUID.
+`BareOpenAi` remains byte-exact and `CodexOpenAi149` remains free of subscription identity state.
+
+The core stores this state in one versioned private
+`rs_<account-digest>.request-state.json` per upstream ChatGPT account. The digest hides the raw
+account ID. Duplicate local credentials share the file and it is deleted only after the last owner
+is removed. Files are `0600`, atomically replaced under an account lock, limited to 16 MiB, and
+contain multiple downstream scopes, conversations, child threads, turns, generated item metadata,
+window/compaction state, and bounded reversible wire-ID pairs. Completed turn/item/compaction/wire
+detail is eligible for LRU pruning after 30 days; conversation identity is capacity-LRU only.
+Corrupt, oversized, or unsupported state is preserved and fails the affected request before
+upstream delivery.
+
+Responses lifecycle IDs are translated transparently in both directions. Caller-origin response,
+conversation, stream, item, call, and approval IDs receive upstream pseudonyms and are restored on
+responses. Provider-origin IDs receive stable downstream aliases that resolve to the original on a
+later request or `response.inject`. HTTP JSON/SSE and WebSocket events persist a new mapping before
+the first downstream-visible occurrence. Translation is schema-aware: file, vector-store, prompt,
+model, connector, tunnel, and skill IDs, plus encrypted and opaque/free-form values, are not
+recursively rewritten. The raw-pair exception is limited to these enumerated IDs; bodies, content,
+tool arguments, credentials, workspace data, and opaque values are never persisted.
+
+Standard Codex turn, prewarm, and compaction metadata always carries a legal sandbox pair. The core
+preserves a legal `sandbox_mode` permission meaning and derives `sandbox` from its own runtime:
+restricted macOS/Linux/Windows maps to `seatbelt`/`seccomp`/`windows_sandbox`, unrestricted maps to
+`none`, and external maps to `external`. Missing or invalid input becomes
+`danger-full-access`/`none`. The body and compatibility header come from the same normalized
+metadata object. Caller `workspaces` values are not rewritten.
 
 One credential owns independent HTTP and WebSocket connection pools. HTTP explicitly selects
 reqwest/native-tls from the deployment runtime; provider WebSocket uses AWS-LC rustls with native
@@ -210,7 +234,9 @@ frames.
 
 ## Inference response
 
-- The core preserves the upstream status, safe end-to-end headers, JSON, and SSE bytes.
+- The core preserves the upstream status and safe end-to-end headers. BareOpenAi and API-key
+  response bodies remain byte-transparent; successful subscription JSON/SSE rewrites only the
+  enumerated lifecycle IDs described above.
 - The core adds `X-Mini-Sub2Api-Core-TTFB-Ms` after receiving upstream response headers.
 - Every streamed response declares the three failure trailers. They remain empty on clean EOF; a
   provider-body failure emits `X-Mini-Sub2Api-Failure-Phase`,
@@ -218,7 +244,9 @@ frames.
 - The coordinator removes internal headers, adds the public request id, and merges `upstream_ttfb;dur=<milliseconds>` into `Server-Timing`.
 - The coordinator validates and republishes a failure trailer block without inserting bytes into
   the JSON/SSE body.
-- Neither layer adds, removes, reorders, or mutates SSE events.
+- The coordinator does not mutate SSE events. The core buffers one bounded subscription SSE event,
+  persists any new ID pairs, then emits that event with translated IDs; comments and non-data event
+  fields are retained. BareOpenAi and API-key SSE remain byte-transparent.
 - Client cancellation cancels the internal request and upstream response body.
 
 ## Responses WebSocket
@@ -250,7 +278,8 @@ for the first `response.create` so its model and service tier can drive the prov
 - Application messages are UTF-8 JSON text and are limited to 16 MiB. `BareOpenAi` keeps every
   valid text frame byte-transparent. Simulated `response.inject` retains only official top-level
   `type`, `input`, and `response_id`, applies the item-schema filter to `input`, and preserves
-  function/custom payload values as opaque data. Other typed non-create events remain unchanged.
+  function/custom payload values as opaque data. Subscription create/inject/control frames
+  translate enumerated IDs; another typed non-create frame remains byte-exact when no ID changes.
 - Both Codex profiles apply the pinned request overlay to `response.create`, preserving explicit
   supported `type`, `generate`, `previous_response_id`, `conversation`, WS-only `stream_id`, and
   current Responses fields while removing unsupported protocol members. WS create strips HTTP-only
@@ -273,7 +302,9 @@ for the first `response.create` so its model and service tier can drive the prov
   `response.create`, the core re-reads the sidecar revision; a changed or unreadable fingerprint
   closes the internal/public socket with empty-reason code 1012 before the create reaches upstream.
   Other valid application events do not trigger this stale-policy check; only simulated
-  `response.inject` receives schema filtering instead of byte-exact relay.
+  `response.inject` receives schema filtering. Subscription response events are first observed with
+  raw upstream IDs by the socket continuation, then translated and durably persisted before being
+  sent downstream.
 - Provider handshakes use `OpenAI-Beta: responses_websockets=2026-02-06`. Subscription auth adds
   `ChatGPT-Account-ID`; both Codex profiles use the runtime-derived canonical identity triplet.
   OAuth header emission retains the

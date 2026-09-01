@@ -46,14 +46,23 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 			connection := dialResponsesProfileWebSocket(t, fixture.public, test.secret, test.headers)
 			defer connection.CloseNow()
 			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.4","input":[],"previous_response_id":"caller-parent"}`)
-			if event := readE2EWebSocketText(t, connection); !bytes.Contains([]byte(event), []byte("response.created")) {
+			createdEvent := readE2EWebSocketText(t, connection)
+			if !bytes.Contains([]byte(createdEvent), []byte("response.created")) {
 				t.Fatal("create did not become active before inject")
+			}
+			var created map[string]any
+			if json.Unmarshal([]byte(createdEvent), &created) != nil {
+				t.Fatal("created event was not JSON")
+			}
+			downstreamResponseID, _ := created["response"].(map[string]any)["id"].(string)
+			if downstreamResponseID == "" {
+				t.Fatal("created event omitted response id")
 			}
 			createCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
 			if test.name == "codex_api_key" && createCapture.Headers.Get("Version") != "0.149.0" {
 				t.Fatal("Codex API-key WebSocket profile did not pin version 0.149.0")
 			}
-			inject := ` {"type":"response.inject","response_id":"` + createCapture.ResponseID +
+			inject := ` {"type":"response.inject","response_id":"` + downstreamResponseID +
 				`","input":[{"type":"function_call_output","id":"fco_profile","call_id":"call_1","output":{"opaque":true,"unknown":true},"unsupported_item":true}],"unsupported_top":true} `
 			writeE2EWebSocketText(t, connection, inject)
 			if event := readE2EWebSocketText(t, connection); !bytes.Contains([]byte(event), []byte("response.completed")) {

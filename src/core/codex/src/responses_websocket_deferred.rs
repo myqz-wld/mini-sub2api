@@ -4,11 +4,11 @@ use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
 use crate::request_identity::apply_synthetic_prewarm;
 use crate::request_normalizer::EmulationTransport;
-use crate::request_normalizer::SubscriptionIdentity;
-use crate::request_normalizer::prepare_emulated_request;
+use crate::request_normalizer::StatefulPrepareError;
+use crate::request_normalizer::SubscriptionStateContext;
+use crate::request_normalizer::prepare_stateful_subscription_request;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
-use crate::request_pseudonym::RequestPseudonymizer;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket::RelayContext;
 use crate::responses_websocket::fingerprint_is_current;
@@ -73,28 +73,41 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         let _ = internal.send(internal_close(1012)).await;
         return;
     }
-    let Ok(prepared) = prepare_emulated_request(
-        context.profile,
+    let prepared = match prepare_stateful_subscription_request(
         EmulationTransport::WebSocket,
         &context.headers,
         Bytes::from(first),
         MAX_WEBSOCKET_MESSAGE_BYTES,
-        Some(SubscriptionIdentity {
+        SubscriptionStateContext {
+            account_ref: &context.account_ref,
             account_namespace: &context.account_namespace,
             downstream_scope: &context.pseudonym_scope,
-        }),
-    ) else {
-        let _ = internal.send(internal_close(1002)).await;
-        return;
+            fingerprint_mode: context.resolved.fingerprint.mode(),
+            store: context.state.vault.request_state(),
+        },
+        false,
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(StatefulPrepareError::InvalidRequest) => {
+            let _ = internal.send(internal_close(1002)).await;
+            return;
+        }
+        Err(StatefulPrepareError::StateUnavailable) => {
+            let _ = internal.send(internal_close(1011)).await;
+            return;
+        }
     };
     let synthesized_item_ids = prepared.synthesized_item_ids;
     let mut upstream_headers = prepared.headers;
+    let Some(resolved_identity) = prepared.resolved_identity else {
+        let _ = internal.send(internal_close(1011)).await;
+        return;
+    };
     if context.resolved.fingerprint.mode() == FingerprintMode::Device
-        && project_device_headers(
-            &mut upstream_headers,
-            &RequestPseudonymizer::converged_installation_id(&context.account_namespace),
-        )
-        .is_err()
+        && project_device_headers(&mut upstream_headers, &resolved_identity.installation_id)
+            .is_err()
     {
         let _ = internal.send(internal_close(1002)).await;
         return;
@@ -107,7 +120,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         match project_websocket_device(
             text,
             &context.resolved.fingerprint,
-            &RequestPseudonymizer::converged_installation_id(&context.account_namespace),
+            &resolved_identity.installation_id,
             MAX_WEBSOCKET_MESSAGE_BYTES,
         ) {
             Ok(text) => text,
@@ -262,6 +275,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         pending,
         vault: context.state.vault,
         fingerprint: context.resolved.fingerprint,
+        identity: Some(resolved_identity),
     };
     relay(
         internal,

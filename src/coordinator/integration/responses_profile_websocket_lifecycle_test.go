@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -25,10 +26,22 @@ func TestResponsesProfileWebSocketOrdinarySecondTurnUsesDelta(t *testing.T) {
 
 	connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.subscriptionKey, nil)
 	defer connection.CloseNow()
-	for _, frame := range [][]byte{mustRequestJSON(t, first), mustRequestJSON(t, second)} {
-		writeE2EWebSocketText(t, connection, string(frame))
-		readResponsesProfileTerminalEvents(t, connection)
+	writeE2EWebSocketText(t, connection, string(mustRequestJSON(t, first)))
+	firstEvents := readResponsesProfileTerminalEvents(t, connection)
+	var assistantAlias string
+	for _, eventText := range firstEvents {
+		var event map[string]any
+		if json.Unmarshal([]byte(eventText), &event) == nil && event["type"] == "response.output_item.done" {
+			item, _ := event["item"].(map[string]any)
+			assistantAlias, _ = item["id"].(string)
+		}
 	}
+	if assistantAlias == "" || assistantAlias == "msg_profile_assistant" {
+		t.Fatal("provider item id was not exposed as a downstream alias")
+	}
+	second["input"].([]any)[1].(map[string]any)["id"] = assistantAlias
+	writeE2EWebSocketText(t, connection, string(mustRequestJSON(t, second)))
+	readResponsesProfileTerminalEvents(t, connection)
 
 	captures := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 3)
 	hidden := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
@@ -38,7 +51,10 @@ func TestResponsesProfileWebSocketOrdinarySecondTurnUsesDelta(t *testing.T) {
 	publicFirst := decodeResponsesProfileWebSocketFrame(t, captures[1].Frame)
 	publicSecond := decodeResponsesProfileWebSocketFrame(t, captures[2].Frame)
 	if publicSecond["previous_response_id"] != captures[1].ResponseID {
-		t.Fatal("ordinary second turn did not reference the first public response")
+		t.Fatalf(
+			"ordinary second turn previous_response_id = %#v, want %q; frame = %#v",
+			publicSecond["previous_response_id"], captures[1].ResponseID, publicSecond,
+		)
 	}
 	input, ok := publicSecond["input"].([]any)
 	if !ok || len(input) != 1 || !bytes.Contains(captures[2].Frame, []byte("ordinary-second")) {

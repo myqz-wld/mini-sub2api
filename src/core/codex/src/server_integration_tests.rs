@@ -378,8 +378,6 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
     }
 
     let state = app_state(vault);
-    let expected_device =
-        crate::request_pseudonym::RequestPseudonymizer::converged_installation_id(account_id);
     let response = call_core_with_headers(&state, &metadata.account_ref, body, extra_headers)
         .await
         .expect("core response");
@@ -390,6 +388,16 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         .expect("decompress normalized request");
     let normalized: serde_json::Value =
         serde_json::from_slice(&captured_body).expect("normalized request");
+    let expected_device = normalized["client_metadata"]["x-codex-installation-id"]
+        .as_str()
+        .expect("installation")
+        .to_string();
+    assert_eq!(
+        uuid::Uuid::parse_str(&expected_device)
+            .expect("installation UUID")
+            .get_version_num(),
+        4
+    );
     assert_eq!(normalized["input"][0]["type"], "additional_tools");
     assert_eq!(normalized["input"][0]["tools"][0]["type"], "namespace");
     assert_eq!(normalized["input"][0]["tools"][0]["name"], "functions");
@@ -424,7 +432,6 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         ("session_id", "body-session-kept"),
         ("thread_id", "body-thread-kept"),
         ("turn_id", "body-turn-kept"),
-        ("window_id", "body-window-kept"),
     ] {
         let pseudonym = body_turn[name].as_str().expect("pseudonym");
         assert_ne!(pseudonym, raw);
@@ -432,9 +439,14 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
             uuid::Uuid::parse_str(pseudonym)
                 .expect("pseudonym UUID")
                 .get_version_num(),
-            8
+            7
         );
     }
+    assert_eq!(body_turn["session_id"], body_turn["thread_id"]);
+    assert_eq!(
+        body_turn["window_id"],
+        format!("{}:0", body_turn["thread_id"].as_str().expect("thread"))
+    );
     assert!(body_turn.get("future").is_none());
     let captured_headers = capture.headers.lock().await.clone().expect("headers");
     assert_eq!(
@@ -483,7 +495,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
             uuid::Uuid::parse_str(&pseudonym)
                 .expect("pseudonym UUID")
                 .get_version_num(),
-            8
+            7
         );
     }
     for name in ["openai-organization", "openai-project", "x-stainless-lang"] {

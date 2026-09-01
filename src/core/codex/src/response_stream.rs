@@ -1,6 +1,9 @@
 use crate::error::CoreFailure;
 use crate::error::failure;
 use crate::request_profile::UpstreamProfile;
+use crate::response_sse_translation::UpstreamByteStream;
+use crate::response_sse_translation::translated_sse_frames;
+use crate::response_translation::ResponseStateContext;
 use axum::body::Body;
 use axum::http::HeaderMap;
 use axum::http::HeaderName;
@@ -27,17 +30,19 @@ pub(crate) async fn build_http_response(
     ttfb_ms: u128,
     downstream_expects_sse: bool,
     profile: UpstreamProfile,
+    response_state: Option<ResponseStateContext>,
 ) -> Result<Response<Body>, CoreFailure> {
     if profile.emulates_codex() && !downstream_expects_sse && upstream.status().is_success() {
-        return build_non_streaming_response(upstream, ttfb_ms).await;
+        return build_non_streaming_response(upstream, ttfb_ms, response_state.as_ref()).await;
     }
-    build_streaming_response(upstream, ttfb_ms, downstream_expects_sse)
+    build_streaming_response(upstream, ttfb_ms, downstream_expects_sse, response_state)
 }
 
 fn build_streaming_response(
     upstream: reqwest::Response,
     ttfb_ms: u128,
     expects_sse: bool,
+    response_state: Option<ResponseStateContext>,
 ) -> Result<Response<Body>, CoreFailure> {
     let status = upstream.status();
     let mut builder = Response::builder().status(status);
@@ -56,7 +61,18 @@ fn build_streaming_response(
         http::header::TRAILER,
         format!("{FAILURE_PHASE_TRAILER}, {DELIVERY_STATE_TRAILER}, {RETRY_ADVICE_TRAILER}"),
     );
-    let upstream_stream = Box::pin(upstream.bytes_stream());
+    let translate_sse = response_state.is_some() && expects_sse && status.is_success();
+    let upstream_stream: UpstreamByteStream = Box::pin(upstream.bytes_stream());
+    if translate_sse {
+        let stream = translated_sse_frames(
+            upstream_stream,
+            response_state.expect("translation context"),
+            MAX_NON_STREAMING_RESPONSE_BYTES,
+        );
+        return builder
+            .body(Body::new(StreamBody::new(stream)))
+            .map_err(|_| CoreFailure::UpstreamResponseFailed);
+    }
     let stream = futures_util::stream::unfold(
         (upstream_stream, false),
         |(mut upstream_stream, finished)| async move {
@@ -91,6 +107,7 @@ fn build_streaming_response(
 async fn build_non_streaming_response(
     upstream: reqwest::Response,
     ttfb_ms: u128,
+    response_state: Option<&ResponseStateContext>,
 ) -> Result<Response<Body>, CoreFailure> {
     let mut builder = Response::builder().status(upstream.status());
     let connection_headers = nominated_connection_headers(upstream.headers());
@@ -109,7 +126,13 @@ async fn build_non_streaming_response(
         let chunk = chunk.map_err(|_| CoreFailure::UpstreamResponseFailed)?;
         append_bounded(&mut bytes, &chunk, MAX_NON_STREAMING_RESPONSE_BYTES)?;
     }
-    let response = terminal_response_from_sse(&bytes)?;
+    let mut response = terminal_response_from_sse(&bytes)?;
+    if let Some(state) = response_state {
+        response = state
+            .translate_value(response)
+            .await
+            .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    }
     let body = serde_json::to_vec(&response).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     builder
         .header(http::header::CONTENT_TYPE, "application/json")

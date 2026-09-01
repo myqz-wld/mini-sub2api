@@ -324,20 +324,20 @@ func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4")
 	if value["model"] != "gpt-5.4" ||
 		value["store"] != false || value["stream"] != true || value["tool_choice"] != "auto" ||
-		value["parallel_tool_calls"] != true || !isUUIDv8(value["prompt_cache_key"]) {
+		value["parallel_tool_calls"] != true || !isUUIDVersion(value["prompt_cache_key"], '7') {
 		t.Fatalf("native subscription controls = %#v", value)
 	}
 	metadata, ok := value["client_metadata"].(map[string]any)
-	if !ok || !isUUIDv8(metadata["session_id"]) || !isUUIDv8(metadata["thread_id"]) ||
-		!isUUIDv8(metadata["turn_id"]) || !isUUIDv8(metadata["x-codex-installation-id"]) ||
+	if !ok || !isUUIDVersion(metadata["session_id"], '7') || !isUUIDVersion(metadata["thread_id"], '7') ||
+		!isUUIDVersion(metadata["turn_id"], '7') || !isUUIDVersion(metadata["x-codex-installation-id"], '4') ||
 		metadata["x-codex-turn-metadata"] == "" {
 		t.Fatalf("native subscription metadata = %#v", value["client_metadata"])
 	}
 }
 
-func isUUIDv8(value any) bool {
+func isUUIDVersion(value any, version byte) bool {
 	text, ok := value.(string)
-	if !ok || len(text) != 36 || text[8] != '-' || text[13] != '-' || text[14] != '8' ||
+	if !ok || len(text) != 36 || text[8] != '-' || text[13] != '-' || text[14] != version ||
 		text[18] != '-' || text[23] != '-' {
 		return false
 	}

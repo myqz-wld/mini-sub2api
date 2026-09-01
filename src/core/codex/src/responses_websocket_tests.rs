@@ -23,6 +23,7 @@ use tokio::task::JoinHandle;
 
 const INTERNAL_TOKEN: &str = "internal-websocket-test-token-at-least-32-bytes";
 const ACCOUNT_NAMESPACE: &str = "chatgpt-account-test";
+const ACCOUNT_REF: &str = "acct_websocket_prepare";
 const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 #[path = "responses_websocket_inject_tests.rs"]
@@ -49,27 +50,39 @@ fn converts_only_supported_upstream_url_schemes() {
     assert!(websocket_url("file:///tmp/responses").is_err());
 }
 
-#[test]
-fn api_key_create_frame_is_byte_exact() {
+fn request_state_store() -> (
+    tempfile::TempDir,
+    crate::request_state_store::RequestStateStore,
+) {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let store = crate::request_state_store::RequestStateStore::new(temp.path().to_path_buf());
+    (temp, store)
+}
+
+#[tokio::test]
+async fn api_key_create_frame_is_byte_exact() {
     let original = " {\"type\":\"response.create\", \"model\":\"test\"} ".to_string();
     let mut headers = HeaderMap::new();
-    let mut continuation =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::BareOpenAi);
+    let (_temp, store) = request_state_store();
+    let mut identity = None;
     let got = prepare_client_text(
         original.clone(),
         &mut headers,
+        ACCOUNT_REF,
         None,
         UpstreamProfile::BareOpenAi,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
-        &mut continuation,
+        &store,
+        &mut identity,
     )
+    .await
     .expect("valid frame");
-    assert_eq!(got, original);
+    assert_eq!(got.text, original);
 }
 
-#[test]
-fn subscription_create_normalization_preserves_websocket_fields() {
+#[tokio::test]
+async fn subscription_create_normalization_preserves_websocket_fields() {
     let original = serde_json::json!({
         "type": "response.create",
         "model": "gpt-5.6-sol",
@@ -84,66 +97,126 @@ fn subscription_create_normalization_preserves_websocket_fields() {
     })
     .to_string();
     let mut headers = HeaderMap::new();
-    let mut continuation =
-        ResponsesWebSocketState::new(CallerKind::Codex, UpstreamProfile::CodexSubscription149);
+    let (_temp, store) = request_state_store();
+    let mut identity = None;
     let got = prepare_client_text(
         original,
         &mut headers,
+        ACCOUNT_REF,
         Some(ACCOUNT_NAMESPACE),
         UpstreamProfile::CodexSubscription149,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
-        &mut continuation,
+        &store,
+        &mut identity,
     )
+    .await
     .expect("valid frame");
-    let value: Value = serde_json::from_str(&got).expect("normalized JSON");
+    let value: Value = serde_json::from_str(&got.text).expect("normalized JSON");
 
     assert_eq!(value["type"], "response.create");
     assert_eq!(value["generate"], false);
-    assert_eq!(value["stream_id"], "stream-caller");
+    assert_ne!(value["stream_id"], "stream-caller");
     assert!(value.get("background").is_none());
     assert!(value.get("stream").is_none());
-    assert_eq!(value["previous_response_id"], "resp_previous");
+    assert_ne!(value["previous_response_id"], "resp_previous");
     assert_eq!(value["client_metadata"]["custom"], "kept");
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert_eq!(value["store"], false);
 }
 
-#[test]
-fn valid_non_create_application_event_is_byte_exact() {
+#[tokio::test]
+async fn valid_non_create_application_event_is_byte_exact() {
     let original = "{\"type\":\"response.append_input_item\",\"item\":{}}".to_string();
     let mut headers = HeaderMap::new();
-    let mut continuation =
-        ResponsesWebSocketState::new(CallerKind::Codex, UpstreamProfile::CodexSubscription149);
+    let (_temp, store) = request_state_store();
+    let mut identity = None;
     let got = prepare_client_text(
         original.clone(),
         &mut headers,
+        ACCOUNT_REF,
         Some(ACCOUNT_NAMESPACE),
         UpstreamProfile::CodexSubscription149,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
-        &mut continuation,
+        &store,
+        &mut identity,
     )
+    .await
     .expect("valid control frame");
-    assert_eq!(got, original);
+    assert_eq!(got.text, original);
 }
 
-#[test]
-fn malformed_or_untyped_application_frames_are_rejected() {
+#[tokio::test]
+async fn subscription_control_frame_ids_are_stable_and_pseudonymized() {
+    let original = serde_json::json!({
+        "type":"response.append_input_item",
+        "response_id":"resp_downstream",
+        "item":{
+            "type":"function_call_output",
+            "id":"item_downstream",
+            "call_id":"call_downstream",
+            "output":{"opaque_id":"opaque_keep"}
+        }
+    })
+    .to_string();
+    let (_temp, store) = request_state_store();
+    let mut identity = None;
+    let mut first_headers = HeaderMap::new();
+    let first = prepare_client_text(
+        original.clone(),
+        &mut first_headers,
+        ACCOUNT_REF,
+        Some(ACCOUNT_NAMESPACE),
+        UpstreamProfile::CodexSubscription149,
+        PSEUDONYM_SCOPE,
+        &device_fingerprint(),
+        &store,
+        &mut identity,
+    )
+    .await
+    .expect("first control frame");
+    let mut second_headers = HeaderMap::new();
+    let second = prepare_client_text(
+        original,
+        &mut second_headers,
+        ACCOUNT_REF,
+        Some(ACCOUNT_NAMESPACE),
+        UpstreamProfile::CodexSubscription149,
+        PSEUDONYM_SCOPE,
+        &device_fingerprint(),
+        &store,
+        &mut identity,
+    )
+    .await
+    .expect("second control frame");
+    assert_eq!(first.text, second.text);
+    let value: Value = serde_json::from_str(&first.text).expect("control JSON");
+    assert_ne!(value["response_id"], "resp_downstream");
+    assert_ne!(value["item"]["id"], "item_downstream");
+    assert_ne!(value["item"]["call_id"], "call_downstream");
+    assert_eq!(value["item"]["output"]["opaque_id"], "opaque_keep");
+}
+
+#[tokio::test]
+async fn malformed_or_untyped_application_frames_are_rejected() {
+    let (_temp, store) = request_state_store();
     for frame in ["not-json", "{}", r#"{"type":""}"#] {
-        let mut continuation =
-            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::BareOpenAi);
         let mut headers = HeaderMap::new();
+        let mut identity = None;
         assert!(
             prepare_client_text(
                 frame.to_string(),
                 &mut headers,
+                ACCOUNT_REF,
                 None,
                 UpstreamProfile::BareOpenAi,
                 PSEUDONYM_SCOPE,
                 &device_fingerprint(),
-                &mut continuation,
+                &store,
+                &mut identity,
             )
+            .await
             .is_err(),
             "frame {frame}"
         );

@@ -1,8 +1,10 @@
 use crate::error::CoreFailure;
-use crate::fingerprint::{FingerprintMode, FingerprintSnapshot};
-use crate::fingerprint_projection::project_device_headers;
+#[cfg(test)]
+use crate::fingerprint::FingerprintMode;
+use crate::fingerprint::FingerprintSnapshot;
+use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_profile::{CallerKind, UpstreamProfile};
-use crate::request_pseudonym::RequestPseudonymizer;
+use crate::response_translation::ResponseStateContext;
 use crate::responses_websocket_deferred::DeferredOAuthContext;
 pub(crate) use crate::responses_websocket_emulation::prepare_client_text;
 use crate::responses_websocket_http::{copy_headers, filtered_upgrade_headers, rejection_response};
@@ -71,15 +73,9 @@ async fn responses_socket_inner(
             ResolvedAuth::CodexOAuth { account_id, .. } => account_id.clone(),
             ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
         };
-        let installation_id = RequestPseudonymizer::converged_installation_id(&account_namespace);
-        let mut upstream_headers = headers;
-        if resolved.fingerprint.mode() == FingerprintMode::Device {
-            project_device_headers(&mut upstream_headers, &installation_id)
-                .map_err(|_| CoreFailure::InvalidRequest)?;
-        }
         let context = DeferredOAuthContext {
             state,
-            headers: upstream_headers,
+            headers,
             account_ref: identity.account_ref,
             account_namespace,
             pseudonym_scope: identity.pseudonym_scope,
@@ -127,6 +123,7 @@ async fn responses_socket_inner(
         pending: VecDeque::new(),
         vault: state.vault.clone(),
         fingerprint,
+        identity: None,
     };
     let mut response = upgrade
         .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
@@ -173,6 +170,7 @@ pub(crate) struct RelayContext {
     pub(crate) pending: VecDeque<InternalMessage>,
     pub(crate) vault: Vault,
     pub(crate) fingerprint: FingerprintSnapshot,
+    pub(crate) identity: Option<ResolvedRequestIdentity>,
 }
 
 pub(crate) async fn relay(
@@ -191,11 +189,22 @@ pub(crate) async fn relay(
         mut pending,
         vault,
         fingerprint,
+        mut identity,
     } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
     let delivery = WebSocketDeliveryTracker::default();
     let continuation = Arc::new(StdMutex::new(continuation));
+    let response_state = account_namespace.as_deref().and_then(|namespace| {
+        profile.uses_codex_subscription().then(|| {
+            ResponseStateContext::new(
+                &account_ref,
+                namespace,
+                &pseudonym_scope,
+                vault.request_state(),
+            )
+        })
+    });
     let exit = {
         let client_continuation = Arc::clone(&continuation);
         let client_to_upstream = async {
@@ -245,23 +254,39 @@ pub(crate) async fn relay(
                         if is_create && public_create_in_flight(&client_continuation) {
                             return RelayExit::Policy;
                         }
-                        let prepared = {
+                        let prepared = prepare_client_text(
+                            text,
+                            &mut headers,
+                            &account_ref,
+                            if profile.uses_codex_subscription() {
+                                account_namespace.as_deref()
+                            } else {
+                                None
+                            },
+                            profile,
+                            &pseudonym_scope,
+                            &fingerprint,
+                            vault.request_state(),
+                            &mut identity,
+                        )
+                        .await;
+                        match prepared.and_then(|prepared| {
+                            let Some(value) = prepared.create_value.as_ref() else {
+                                return Ok(prepared.text);
+                            };
                             let mut continuation = continuation_guard(&client_continuation);
-                            prepare_client_text(
-                                text,
-                                &mut headers,
-                                if profile.uses_codex_subscription() {
-                                    account_namespace.as_deref()
-                                } else {
-                                    None
-                                },
-                                profile,
-                                &pseudonym_scope,
-                                &fingerprint,
-                                &mut continuation,
-                            )
-                        };
-                        match prepared {
+                            if profile == UpstreamProfile::BareOpenAi {
+                                continuation.plan_public_create(value);
+                                Ok(prepared.text)
+                            } else {
+                                crate::responses_websocket_emulation::plan_public_text_with_synthesized_ids(
+                                    &mut continuation,
+                                    value,
+                                    &prepared.synthesized_item_ids,
+                                    MAX_WEBSOCKET_MESSAGE_BYTES,
+                                )
+                            }
+                        }) {
                             Ok(prepared) => {
                                 create_attempt = is_create;
                                 UpstreamMessage::Text(prepared.into())
@@ -316,13 +341,23 @@ pub(crate) async fn relay(
             while let Some(message) = upstream_read.next().await {
                 let (outbound, terminal_event) = match message {
                     Ok(UpstreamMessage::Text(text)) => {
-                        let text = text.to_string();
-                        let disposition = observe_server_text(&server_continuation, &text);
+                        let upstream_text = text.to_string();
+                        let disposition = observe_server_text(&server_continuation, &upstream_text);
                         if disposition == EventDisposition::ConsumeHiddenSetup {
                             continue;
                         }
+                        let text = match response_state.as_ref() {
+                            Some(state) => match state
+                                .translate_text(upstream_text.clone(), MAX_WEBSOCKET_MESSAGE_BYTES)
+                                .await
+                            {
+                                Ok(text) => text,
+                                Err(_) => return RelayExit::Failure(delivery.failure()),
+                            },
+                            None => upstream_text.clone(),
+                        };
                         delivery.mark_response_observed();
-                        let terminal = is_terminal_response_event(&text);
+                        let terminal = is_terminal_response_event(&upstream_text);
                         (InternalMessage::Text(text.into()), terminal)
                     }
                     Ok(UpstreamMessage::Binary(_)) | Ok(UpstreamMessage::Frame(_)) => {

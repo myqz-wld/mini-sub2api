@@ -186,7 +186,7 @@ pub(crate) fn strip_unprefixed_id(object: &mut Map<String, Value>) {
     }
 }
 
-fn adds_create_time(object: &Map<String, Value>) -> bool {
+pub(crate) fn adds_create_time(object: &Map<String, Value>) -> bool {
     match object.get("type").and_then(Value::as_str) {
         Some("message") => matches!(
             object.get("role").and_then(Value::as_str),

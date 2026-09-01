@@ -42,12 +42,14 @@ impl IdentityDomain {
     }
 }
 
-/// Deterministically isolates caller identifiers by credential and downstream key.
+/// Legacy deterministic fixture retained only for synchronous overlay unit tests.
 ///
 /// The stable upstream account namespace derives the HMAC key; a stateless scope derived from the
 /// downstream key verifier and the field domain are included in every message. The first 128
 /// digest bits are encoded as an RFC 9562 UUIDv8 so projected values keep the UUID-shaped wire
 /// contract without copying sub2api's namespace-UUID construction or relying on machine state.
+/// Production subscription traffic never compiles or uses this fixture; it goes through the
+/// persisted UUIDv4/UUIDv7 request-state translator.
 pub(crate) struct RequestPseudonymizer {
     key: [u8; 32],
     downstream_scope: String,

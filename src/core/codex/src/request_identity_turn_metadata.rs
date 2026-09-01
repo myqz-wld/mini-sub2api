@@ -27,7 +27,7 @@ const TURN_METADATA_FIELDS: &[&str] = &[
     "compaction",
 ];
 
-pub(super) fn bounded_turn_metadata(raw: &str) -> Option<String> {
+pub(crate) fn bounded_turn_metadata(raw: &str) -> Option<String> {
     let mut value = serde_json::from_str::<Value>(raw).ok()?;
     value.as_object_mut()?.retain(|name, _| {
         name != "tool_namespaces_info" && TURN_METADATA_FIELDS.contains(&name.as_str())

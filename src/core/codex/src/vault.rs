@@ -1,4 +1,6 @@
 use crate::fingerprint::{self, FingerprintMetadata, FingerprintMode, FingerprintSnapshot};
+use crate::request_state_store::RequestStateStore;
+use crate::request_state_store::cleanup_orphan_request_states;
 use crate::vault_io::open_private_file;
 use crate::vault_io::read_json_limited;
 use crate::vault_io::set_private_directory;
@@ -99,6 +101,7 @@ impl VaultRecord {
 pub struct Vault {
     state_dir: PathBuf,
     accounts_dir: PathBuf,
+    request_state: RequestStateStore,
 }
 
 pub struct InstanceLock {
@@ -120,8 +123,10 @@ impl Vault {
         set_private_directory(&state_dir)?;
         set_private_directory(&accounts_dir)?;
         cleanup_orphan_fingerprints(&accounts_dir)?;
+        cleanup_orphan_request_states(&accounts_dir)?;
         Ok(Self {
             state_dir,
+            request_state: RequestStateStore::new(accounts_dir.clone()),
             accounts_dir,
         })
     }
@@ -162,6 +167,10 @@ impl Vault {
         let metadata = record.metadata();
         let accounts_dir = self.accounts_dir.clone();
         tokio::task::spawn_blocking(move || {
+            let account_namespace = match &record.material {
+                CredentialMaterial::CodexOAuth { account_id, .. } => Some(account_id.clone()),
+                CredentialMaterial::OpenAiApiKey { .. } => None,
+            };
             let path = record_path(&accounts_dir, &record.account_ref)?;
             let _lock = lock_account(&accounts_dir, &record.account_ref)?;
             if path.exists() {
@@ -180,6 +189,16 @@ impl Vault {
                 fingerprint::remove_if_exists(&accounts_dir, &record.account_ref)
                     .context("cleaning failed credential creation")?;
                 return Err(write_error);
+            }
+            if let Some(account_namespace) = account_namespace
+                && let Err(state_error) = RequestStateStore::new(accounts_dir.clone())
+                    .register_owner_if_exists(&account_namespace, &record.account_ref)
+            {
+                let _ = std::fs::remove_file(&path);
+                fingerprint::remove_if_exists(&accounts_dir, &record.account_ref)
+                    .context("cleaning failed request state owner registration")?;
+                sync_directory(&accounts_dir);
+                return Err(state_error);
             }
             Ok(())
         })
@@ -270,6 +289,10 @@ impl Vault {
     pub async fn fingerprint_snapshot(&self, account_ref: &str) -> Result<FingerprintSnapshot> {
         let locked = self.lock_record(account_ref).await?;
         Ok(locked.fingerprint.clone())
+    }
+
+    pub(crate) fn request_state(&self) -> &RequestStateStore {
+        &self.request_state
     }
 
     pub async fn fingerprint_metadata(&self, account_ref: &str) -> Result<FingerprintMetadata> {
@@ -447,6 +470,17 @@ fn complete_removal_locked(
     account_ref: &str,
     requested_kind: RemovalKind,
 ) -> Result<RemovalReceipt> {
+    let record = match read_record(record_path) {
+        Ok(record) => {
+            anyhow::ensure!(
+                record.account_ref == account_ref,
+                "credential record identity mismatch"
+            );
+            Some(record)
+        }
+        Err(error) if is_not_found(&error) => None,
+        Err(error) => return Err(error),
+    };
     let receipt_path = receipt_path(accounts_dir, account_ref)?;
     let receipt = match read_optional_receipt(&receipt_path)? {
         Some(existing) => {
@@ -472,6 +506,13 @@ fn complete_removal_locked(
             receipt
         }
     };
+    if let Some(VaultRecord {
+        material: CredentialMaterial::CodexOAuth { account_id, .. },
+        ..
+    }) = &record
+    {
+        RequestStateStore::new(accounts_dir.to_path_buf()).remove_owner(account_id, account_ref)?;
+    }
     match std::fs::remove_file(record_path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
