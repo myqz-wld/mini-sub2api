@@ -21,7 +21,6 @@ use crate::request_state_types::INITIAL_REQUEST_STATE_REVISION;
 use crate::request_state_types::MAX_REQUEST_STATE_BYTES;
 use crate::request_state_types::PersistedRequestState;
 use crate::request_state_types::validate_account_ref;
-use crate::vault::CredentialMaterial;
 use crate::vault::VaultRecord;
 use crate::vault_io::open_private_file;
 use crate::vault_io::read_json_limited;
@@ -344,11 +343,7 @@ fn owners_for_state_ref(accounts_dir: &Path, state_ref: &str) -> Result<BTreeSet
             Err(error) if is_not_found(&error) => continue,
             Err(error) => return Err(error),
         };
-        if matches!(
-            &record.material,
-            CredentialMaterial::CodexOAuth { account_id, .. }
-                if LookupKeyFactory::account_state_ref(account_id) == state_ref
-        ) {
+        if LookupKeyFactory::account_state_ref(record.request_state_namespace()) == state_ref {
             owners.insert(record.account_ref);
         }
     }
@@ -377,9 +372,9 @@ fn active_state_refs(accounts_dir: &Path) -> Result<BTreeSet<String>> {
             Err(error) if is_not_found(&error) => continue,
             Err(error) => return Err(error),
         };
-        if let CredentialMaterial::CodexOAuth { account_id, .. } = record.material {
-            active.insert(LookupKeyFactory::account_state_ref(&account_id));
-        }
+        active.insert(LookupKeyFactory::account_state_ref(
+            record.request_state_namespace(),
+        ));
     }
     Ok(active)
 }

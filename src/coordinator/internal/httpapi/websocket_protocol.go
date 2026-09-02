@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 const maxHandshakeRejectionBytes = 64 * 1024
@@ -17,6 +19,26 @@ const maxHandshakeRejectionBytes = 64 * 1024
 type clientApplicationEvent struct {
 	eventType     string
 	operationKind string
+}
+
+func parseProviderRequestIDControl(payload []byte) (string, bool, bool) {
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(payload, &envelope) != nil || envelope.Type != protocolv1.ProviderRequestIDEventType {
+		return "", false, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	var control protocolv1.ProviderRequestIDControl
+	if decoder.Decode(&control) != nil || control.Type != protocolv1.ProviderRequestIDEventType ||
+		!validProviderRequestID(control.ProviderRequestID) {
+		return "", true, false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return "", true, false
+	}
+	return control.ProviderRequestID, true, true
 }
 
 func parseClientApplicationEvent(payload []byte) (clientApplicationEvent, bool) {
@@ -93,18 +115,14 @@ func writeInvalidWebSocketHandshake(
 	writeOpenAIError(writer, status, code, message, requestID)
 }
 
-func copyWebSocketUpgradeHeaders(destination, source http.Header) *time.Duration {
-	for _, name := range []string{
-		"Openai-Model",
-		"X-Codex-Turn-State",
-		"X-Models-Etag",
-		"X-Reasoning-Included",
-	} {
-		for _, value := range source.Values(name) {
-			destination.Add(name, value)
-		}
-	}
-	return mergeCoreTTFB(destination, source)
+func copyWebSocketUpgradeHeaders(
+	destination, source http.Header,
+	gatewayRequestID string,
+) *time.Duration {
+	ttfb := copyResponseHeaders(destination, source, gatewayRequestID)
+	destination.Del("Content-Type")
+	destination.Del("Content-Encoding")
+	return ttfb
 }
 
 func writeWebSocketHandshakeRejection(
@@ -117,7 +135,10 @@ func writeWebSocketHandshakeRejection(
 	preserveBody := err == nil && len(data) <= maxHandshakeRejectionBytes &&
 		(strings.HasPrefix(strings.ToLower(contentType), "application/json") ||
 			strings.HasPrefix(strings.ToLower(contentType), "text/"))
+	copyResponseHeaders(writer.Header(), response.Header, requestID)
 	if !preserveBody {
+		writer.Header().Del("Content-Type")
+		writer.Header().Del("Content-Encoding")
 		writeOpenAIError(
 			writer, response.StatusCode, "upstream_rejected",
 			"The upstream service rejected the WebSocket handshake.", requestID,
@@ -125,9 +146,6 @@ func writeWebSocketHandshakeRejection(
 		return
 	}
 	writer.Header().Set("Content-Type", contentType)
-	if retryAfter := response.Header.Get("Retry-After"); retryAfter != "" {
-		writer.Header().Set("Retry-After", retryAfter)
-	}
 	if response.StatusCode == http.StatusUpgradeRequired {
 		writer.Header().Set("Upgrade", "websocket")
 	}

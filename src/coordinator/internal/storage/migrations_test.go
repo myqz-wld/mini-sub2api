@@ -28,6 +28,7 @@ func TestFreshMigrationHasExpectedVersionAndNoBodyColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rows.Close()
+	foundProviderRequestID := false
 	for rows.Next() {
 		var cid, notNull, primaryKey int
 		var name, dataType string
@@ -39,6 +40,15 @@ func TestFreshMigrationHasExpectedVersionAndNoBodyColumns(t *testing.T) {
 		if strings.Contains(lower, "body") || strings.Contains(lower, "prompt") || lower == "response" {
 			t.Fatalf("request-content column must not exist: %s", name)
 		}
+		if lower == "provider_request_id" {
+			foundProviderRequestID = true
+			if dataType != "TEXT" || notNull != 0 {
+				t.Fatalf("provider_request_id shape = %s/not-null-%d", dataType, notNull)
+			}
+		}
+	}
+	if !foundProviderRequestID {
+		t.Fatal("provider_request_id column is missing")
 	}
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(filepath.Join(stateDir, "coordinator.sqlite3"))
@@ -107,14 +117,105 @@ func TestVersionOneDatabaseUpgradesWebSocketMetadataTransactionally(t *testing.T
 	defer store.Close()
 	var version int
 	var transport, operationKind string
+	var providerRequestID sql.NullString
 	if err := store.db.QueryRow(`
-        SELECT m.version, r.transport, r.operation_kind
+        SELECT m.version, r.transport, r.operation_kind, r.provider_request_id
         FROM schema_meta m JOIN requests r ON r.request_id = 'req_upgrade'
         WHERE m.singleton = 1`,
-	).Scan(&version, &transport, &operationKind); err != nil {
+	).Scan(&version, &transport, &operationKind, &providerRequestID); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 || transport != TransportHTTP || operationKind != OperationInference {
-		t.Fatalf("upgraded values = %d/%q/%q", version, transport, operationKind)
+	if version != 3 || transport != TransportHTTP || operationKind != OperationInference || providerRequestID.Valid {
+		t.Fatalf("upgraded values = %d/%q/%q/%#v", version, transport, operationKind, providerRequestID)
+	}
+}
+
+func TestVersionTwoDatabaseUpgradesProviderRequestIDTransactionally(t *testing.T) {
+	stateDir := t.TempDir()
+	databasePath := filepath.Join(stateDir, "coordinator.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		if _, err := database.Exec(migrations[index]); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := database.Exec(`UPDATE schema_meta SET version = 2 WHERE singleton = 1`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(context.Background(), stateDir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var version int
+	if err := store.db.QueryRow(`SELECT version FROM schema_meta WHERE singleton = 1`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 3 {
+		t.Fatalf("schema version = %d, want 3", version)
+	}
+	var columnCount int
+	if err := store.db.QueryRow(`
+        SELECT count(*) FROM pragma_table_info('requests') WHERE name = 'provider_request_id'`,
+	).Scan(&columnCount); err != nil {
+		t.Fatal(err)
+	}
+	if columnCount != 1 {
+		t.Fatalf("provider_request_id column count = %d", columnCount)
+	}
+}
+
+func TestFailedVersionThreeMigrationRollsBackSchemaVersionForRecovery(t *testing.T) {
+	stateDir := t.TempDir()
+	databasePath := filepath.Join(stateDir, "coordinator.sqlite3")
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		if _, err := database.Exec(migrations[index]); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+	}
+	if _, err := database.Exec(`
+		ALTER TABLE requests ADD COLUMN provider_request_id TEXT;
+		UPDATE schema_meta SET version = 2 WHERE singleton = 1;`); err != nil {
+		database.Close()
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if store, err := Open(context.Background(), stateDir, time.Now); err == nil {
+		store.Close()
+		t.Fatal("conflicting migration unexpectedly succeeded")
+	}
+	database, err = sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	var version, columnCount int
+	if err := database.QueryRow(`SELECT version FROM schema_meta WHERE singleton = 1`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`
+		SELECT count(*) FROM pragma_table_info('requests') WHERE name = 'provider_request_id'`,
+	).Scan(&columnCount); err != nil {
+		t.Fatal(err)
+	}
+	if version != 2 || columnCount != 1 {
+		t.Fatalf("failed migration recovery state = version %d, columns %d", version, columnCount)
 	}
 }

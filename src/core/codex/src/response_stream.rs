@@ -1,6 +1,7 @@
 use crate::error::CoreFailure;
 use crate::error::failure;
 use crate::request_profile::UpstreamProfile;
+use crate::response_headers::filtered_provider_headers;
 use crate::response_sse_translation::UpstreamByteStream;
 use crate::response_sse_translation::translated_sse_frames;
 use crate::response_translation::ResponseStateContext;
@@ -15,12 +16,12 @@ use http_body_util::StreamBody;
 use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
 use mini_sub2api_protocol_v1::DELIVERY_STATE_TRAILER;
 use mini_sub2api_protocol_v1::DeliveryState;
+use mini_sub2api_protocol_v1::ErrorEnvelope;
 use mini_sub2api_protocol_v1::FAILURE_PHASE_TRAILER;
 use mini_sub2api_protocol_v1::FailureMetadata;
 use mini_sub2api_protocol_v1::FailurePhase;
 use mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER;
 use mini_sub2api_protocol_v1::RetryAdvice;
-use std::collections::HashSet;
 use std::convert::Infallible;
 
 const MAX_NON_STREAMING_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
@@ -31,11 +32,73 @@ pub(crate) async fn build_http_response(
     downstream_expects_sse: bool,
     profile: UpstreamProfile,
     response_state: Option<ResponseStateContext>,
+    gateway_request_id: &str,
 ) -> Result<Response<Body>, CoreFailure> {
-    if profile.emulates_codex() && !downstream_expects_sse && upstream.status().is_success() {
-        return build_non_streaming_response(upstream, ttfb_ms, response_state.as_ref()).await;
+    let filtered_headers = filtered_provider_headers(upstream.headers(), gateway_request_id)
+        .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    if profile.uses_identity_state() && !upstream.status().is_success() {
+        return normalized_upstream_failure(
+            upstream.status(),
+            ttfb_ms,
+            filtered_headers,
+            gateway_request_id,
+            &CoreFailure::UpstreamResponseFailed,
+        );
     }
-    build_streaming_response(upstream, ttfb_ms, downstream_expects_sse, response_state)
+    if profile.emulates_codex() && !downstream_expects_sse && upstream.status().is_success() {
+        let diagnostic_headers = filtered_headers.clone();
+        return match build_non_streaming_response(
+            upstream,
+            ttfb_ms,
+            response_state.as_ref(),
+            filtered_headers,
+        )
+        .await
+        {
+            Ok(response) => Ok(response),
+            Err(error) => normalized_upstream_failure(
+                error.status(),
+                ttfb_ms,
+                diagnostic_headers,
+                gateway_request_id,
+                &error,
+            ),
+        };
+    }
+    let diagnostic_headers = filtered_headers.clone();
+    match build_streaming_response(
+        upstream,
+        ttfb_ms,
+        downstream_expects_sse,
+        response_state,
+        filtered_headers,
+    ) {
+        Ok(response) => Ok(response),
+        Err(error) => normalized_upstream_failure(
+            error.status(),
+            ttfb_ms,
+            diagnostic_headers,
+            gateway_request_id,
+            &error,
+        ),
+    }
+}
+
+pub(crate) fn build_http_failure_response(
+    upstream: reqwest::Response,
+    ttfb_ms: u128,
+    gateway_request_id: &str,
+    failure: &CoreFailure,
+) -> Result<Response<Body>, CoreFailure> {
+    let filtered_headers = filtered_provider_headers(upstream.headers(), gateway_request_id)
+        .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    normalized_upstream_failure(
+        upstream.status(),
+        ttfb_ms,
+        filtered_headers,
+        gateway_request_id,
+        failure,
+    )
 }
 
 fn build_streaming_response(
@@ -43,15 +106,13 @@ fn build_streaming_response(
     ttfb_ms: u128,
     expects_sse: bool,
     response_state: Option<ResponseStateContext>,
+    filtered_headers: HeaderMap,
 ) -> Result<Response<Body>, CoreFailure> {
     let status = upstream.status();
     let mut builder = Response::builder().status(status);
-    let connection_headers = nominated_connection_headers(upstream.headers());
-    let has_content_type = upstream.headers().contains_key(http::header::CONTENT_TYPE);
-    for (name, value) in upstream.headers() {
-        if is_safe_response_header(name) && !connection_headers.contains(name.as_str()) {
-            builder = builder.header(name, value);
-        }
+    let has_content_type = filtered_headers.contains_key(http::header::CONTENT_TYPE);
+    for (name, value) in &filtered_headers {
+        builder = builder.header(name, value);
     }
     if expects_sse && status.is_success() && !has_content_type {
         builder = builder.header(http::header::CONTENT_TYPE, "text/event-stream");
@@ -108,17 +169,13 @@ async fn build_non_streaming_response(
     upstream: reqwest::Response,
     ttfb_ms: u128,
     response_state: Option<&ResponseStateContext>,
+    mut filtered_headers: HeaderMap,
 ) -> Result<Response<Body>, CoreFailure> {
     let mut builder = Response::builder().status(upstream.status());
-    let connection_headers = nominated_connection_headers(upstream.headers());
-    for (name, value) in upstream.headers() {
-        if name != http::header::CONTENT_TYPE
-            && name != http::header::CONTENT_ENCODING
-            && is_safe_response_header(name)
-            && !connection_headers.contains(name.as_str())
-        {
-            builder = builder.header(name, value);
-        }
+    filtered_headers.remove(http::header::CONTENT_TYPE);
+    filtered_headers.remove(http::header::CONTENT_ENCODING);
+    for (name, value) in &filtered_headers {
+        builder = builder.header(name, value);
     }
     let mut bytes = Vec::new();
     let mut stream = upstream.bytes_stream();
@@ -126,10 +183,11 @@ async fn build_non_streaming_response(
         let chunk = chunk.map_err(|_| CoreFailure::UpstreamResponseFailed)?;
         append_bounded(&mut bytes, &chunk, MAX_NON_STREAMING_RESPONSE_BYTES)?;
     }
-    let mut response = terminal_response_from_sse(&bytes)?;
+    let terminal = terminal_response_from_sse(&bytes)?;
+    let mut response = terminal.response;
     if let Some(state) = response_state {
         response = state
-            .translate_value(response)
+            .translate_terminal_value(response, terminal.kind == TerminalKind::Completed)
             .await
             .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     }
@@ -139,6 +197,35 @@ async fn build_non_streaming_response(
         .header(CORE_TTFB_HEADER, ttfb_ms.to_string())
         .body(Body::from(body))
         .map_err(|_| CoreFailure::UpstreamResponseFailed)
+}
+
+fn normalized_upstream_failure(
+    status: axum::http::StatusCode,
+    ttfb_ms: u128,
+    mut filtered_headers: HeaderMap,
+    gateway_request_id: &str,
+    failure: &CoreFailure,
+) -> Result<Response<Body>, CoreFailure> {
+    filtered_headers.remove(http::header::CONTENT_TYPE);
+    filtered_headers.remove(http::header::CONTENT_ENCODING);
+    let envelope = ErrorEnvelope {
+        error: mini_sub2api_protocol_v1::CoreError {
+            code: failure.code().to_string(),
+            message: failure.public_message().to_string(),
+            request_id: gateway_request_id.to_string(),
+            failure: failure.failure(),
+        },
+    };
+    let body = serde_json::to_vec(&envelope).map_err(|_| CoreFailure::Internal)?;
+    let mut builder = Response::builder().status(status);
+    for (name, value) in &filtered_headers {
+        builder = builder.header(name, value);
+    }
+    builder
+        .header(http::header::CONTENT_TYPE, "application/json")
+        .header(CORE_TTFB_HEADER, ttfb_ms.to_string())
+        .body(Body::from(body))
+        .map_err(|_| CoreFailure::Internal)
 }
 
 fn append_bounded(
@@ -157,7 +244,19 @@ fn append_bounded(
     Ok(())
 }
 
-fn terminal_response_from_sse(bytes: &[u8]) -> Result<serde_json::Value, CoreFailure> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalKind {
+    Completed,
+    Failed,
+    Incomplete,
+}
+
+struct TerminalResponse {
+    kind: TerminalKind,
+    response: serde_json::Value,
+}
+
+fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalResponse, CoreFailure> {
     let text = std::str::from_utf8(bytes).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     let mut data = Vec::new();
     let mut terminal = None;
@@ -170,11 +269,16 @@ fn terminal_response_from_sse(bytes: &[u8]) -> Result<serde_json::Value, CoreFai
                 if payload != "[DONE]" {
                     let event: serde_json::Value = serde_json::from_str(&payload)
                         .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
-                    if matches!(
-                        event.get("type").and_then(serde_json::Value::as_str),
-                        Some("response.completed" | "response.failed" | "response.incomplete")
-                    ) {
-                        terminal = event.get("response").cloned();
+                    let kind = match event.get("type").and_then(serde_json::Value::as_str) {
+                        Some("response.completed") => Some(TerminalKind::Completed),
+                        Some("response.failed") => Some(TerminalKind::Failed),
+                        Some("response.incomplete") => Some(TerminalKind::Incomplete),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind
+                        && let Some(response) = event.get("response").cloned()
+                    {
+                        terminal = Some(TerminalResponse { kind, response });
                     }
                 }
             }
@@ -211,37 +315,6 @@ fn failure_trailers(metadata: FailureMetadata) -> HeaderMap {
     trailers
 }
 
-fn nominated_connection_headers(headers: &HeaderMap) -> HashSet<String> {
-    headers
-        .get_all(http::header::CONNECTION)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect()
-}
-
-fn is_safe_response_header(name: &HeaderName) -> bool {
-    if name.as_str().starts_with("x-mini-sub2api-") {
-        return false;
-    }
-    !matches!(
-        name.as_str(),
-        "connection"
-            | "content-length"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "set-cookie"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,9 +323,27 @@ mod tests {
     fn terminal_sse_response_is_extracted_across_standard_line_endings() {
         let body = b": keepalive\r\nevent: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\r\ndata: \"delta\":\"ok\"}\r\n\r\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\",\"output\":[]}}\n\ndata: [DONE]\n\n";
         assert_eq!(
-            terminal_response_from_sse(body).expect("terminal response"),
+            terminal_response_from_sse(body)
+                .expect("terminal response")
+                .response,
             serde_json::json!({"id":"resp_test","output":[]})
         );
+    }
+
+    #[test]
+    fn aggregated_sse_retains_each_terminal_kind() {
+        for (event_type, expected) in [
+            ("response.completed", TerminalKind::Completed),
+            ("response.failed", TerminalKind::Failed),
+            ("response.incomplete", TerminalKind::Incomplete),
+        ] {
+            let body = format!(
+                "event: {event_type}\ndata: {{\"type\":\"{event_type}\",\"response\":{{\"id\":\"resp_terminal\"}}}}\n\n"
+            );
+            let terminal = terminal_response_from_sse(body.as_bytes()).expect("terminal response");
+            assert_eq!(terminal.kind, expected);
+            assert_eq!(terminal.response["id"], "resp_terminal");
+        }
     }
 
     #[test]

@@ -3,6 +3,11 @@ use serde_json::Map;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+use crate::lifecycle_carriers::CarrierContainer;
+use crate::lifecycle_carriers::CarrierDirection;
+use crate::lifecycle_carriers::CarrierRule;
+use crate::lifecycle_carriers::CarrierShape;
+use crate::lifecycle_carriers::wire_rules;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
 
@@ -11,41 +16,76 @@ pub(crate) fn translate_request_ids(
     object: &mut Map<String, Value>,
     generated_upstream_item_ids: &BTreeSet<String>,
 ) -> Result<()> {
-    translate_field(
+    translate_request_object(
         editor,
         object,
-        "previous_response_id",
-        WireIdDomain::Response,
+        CarrierContainer::TopLevel,
+        generated_upstream_item_ids,
     )?;
-    translate_field(editor, object, "response_id", WireIdDomain::Response)?;
-    translate_field(editor, object, "stream_id", WireIdDomain::Stream)?;
-    translate_field(editor, object, "item_id", WireIdDomain::Item)?;
-    translate_field(editor, object, "output_item_id", WireIdDomain::Item)?;
-    translate_field(editor, object, "call_id", WireIdDomain::Call)?;
-    translate_field(
-        editor,
-        object,
-        "approval_request_id",
-        WireIdDomain::Approval,
-    )?;
-    translate_field(editor, object, "approval_id", WireIdDomain::Approval)?;
-    translate_conversation(editor, object)?;
-    if let Some(item) = object.get_mut("item").and_then(Value::as_object_mut) {
-        translate_item(editor, item, generated_upstream_item_ids)?;
-    }
-    if let Some(items) = object.get_mut("items").and_then(Value::as_array_mut) {
-        for item in items {
-            if let Some(item) = item.as_object_mut() {
-                translate_item(editor, item, generated_upstream_item_ids)?;
+    Ok(())
+}
+
+fn translate_request_object(
+    editor: &mut RequestStateEditor<'_>,
+    object: &mut Map<String, Value>,
+    container: CarrierContainer,
+    generated_upstream_item_ids: &BTreeSet<String>,
+) -> Result<()> {
+    for rule in wire_rules(CarrierDirection::Request, container) {
+        match rule.shape {
+            CarrierShape::Scalar => translate_field(editor, object, rule)?,
+            CarrierShape::Conversation => translate_conversation(editor, object, rule)?,
+            CarrierShape::TypedItemId => {
+                translate_typed_item_id(editor, object, rule, generated_upstream_item_ids)?;
             }
-        }
-    }
-    if let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) {
-        for item in items {
-            let Some(item) = item.as_object_mut() else {
-                continue;
-            };
-            translate_item(editor, item, generated_upstream_item_ids)?;
+            CarrierShape::ItemObject => {
+                if let Some(item) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_request_object(
+                        editor,
+                        item,
+                        CarrierContainer::Item,
+                        generated_upstream_item_ids,
+                    )?;
+                }
+            }
+            CarrierShape::ItemArray => {
+                if let Some(items) = object.get_mut(rule.name).and_then(Value::as_array_mut) {
+                    for item in items.iter_mut().filter_map(Value::as_object_mut) {
+                        translate_request_object(
+                            editor,
+                            item,
+                            CarrierContainer::Item,
+                            generated_upstream_item_ids,
+                        )?;
+                    }
+                }
+            }
+            CarrierShape::CallerObject => {
+                if let Some(caller) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_request_object(
+                        editor,
+                        caller,
+                        CarrierContainer::Caller,
+                        generated_upstream_item_ids,
+                    )?;
+                }
+            }
+            CarrierShape::SafetyCheckArray => {
+                if let Some(checks) = object.get_mut(rule.name).and_then(Value::as_array_mut) {
+                    for check in checks.iter_mut().filter_map(Value::as_object_mut) {
+                        translate_request_object(
+                            editor,
+                            check,
+                            CarrierContainer::SafetyCheck,
+                            generated_upstream_item_ids,
+                        )?;
+                    }
+                }
+            }
+            unsupported => anyhow::bail!(
+                "unsupported request carrier shape {unsupported:?} for {}",
+                rule.name
+            ),
         }
     }
     Ok(())
@@ -54,58 +94,56 @@ pub(crate) fn translate_request_ids(
 fn translate_conversation(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,
+    rule: &CarrierRule,
 ) -> Result<()> {
-    let Some(conversation) = object.get_mut("conversation") else {
+    let domain = required_domain(rule)?;
+    let Some(conversation) = object.get_mut(rule.name) else {
         return Ok(());
     };
     match conversation {
         Value::String(value) if !value.is_empty() => {
-            *value = editor.wire_from_downstream(WireIdDomain::Conversation, value)?;
+            *value = editor.wire_from_downstream(domain, value)?;
         }
         Value::Object(conversation) => {
-            translate_field(editor, conversation, "id", WireIdDomain::Conversation)?;
+            translate_named_field(editor, conversation, "id", domain)?;
         }
         _ => {}
     }
     Ok(())
 }
 
-fn translate_item(
+fn translate_typed_item_id(
     editor: &mut RequestStateEditor<'_>,
     item: &mut Map<String, Value>,
+    rule: &CarrierRule,
     generated_upstream_item_ids: &BTreeSet<String>,
 ) -> Result<()> {
-    if let Some(id) = item.get("id").and_then(Value::as_str).map(str::to_string)
-        && !id.is_empty()
-        && !generated_upstream_item_ids.contains(&id)
-    {
-        item.insert(
-            "id".to_string(),
-            Value::String(editor.wire_from_downstream(WireIdDomain::Item, &id)?),
-        );
+    let Some(id) = item
+        .get(rule.name)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
+    if id.is_empty() || generated_upstream_item_ids.contains(&id) {
+        return Ok(());
     }
-    for name in ["item_id", "output_item_id"] {
-        translate_field(editor, item, name, WireIdDomain::Item)?;
-    }
-    translate_field(editor, item, "call_id", WireIdDomain::Call)?;
-    translate_field(editor, item, "approval_request_id", WireIdDomain::Approval)?;
-    translate_field(editor, item, "response_id", WireIdDomain::Response)?;
-    if let Some(caller) = item.get_mut("caller").and_then(Value::as_object_mut) {
-        translate_field(editor, caller, "caller_id", WireIdDomain::Item)?;
-    }
-    for name in ["pending_safety_checks", "acknowledged_safety_checks"] {
-        if let Some(checks) = item.get_mut(name).and_then(Value::as_array_mut) {
-            for check in checks {
-                if let Some(check) = check.as_object_mut() {
-                    translate_field(editor, check, "id", WireIdDomain::Approval)?;
-                }
-            }
-        }
-    }
+    item.insert(
+        rule.name.to_string(),
+        Value::String(editor.wire_from_downstream(required_domain(rule)?, &id)?),
+    );
     Ok(())
 }
 
 fn translate_field(
+    editor: &mut RequestStateEditor<'_>,
+    object: &mut Map<String, Value>,
+    rule: &CarrierRule,
+) -> Result<()> {
+    translate_named_field(editor, object, rule.name, required_domain(rule)?)
+}
+
+fn translate_named_field(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,
     name: &str,
@@ -122,6 +160,11 @@ fn translate_field(
         Value::String(editor.wire_from_downstream(domain, &raw)?),
     );
     Ok(())
+}
+
+fn required_domain(rule: &CarrierRule) -> Result<WireIdDomain> {
+    rule.domain
+        .ok_or_else(|| anyhow::anyhow!("carrier {} has no wire domain", rule.name))
 }
 
 #[cfg(test)]

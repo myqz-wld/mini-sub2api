@@ -383,6 +383,34 @@ fn failed_incomplete_and_error_events_clear_reuse() {
 }
 
 #[test]
+fn only_completed_public_operation_releases_its_compaction_token() {
+    let request = request(vec![message("user", "compaction-user")]);
+    let token = PendingCompaction {
+        marker_key: "marker-test".to_string(),
+        thread_id: "01900000-0000-7000-8000-000000000001".to_string(),
+        target_window: 1,
+    };
+    let mut completed = state();
+    completed.plan_public_create_with_state(&request, &[], Some(token.clone()));
+    assert!(completed.mark_public_create_attempted());
+    let observed = completed.observe_server_event_with_compaction(&json!({
+        "type":"response.completed",
+        "response":{"id":"response-compaction"}
+    }));
+    assert_eq!(observed.disposition, EventDisposition::ForwardPublic);
+    assert_eq!(observed.completed_compaction, Some(token.clone()));
+
+    for event_type in ["response.failed", "response.incomplete", "error"] {
+        let mut failed = state();
+        failed.plan_public_create_with_state(&request, &[], Some(token.clone()));
+        assert!(failed.mark_public_create_attempted());
+        let observed = failed.observe_server_event_with_compaction(&json!({"type":event_type}));
+        assert_eq!(observed.disposition, EventDisposition::ForwardPublic);
+        assert!(observed.completed_compaction.is_none(), "{event_type}");
+    }
+}
+
+#[test]
 fn setup_failure_transport_failure_reconnect_and_reset_clear_state() {
     let first = request(vec![message("user", "user-1")]);
     let next = request(vec![message("user", "user-1"), message("user", "user-2")]);

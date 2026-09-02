@@ -27,14 +27,14 @@ const WS_STREAM_START_METADATA: &str = "x-codex-ws-stream-request-start-ms";
 const DEFAULT_BETA_FEATURE: &str = "remote_compaction_v2";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) enum SubscriptionTransport {
+pub(crate) enum CodexTransport {
     Http,
     WebSocket,
 }
 
 pub(crate) struct IdentityContext {
     pub(crate) responses_lite: bool,
-    pub(crate) transport: SubscriptionTransport,
+    pub(crate) transport: CodexTransport,
     pub(crate) tool_namespaces_info: Option<Value>,
 }
 
@@ -112,10 +112,10 @@ fn resolve_identity(
         .unwrap_or_else(new_uuid_v7);
     let body_turn_metadata = client_metadata_text(object, TURN_METADATA_HEADER);
     let header_turn_metadata = header_text(headers, TURN_METADATA_HEADER);
-    let request_header_turn_metadata = (context.transport == SubscriptionTransport::Http)
+    let request_header_turn_metadata = (context.transport == CodexTransport::Http)
         .then_some(header_turn_metadata.as_deref())
         .flatten();
-    let prewarm = context.transport == SubscriptionTransport::WebSocket
+    let prewarm = context.transport == CodexTransport::WebSocket
         && object.get("generate").and_then(Value::as_bool) == Some(false);
     let request_kind = body_turn_metadata
         .as_deref()
@@ -160,7 +160,7 @@ fn resolve_identity(
         crate::sandbox_projection::normalize_serialized(&body_turn_metadata, &request_kind)
             .unwrap_or(body_turn_metadata);
     let bounded_generated = bounded_turn_metadata(&generated).unwrap_or_else(|| generated.clone());
-    let header_turn_metadata = if context.transport == SubscriptionTransport::WebSocket {
+    let header_turn_metadata = if context.transport == CodexTransport::WebSocket {
         bounded_turn_metadata(&body_turn_metadata).unwrap_or(bounded_generated)
     } else {
         header_turn_metadata
@@ -244,7 +244,7 @@ fn apply_headers(headers: &mut HeaderMap, identity: &RequestIdentity, context: &
     insert_header(headers, WINDOW_HEADER, &identity.window_id);
     headers.remove(INSTALLATION_HEADER);
     ensure_beta_features(headers);
-    if context.transport == SubscriptionTransport::Http && context.responses_lite {
+    if context.transport == CodexTransport::Http && context.responses_lite {
         headers.insert(
             HeaderName::from_static(RESPONSES_LITE_HEADER),
             HeaderValue::from_static("true"),
@@ -291,7 +291,7 @@ fn apply_client_metadata(
             insert_string_if_invalid(metadata, name, &value);
         }
     }
-    if context.transport == SubscriptionTransport::WebSocket {
+    if context.transport == CodexTransport::WebSocket {
         if let Some(value) = header_text(headers, "x-codex-turn-state") {
             insert_string_if_invalid(metadata, "x-codex-turn-state", &value);
         }

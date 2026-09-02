@@ -51,29 +51,31 @@ const (
 )
 
 type websocketOperation struct {
-	requestID       string
-	kind            string
-	started         time.Time
-	ttfb            *time.Duration
-	usage           *storage.TokenUsage
-	terminalPending bool
-	terminalReady   chan struct{}
+	requestID         string
+	kind              string
+	started           time.Time
+	ttfb              *time.Duration
+	usage             *storage.TokenUsage
+	terminalPending   bool
+	terminalReady     chan struct{}
+	providerRequestID *string
 }
 
 type websocketSession struct {
-	handler      *Handler
-	route        storage.Route
-	publicSocket *websocket.Conn
-	coreSocket   *websocket.Conn
-	timeouts     websocketTimeouts
-	ctx          context.Context
-	cancel       context.CancelFunc
-	deadlines    chan websocketDeadlineEvent
-	stopping     atomic.Bool
-	exitCause    atomic.Int32
-	stopOnce     sync.Once
-	mu           sync.Mutex
-	active       *websocketOperation
+	handler           *Handler
+	route             storage.Route
+	publicSocket      *websocket.Conn
+	coreSocket        *websocket.Conn
+	timeouts          websocketTimeouts
+	ctx               context.Context
+	cancel            context.CancelFunc
+	deadlines         chan websocketDeadlineEvent
+	stopping          atomic.Bool
+	exitCause         atomic.Int32
+	stopOnce          sync.Once
+	mu                sync.Mutex
+	active            *websocketOperation
+	providerRequestID *string
 }
 
 var errOverlappingResponse = errors.New("a response is already active")
@@ -82,12 +84,14 @@ func newWebSocketSession(
 	handler *Handler,
 	route storage.Route,
 	publicSocket, coreSocket *websocket.Conn,
+	providerRequestID *string,
 ) *websocketSession {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &websocketSession{
 		handler: handler, route: route, publicSocket: publicSocket, coreSocket: coreSocket,
 		timeouts: handler.wsTimeouts, ctx: ctx, cancel: cancel,
-		deadlines: make(chan websocketDeadlineEvent, 8),
+		deadlines:         make(chan websocketDeadlineEvent, 8),
+		providerRequestID: cloneString(providerRequestID),
 	}
 }
 
@@ -207,6 +211,13 @@ func (s *websocketSession) corePump() websocketPumpResult {
 		if messageType != websocket.MessageText {
 			return s.upstreamPumpResult(nil)
 		}
+		if providerRequestID, control, valid := parseProviderRequestIDControl(payload); control {
+			if !valid {
+				return s.upstreamPumpResult(nil)
+			}
+			s.observeProviderRequestID(providerRequestID)
+			continue
+		}
 		s.observeCoreResponse()
 		event, ok := usage.ParseWebSocketEvent(payload)
 		if !ok {
@@ -254,7 +265,8 @@ func (s *websocketSession) beginOperation(kind string) error {
 		}
 		operation := &websocketOperation{
 			requestID: requestID, kind: kind, started: s.handler.clock().UTC(),
-			terminalReady: make(chan struct{}),
+			terminalReady:     make(chan struct{}),
+			providerRequestID: cloneString(s.providerRequestID),
 		}
 		s.active = operation
 		err = s.handler.store.StartWebSocketOperation(s.ctx, s.route, requestID, kind)
@@ -263,6 +275,15 @@ func (s *websocketSession) beginOperation(kind string) error {
 		}
 		s.mu.Unlock()
 		return err
+	}
+}
+
+func (s *websocketSession) observeProviderRequestID(value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.providerRequestID = cloneString(&value)
+	if s.active != nil {
+		s.active.providerRequestID = cloneString(&value)
 	}
 }
 
@@ -332,15 +353,24 @@ func (s *websocketSession) finishOperation(operation *websocketOperation, status
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := s.handler.store.FinalizeRequest(ctx, operation.requestID, storage.RequestResult{
-		CompletedAt: completed,
-		Status:      status,
-		TTFB:        operation.ttfb,
-		Duration:    completed.Sub(operation.started),
-		Usage:       operation.usage,
+		CompletedAt:       completed,
+		Status:            status,
+		TTFB:              operation.ttfb,
+		Duration:          completed.Sub(operation.started),
+		Usage:             operation.usage,
+		ProviderRequestID: operation.providerRequestID,
 	})
 	if err != nil {
 		s.handler.logger.Printf("request %s history finalization failed: %v", operation.requestID, err)
 	}
+}
+
+func cloneString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func (s *websocketSession) notifyDeadline(event websocketDeadlineEvent) {

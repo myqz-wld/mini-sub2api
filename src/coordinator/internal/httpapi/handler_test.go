@@ -49,11 +49,16 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{" +
 		"\"input_tokens\":11,\"input_tokens_details\":{\"cached_tokens\":4}," +
 		"\"output_tokens\":5,\"output_tokens_details\":{\"reasoning_tokens\":2},\"total_tokens\":16}}}\n\n"
-	core := &fakeCore{response: func(context.Context, string) (*http.Response, error) {
+	core := &fakeCore{response: func(_ context.Context, requestID string) (*http.Response, error) {
 		headers := make(http.Header)
 		headers.Set("Content-Type", "text/event-stream")
 		headers.Set("Server-Timing", "provider;dur=1")
 		headers.Set(protocolv1.CoreTTFBHeader, "12")
+		headers.Set(protocolv1.ProviderRequestIDHeader, "provider-http-diagnostic")
+		headers.Set("X-Request-Id", requestID)
+		headers.Set("Openai-Request-Id", requestID)
+		headers.Set("Session-Id", "must-not-cross")
+		headers.Set("X-Provider-Future-Id", "must-not-cross")
 		headers.Set("Set-Cookie", "must-not-cross=1")
 		headers.Set("X-Mini-Sub2Api-Forged-Upstream", "no")
 		headers.Set("Connection", "X-Hop-Test")
@@ -109,7 +114,14 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	if timing := response.Header.Get("Server-Timing"); timing != "provider;dur=1, upstream_ttfb;dur=12" {
 		t.Fatalf("Server-Timing = %q", timing)
 	}
+	requestID := response.Header.Get("X-Mini-Sub2Api-Request-Id")
+	if response.Header.Get("X-Request-Id") != requestID ||
+		response.Header.Get("Openai-Request-Id") != requestID {
+		t.Fatalf("provider request aliases = %#v", response.Header)
+	}
 	if response.Header.Get("Set-Cookie") != "" || response.Header.Get(protocolv1.CoreTTFBHeader) != "" ||
+		response.Header.Get(protocolv1.ProviderRequestIDHeader) != "" ||
+		response.Header.Get("Session-Id") != "" || response.Header.Get("X-Provider-Future-Id") != "" ||
 		response.Header.Get("X-Hop-Test") != "" {
 		t.Fatalf("unsafe response headers crossed: %#v", response.Header)
 	}
@@ -147,6 +159,11 @@ func TestResponsesStreamsAndRecordsUsageByDownstreamKey(t *testing.T) {
 	if len(stats) != 1 || stats[0].APIKeyID != key.ID || stats[0].Usage == nil ||
 		stats[0].Usage.TotalTokens != 16 || stats[0].Usage.ReasoningOutputTokens != 2 {
 		t.Fatalf("stats = %#v (credential %s)", stats, credential.ID)
+	}
+	history := waitForHistory(t, store, key.ID, 1)
+	if history[0].ProviderRequestID == nil ||
+		*history[0].ProviderRequestID != "provider-http-diagnostic" {
+		t.Fatalf("provider diagnostic history = %#v", history)
 	}
 }
 
@@ -278,9 +295,17 @@ func TestCoreStateUnavailablePreservesRetryableNotDeliveredFailure(t *testing.T)
 				DeliveryState: protocolv1.DeliveryNotDelivered,
 			},
 		}})
+		headers := make(http.Header)
+		headers.Set("Content-Type", "application/json")
+		headers.Set("Retry-After", "3")
+		headers.Set("X-Request-Id", requestID)
+		headers.Set(protocolv1.CoreTTFBHeader, "4")
+		headers.Set(protocolv1.ProviderRequestIDHeader, "provider-error-diagnostic")
+		headers.Set("X-Codex-Installation-Id", "must-not-cross")
+		headers.Set("X-Unrecognized-Provider-Extension", "must-not-cross")
 		return &http.Response{
 			StatusCode: http.StatusServiceUnavailable,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Header:     headers,
 			Body:       io.NopCloser(bytes.NewReader(body)),
 		}, nil
 	}}
@@ -303,6 +328,16 @@ func TestCoreStateUnavailablePreservesRetryableNotDeliveredFailure(t *testing.T)
 	if response.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d", response.StatusCode)
 	}
+	requestID := response.Header.Get("X-Mini-Sub2Api-Request-Id")
+	if response.Header.Get("X-Request-Id") != requestID || response.Header.Get("Retry-After") != "3" ||
+		response.Header.Get("Server-Timing") != "upstream_ttfb;dur=4" {
+		t.Fatalf("safe error headers = %#v", response.Header)
+	}
+	if response.Header.Get(protocolv1.ProviderRequestIDHeader) != "" ||
+		response.Header.Get("X-Codex-Installation-Id") != "" ||
+		response.Header.Get("X-Unrecognized-Provider-Extension") != "" {
+		t.Fatalf("private error headers crossed = %#v", response.Header)
+	}
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatal(err)
@@ -317,6 +352,12 @@ func TestCoreStateUnavailablePreservesRetryableNotDeliveredFailure(t *testing.T)
 		if !strings.Contains(text, expected) {
 			t.Fatalf("public error missing %s: %q", expected, text)
 		}
+	}
+	history := waitForHistory(t, store, key.ID, 1)
+	if history[0].ProviderRequestID == nil ||
+		*history[0].ProviderRequestID != "provider-error-diagnostic" ||
+		history[0].TTFBMilliseconds == nil || *history[0].TTFBMilliseconds != 4 {
+		t.Fatalf("error history = %#v", history)
 	}
 }
 

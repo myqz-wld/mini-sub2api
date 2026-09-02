@@ -105,7 +105,7 @@ pub(super) fn apply(
     } else {
         canonicalize_top_level_tools(object);
     }
-    if profile.uses_codex_subscription() {
+    if !profile.allows_openai_controls() {
         strip_unsupported_subscription_fields(object);
         rewrite_subscription_system_roles(object);
     }
@@ -116,7 +116,7 @@ pub(super) fn apply(
         transport == EmulationTransport::Http,
     );
     enforce_upstream_transport_controls(object, transport);
-    if profile.uses_codex_subscription() {
+    if profile.uses_subscription_transport() {
         request_identity::apply_routing_hint(object, headers);
     } else {
         request_identity::remove_routing_hint(headers);

@@ -60,7 +60,7 @@ fn request_state_store() -> (
 }
 
 #[tokio::test]
-async fn api_key_create_frame_is_byte_exact() {
+async fn bare_api_key_create_frame_is_byte_exact_and_never_uses_state() {
     let original = " {\"type\":\"response.create\", \"model\":\"test\"} ".to_string();
     let mut headers = HeaderMap::new();
     let (_temp, store) = request_state_store();
@@ -79,6 +79,7 @@ async fn api_key_create_frame_is_byte_exact() {
     .await
     .expect("valid frame");
     assert_eq!(got.text, original);
+    assert!(!store.state_path_for_test(ACCOUNT_REF).exists());
 }
 
 #[tokio::test]
@@ -242,13 +243,14 @@ impl Drop for RunningInternalServer {
 }
 
 #[tokio::test]
-async fn api_key_route_relays_multiple_turns_and_filters_handshake_headers() {
+async fn bare_api_key_route_relays_byte_exact_turns_and_filters_handshake_headers() {
     let capture = WebSocketCapture::default();
     let app = Router::new()
         .route("/responses", get(accepting_upstream))
         .with_state(capture.clone());
     let upstream = spawn_loopback(app).await;
     let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let vault = state.vault.clone();
     let core = spawn_internal(state).await;
 
     let handshake = internal_handshake(&core.base_url, &account_ref)
@@ -294,6 +296,13 @@ async fn api_key_route_relays_multiple_turns_and_filters_handshake_headers() {
     let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
     assert_eq!(capture.frames.lock().await.as_slice(), [first, second]);
+    assert!(
+        !vault
+            .request_state()
+            .state_path_for_test(&account_ref)
+            .exists(),
+        "BareOpenAi WebSocket created request state"
+    );
     let headers = capture
         .headers
         .lock()
@@ -323,6 +332,195 @@ async fn api_key_route_relays_multiple_turns_and_filters_handshake_headers() {
     ] {
         assert!(!headers.contains_key(forbidden), "header {forbidden}");
     }
+}
+
+#[tokio::test]
+async fn codex_api_key_defers_provider_handshake_and_reuses_state_after_reconnect() {
+    let capture = WebSocketCapture::default();
+    let app = Router::new()
+        .route("/responses", get(accepting_upstream))
+        .with_state(capture.clone());
+    let upstream = spawn_loopback(app).await;
+    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let vault = state.vault.clone();
+    let core = spawn_internal(state).await;
+    let create = serde_json::json!({
+        "type":"response.create",
+        "model":"gpt-5.4",
+        "input":[{"type":"message","id":"msg_down","role":"user","content":"hello"}],
+        "client_metadata":{
+            "session_id":"session_down",
+            "thread_id":"thread_down",
+            "turn_id":"turn_down"
+        }
+    })
+    .to_string();
+
+    let mut first = internal_handshake(&core.base_url, &account_ref)
+        .header("originator", "codex_exec")
+        .upgrade()
+        .send()
+        .await
+        .expect("first internal handshake")
+        .into_websocket()
+        .await
+        .expect("first internal socket");
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 0);
+    first
+        .send(DownstreamMessage::Text(create.clone()))
+        .await
+        .expect("first create");
+    let first_event = first
+        .next()
+        .await
+        .expect("first completion")
+        .expect("first completion event");
+    let DownstreamMessage::Text(first_event) = first_event else {
+        panic!("expected first completion text")
+    };
+    let first_event: Value = serde_json::from_str(&first_event).expect("first completion JSON");
+    let first_response_id = first_event["response"]["id"]
+        .as_str()
+        .expect("first response alias")
+        .to_string();
+    assert_ne!(first_response_id, "resp_provider");
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
+    let first_frame: Value =
+        serde_json::from_str(&capture.frames.lock().await[0]).expect("first projected frame");
+    let first_metadata = &first_frame["client_metadata"];
+    for (name, raw, version) in [
+        ("session_id", "session_down", 7),
+        ("thread_id", "thread_down", 7),
+        ("turn_id", "turn_down", 7),
+        (
+            "x-codex-installation-id",
+            "00000000-0000-0000-0000-000000000000",
+            4,
+        ),
+    ] {
+        let projected = first_metadata[name].as_str().expect("projected identity");
+        assert_ne!(projected, raw);
+        assert_eq!(
+            uuid::Uuid::parse_str(projected)
+                .expect("projected UUID")
+                .get_version_num(),
+            version
+        );
+    }
+    let projected_session = first_metadata["session_id"]
+        .as_str()
+        .expect("projected session")
+        .to_string();
+    assert!(
+        vault
+            .request_state()
+            .state_path_for_test(&account_ref)
+            .is_file()
+    );
+    first
+        .close(DownstreamCloseCode::Normal, None)
+        .await
+        .expect("close first socket");
+
+    let mut second = internal_handshake(&core.base_url, &account_ref)
+        .header("originator", "codex_exec")
+        .upgrade()
+        .send()
+        .await
+        .expect("second internal handshake")
+        .into_websocket()
+        .await
+        .expect("second internal socket");
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
+    second
+        .send(DownstreamMessage::Text(create))
+        .await
+        .expect("second create");
+    let second_event = second
+        .next()
+        .await
+        .expect("second completion")
+        .expect("second completion event");
+    let DownstreamMessage::Text(second_event) = second_event else {
+        panic!("expected second completion text")
+    };
+    let second_event: Value = serde_json::from_str(&second_event).expect("second completion JSON");
+    assert_eq!(second_event["response"]["id"], first_response_id);
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 2);
+    let second_frame: Value =
+        serde_json::from_str(&capture.frames.lock().await[1]).expect("second projected frame");
+    assert_eq!(
+        second_frame["client_metadata"]["session_id"],
+        projected_session
+    );
+}
+
+#[tokio::test]
+async fn codex_api_key_websocket_compaction_commits_only_completed_terminal() {
+    let capture = WebSocketCapture::default();
+    let app = Router::new()
+        .route("/responses", get(compaction_upstream))
+        .with_state(capture.clone());
+    let upstream = spawn_loopback(app).await;
+    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let core = spawn_internal(state).await;
+    let mut socket = internal_handshake(&core.base_url, &account_ref)
+        .header("originator", "codex_exec")
+        .upgrade()
+        .send()
+        .await
+        .expect("internal handshake")
+        .into_websocket()
+        .await
+        .expect("internal socket");
+    let compaction = |model: &str, turn: &str| {
+        let metadata = serde_json::json!({
+            "session_id":"compaction-session",
+            "thread_id":"compaction-session",
+            "turn_id":turn,
+            "request_kind":"compaction",
+            "compaction":{"trigger":"manual","implementation":"responses_compaction_v2"}
+        });
+        serde_json::json!({
+            "type":"response.create",
+            "model":model,
+            "input":[{"type":"compaction_trigger"}],
+            "client_metadata":{"x-codex-turn-metadata":metadata.to_string()}
+        })
+        .to_string()
+    };
+    for frame in [
+        compaction("fail-compaction", "turn-one"),
+        compaction("complete-compaction", "turn-one"),
+        compaction("complete-compaction", "turn-two"),
+    ] {
+        socket
+            .send(DownstreamMessage::Text(frame))
+            .await
+            .expect("send compaction");
+        let event = socket
+            .next()
+            .await
+            .expect("terminal event")
+            .expect("valid terminal event");
+        assert!(matches!(event, DownstreamMessage::Text(_)));
+    }
+    let frames = capture.frames.lock().await;
+    let windows = frames
+        .iter()
+        .map(|frame| {
+            serde_json::from_str::<Value>(frame)
+                .expect("projected compaction")
+                .get("client_metadata")
+                .and_then(|metadata| metadata.get("x-codex-window-id"))
+                .and_then(Value::as_str)
+                .expect("projected compaction window")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert!(windows[0].ends_with(":0"));
+    assert_eq!(windows[1], windows[0], "failed terminal advanced window");
+    assert!(windows[2].ends_with(":1"));
 }
 
 #[tokio::test]
@@ -447,10 +645,17 @@ async fn accepting_upstream(
                 let event = serde_json::json!({
                     "type": "response.completed",
                     "sequence": sequence,
-                    "response": {"usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}
+                    "response": {
+                        "id":"resp_provider",
+                        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                    }
                 })
                 .to_string();
-                if socket.send(InternalMessage::Text(event.into())).await.is_err() {
+                if socket
+                    .send(InternalMessage::Text(event.into()))
+                    .await
+                    .is_err()
+                {
                     return;
                 }
             }
@@ -467,6 +672,39 @@ async fn accepting_upstream(
         HeaderValue::from_static("must-not-cross"),
     );
     response
+}
+
+async fn compaction_upstream(
+    AxumState(capture): AxumState<WebSocketCapture>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> AxumResponse {
+    capture.calls.fetch_add(1, Ordering::SeqCst);
+    *capture.headers.lock().await = Some(headers);
+    let relay_capture = capture.clone();
+    upgrade
+        .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .on_upgrade(move |mut socket| async move {
+            while let Some(Ok(InternalMessage::Text(frame))) = socket.next().await {
+                relay_capture.frames.lock().await.push(frame.to_string());
+                let value: Value = serde_json::from_str(&frame).expect("compaction frame JSON");
+                let completed = value["model"] == "complete-compaction";
+                let event = serde_json::json!({
+                    "type": if completed { "response.completed" } else { "response.failed" },
+                    "response":{"id": if completed { "resp_completed" } else { "resp_failed" }}
+                })
+                .to_string();
+                if socket
+                    .send(InternalMessage::Text(event.into()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        })
+        .into_response()
 }
 
 async fn api_key_state(base_url: &str) -> (AppState, String, tempfile::TempDir) {
@@ -553,3 +791,6 @@ mod size_tests;
 
 #[path = "responses_websocket_initial_tests.rs"]
 mod initial_tests;
+
+#[path = "responses_websocket_diagnostics_tests.rs"]
+mod diagnostics_tests;

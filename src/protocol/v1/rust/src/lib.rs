@@ -7,6 +7,8 @@ pub const ACCOUNT_REF_HEADER: &str = "X-Mini-Sub2Api-Account-Ref";
 pub const PSEUDONYM_SCOPE_HEADER: &str = "X-Mini-Sub2Api-Pseudonym-Scope";
 pub const REQUEST_ID_HEADER: &str = "X-Mini-Sub2Api-Request-Id";
 pub const CORE_TTFB_HEADER: &str = "X-Mini-Sub2Api-Core-TTFB-Ms";
+pub const PROVIDER_REQUEST_ID_HEADER: &str = "X-Mini-Sub2Api-Provider-Request-Id";
+pub const PROVIDER_REQUEST_ID_EVENT_TYPE: &str = "mini_sub2api.provider_request_id";
 pub const FAILURE_PHASE_TRAILER: &str = "X-Mini-Sub2Api-Failure-Phase";
 pub const DELIVERY_STATE_TRAILER: &str = "X-Mini-Sub2Api-Delivery-State";
 pub const RETRY_ADVICE_TRAILER: &str = "X-Mini-Sub2Api-Retry-Advice";
@@ -135,6 +137,14 @@ pub struct CoreError {
     pub failure: FailureMetadata,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderRequestIdControl {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub provider_request_id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +198,18 @@ mod tests {
                 delivery_state: DeliveryState::PossiblyDelivered,
             }
             .is_valid()
+        );
+    }
+
+    #[test]
+    fn provider_request_id_control_is_bounded_to_the_private_shape() {
+        let control = ProviderRequestIdControl {
+            event_type: PROVIDER_REQUEST_ID_EVENT_TYPE.to_string(),
+            provider_request_id: "provider-visible-ascii".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_string(&control).expect("control JSON"),
+            r#"{"type":"mini_sub2api.provider_request_id","providerRequestId":"provider-visible-ascii"}"#
         );
     }
 }

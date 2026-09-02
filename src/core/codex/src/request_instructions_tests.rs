@@ -2,8 +2,6 @@ use super::*;
 use crate::codex_instructions;
 use pretty_assertions::assert_eq;
 
-const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
 #[test]
 fn normal_codex_profiles_pin_base_and_append_custom_as_developer() {
     for profile in [
@@ -175,19 +173,12 @@ fn prepare(
     caller: Value,
     transport: EmulationTransport,
 ) -> Result<Value, ()> {
-    let identity = profile
-        .uses_codex_subscription()
-        .then_some(SubscriptionIdentity {
-            account_namespace: "account-test",
-            downstream_scope: PSEUDONYM_SCOPE,
-        });
-    let prepared = prepare_emulated_request(
+    let prepared = prepare_codex_overlay_for_test(
         profile,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&caller).expect("caller JSON")),
         1024 * 1024,
-        identity,
     )?;
     serde_json::from_slice(&prepared.body).map_err(|_| ())
 }

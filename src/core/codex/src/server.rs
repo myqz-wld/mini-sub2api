@@ -9,13 +9,13 @@ mod internal_request;
 use crate::oauth::OAuthFailure;
 use crate::oauth::access_token_and_account;
 use crate::oauth::refresh_if_needed;
+use crate::request_normalizer::CodexStateContext;
 use crate::request_normalizer::EmulationTransport;
 use crate::request_normalizer::StatefulPrepareError;
-use crate::request_normalizer::SubscriptionStateContext;
-use crate::request_normalizer::prepare_emulated_request;
-use crate::request_normalizer::prepare_stateful_subscription_request;
+use crate::request_normalizer::prepare_stateful_codex_request;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
+use crate::response_stream::build_http_failure_response;
 use crate::response_stream::build_http_response;
 use crate::response_stream::request_expects_sse;
 use crate::response_translation::ResponseStateContext;
@@ -78,6 +78,7 @@ pub(crate) struct ResolvedCredential {
     pub(crate) upstream_url: String,
     pub(crate) auth: ResolvedAuth,
     pub(crate) fingerprint: FingerprintSnapshot,
+    pub(crate) state_namespace: String,
     pub(crate) transport: Arc<CredentialTransportContext>,
 }
 
@@ -140,6 +141,8 @@ async fn responses_inner(
     request: Request<Body>,
 ) -> std::result::Result<Response<Body>, CoreFailure> {
     let identity = validate_internal_request(peer, state, &headers)?;
+    let gateway_request_id =
+        header_text(&headers, REQUEST_ID_HEADER).ok_or(CoreFailure::InvalidRequest)?;
     let caller = CallerKind::from_headers(&headers);
     let account_ref = identity.account_ref;
     let pseudonym_scope = identity.pseudonym_scope;
@@ -153,10 +156,7 @@ async fn responses_inner(
     let resolved = resolve_auth(state, &account_ref, None).await?;
     drop(_guard);
     let profile = UpstreamProfile::select(caller, resolved.auth.credential_kind());
-    let account_namespace = match &resolved.auth {
-        ResolvedAuth::CodexOAuth { account_id, .. } => Some(account_id.clone()),
-        ResolvedAuth::OpenAiApiKey { .. } => None,
-    };
+    let state_namespace = resolved.state_namespace.clone();
     let mut forward_headers = headers;
     let body = if profile.emulates_codex() {
         decode_emulated_request_body(&mut forward_headers, body, MAX_REQUEST_BYTES)
@@ -164,45 +164,39 @@ async fn responses_inner(
     } else {
         body
     };
-    let (forward_headers, body, resolved_identity) = if profile.emulates_codex() {
-        let prepared = if profile.uses_codex_subscription() {
-            let account_namespace = account_namespace.as_deref().ok_or(CoreFailure::Internal)?;
-            prepare_stateful_subscription_request(
-                EmulationTransport::Http,
-                &forward_headers,
-                body,
-                MAX_REQUEST_BYTES,
-                SubscriptionStateContext {
-                    account_ref: &account_ref,
-                    account_namespace,
-                    downstream_scope: &pseudonym_scope,
-                    fingerprint_mode: resolved.fingerprint.mode(),
-                    store: state.vault.request_state(),
-                },
-                false,
-            )
-            .await
-            .map_err(|error| match error {
-                StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
-                StatefulPrepareError::StateUnavailable => CoreFailure::StateUnavailable,
-            })?
-        } else {
-            prepare_emulated_request(
-                profile,
-                EmulationTransport::Http,
-                &forward_headers,
-                body,
-                MAX_REQUEST_BYTES,
-                None,
-            )
-            .map_err(|()| CoreFailure::InvalidRequest)?
-        };
-        (prepared.headers, prepared.body, prepared.resolved_identity)
+    let (forward_headers, body, resolved_identity, pending_compaction) = if profile.emulates_codex()
+    {
+        let prepared = prepare_stateful_codex_request(
+            profile,
+            EmulationTransport::Http,
+            &forward_headers,
+            body,
+            MAX_REQUEST_BYTES,
+            CodexStateContext {
+                account_ref: &account_ref,
+                state_namespace: &state_namespace,
+                downstream_scope: &pseudonym_scope,
+                fingerprint_mode: resolved.fingerprint.mode(),
+                store: state.vault.request_state(),
+            },
+            false,
+        )
+        .await
+        .map_err(|error| match error {
+            StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
+            StatefulPrepareError::StateUnavailable => CoreFailure::StateUnavailable,
+        })?;
+        (
+            prepared.headers,
+            prepared.body,
+            prepared.resolved_identity,
+            prepared.pending_compaction,
+        )
     } else {
-        (forward_headers, body, None)
+        (forward_headers, body, None, None)
     };
     let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device
-        && profile.uses_codex_subscription()
+        && profile.uses_identity_state()
     {
         let installation_id = resolved_identity
             .as_ref()
@@ -230,9 +224,7 @@ async fn responses_inner(
         body.clone(),
     )
     .await?;
-    if upstream.status() == StatusCode::UNAUTHORIZED
-        && matches!(resolved.auth, ResolvedAuth::CodexOAuth { .. })
-    {
+    if upstream.status() == StatusCode::UNAUTHORIZED && profile.uses_oauth_refresh() {
         let failed_access_token = match &resolved.auth {
             ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
             ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
@@ -251,20 +243,24 @@ async fn responses_inner(
         )
         .await?;
         if upstream.status() == StatusCode::UNAUTHORIZED {
-            return Err(CoreFailure::UpstreamAuthFailed);
+            return build_http_failure_response(
+                upstream,
+                started.elapsed().as_millis(),
+                &gateway_request_id,
+                &CoreFailure::UpstreamAuthFailed,
+            );
         }
     }
     let ttfb_ms = started.elapsed().as_millis();
-    let response_state = account_namespace.as_deref().and_then(|namespace| {
-        profile.uses_codex_subscription().then(|| {
-            ResponseStateContext::new(
-                &account_ref,
-                namespace,
-                &pseudonym_scope,
-                state.vault.request_state(),
-                resolved_identity.as_ref(),
-            )
-        })
+    let response_state = profile.uses_identity_state().then(|| {
+        ResponseStateContext::new(
+            &account_ref,
+            &state_namespace,
+            &pseudonym_scope,
+            state.vault.request_state(),
+            resolved_identity.as_ref(),
+            pending_compaction.as_ref(),
+        )
     });
     build_http_response(
         upstream,
@@ -272,6 +268,7 @@ async fn responses_inner(
         downstream_expects_sse,
         profile,
         response_state,
+        &gateway_request_id,
     )
     .await
 }
@@ -323,6 +320,7 @@ pub(crate) async fn resolve_auth(
         }
     }
     let upstream_url = locked.record.upstream_url.clone();
+    let state_namespace = locked.record.request_state_namespace().to_string();
     let auth = if let Some((token, account_id)) = access_token_and_account(&locked.record) {
         ResolvedAuth::CodexOAuth {
             token: token.to_string(),
@@ -340,6 +338,7 @@ pub(crate) async fn resolve_auth(
         upstream_url,
         auth,
         fingerprint,
+        state_namespace,
         transport,
     })
 }
@@ -463,3 +462,7 @@ mod oauth_integration_tests;
 #[cfg(test)]
 #[path = "server_compaction_tests.rs"]
 mod compaction_integration_tests;
+
+#[cfg(test)]
+#[path = "server_response_privacy_tests.rs"]
+mod response_privacy_tests;

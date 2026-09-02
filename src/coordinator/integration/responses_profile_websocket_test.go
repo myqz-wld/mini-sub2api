@@ -20,16 +20,21 @@ import (
 )
 
 type responsesProfileWebSocketCapture struct {
-	Headers    http.Header
-	Frame      []byte
-	ResponseID string
+	Headers           http.Header
+	Frame             []byte
+	ResponseID        string
+	ProviderRequestID string
 }
 
 type responsesProfileWebSocketFixture struct {
-	apiKey          string
-	subscriptionKey string
-	public          *httptest.Server
-	captures        <-chan responsesProfileWebSocketCapture
+	apiKey            string
+	apiKeyID          string
+	subscriptionKey   string
+	subscriptionKeyID string
+	public            *httptest.Server
+	captures          <-chan responsesProfileWebSocketCapture
+	store             *storage.Store
+	coreStateDir      string
 }
 
 type responsesProfileWebSocketResponder func(*websocket.Conn, []byte, string)
@@ -66,7 +71,9 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			first, second := responsesProfileWebSocketFrames(t, test.model)
-			connection := dialResponsesProfileWebSocket(t, fixture.public, test.secret, test.headers)
+			connection, publicHandshake := dialResponsesProfileWebSocketWithResponse(
+				t, fixture.public, test.secret, test.headers,
+			)
 			defer connection.CloseNow()
 			for _, frame := range [][]byte{first, second} {
 				writeE2EWebSocketText(t, connection, string(frame))
@@ -79,13 +86,24 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 				hiddenResponseID = captures[0].ResponseID
 				captures = captures[1:]
 			}
+			assertProfileWebSocketHandshakePrivacy(
+				t, publicHandshake, test.emulates, captures[0].ProviderRequestID,
+			)
 			for _, capture := range captures {
 				assertWebSocketProfileCredentialBoundary(t, capture, test.subscription)
 			}
+			keyID := fixture.apiKeyID
+			if test.subscription {
+				keyID = fixture.subscriptionKeyID
+			}
+			assertProfileWebSocketDiagnosticHistory(
+				t, fixture.store, keyID, captures[0].ProviderRequestID, 2,
+			)
 			if !test.emulates {
 				if !bytes.Equal(captures[0].Frame, first) || !bytes.Equal(captures[1].Frame, second) {
 					t.Fatal("bare API-key WebSocket frame changed")
 				}
+				assertProfileStateFileCount(t, fixture.coreStateDir, 0)
 				return
 			}
 			firstValue := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
@@ -157,8 +175,18 @@ func newResponsesProfileWebSocketFixtureWithResponder(
 	coreBinary := findCoreBinary(t)
 	captures := make(chan responsesProfileWebSocketCapture, 16)
 	var responseNumber int
+	var connectionNumber int
 	var responseMu sync.Mutex
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		responseMu.Lock()
+		connectionNumber++
+		providerRequestID := responsesProfileProviderRequestID(connectionNumber)
+		responseMu.Unlock()
+		writer.Header().Set("X-Request-Id", providerRequestID)
+		writer.Header().Set("Openai-Request-Id", "secondary-"+providerRequestID)
+		writer.Header().Set("Openai-Model", "gpt-loopback-ws")
+		writer.Header().Set("X-Codex-Installation-Id", "must-not-cross")
+		writer.Header().Set("X-Unrecognized-Provider-Extension", "must-not-cross")
 		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{CompressionMode: websocket.CompressionDisabled})
 		if err != nil {
 			return
@@ -175,7 +203,8 @@ func newResponsesProfileWebSocketFixtureWithResponder(
 			responseMu.Unlock()
 			responseID := responsesProfileResponseID(identifier)
 			captures <- responsesProfileWebSocketCapture{
-				Headers: request.Header.Clone(), Frame: append([]byte(nil), payload...), ResponseID: responseID,
+				Headers: request.Header.Clone(), Frame: append([]byte(nil), payload...),
+				ResponseID: responseID, ProviderRequestID: providerRequestID,
 			}
 			responder(connection, payload, responseID)
 		}
@@ -227,7 +256,9 @@ func newResponsesProfileWebSocketFixtureWithResponder(
 		public.Close()
 	})
 	return responsesProfileWebSocketFixture{
-		apiKey: apiKey.Secret, subscriptionKey: subscriptionKey.Secret, public: public, captures: captures,
+		apiKey: apiKey.Secret, apiKeyID: apiKey.ID,
+		subscriptionKey: subscriptionKey.Secret, subscriptionKeyID: subscriptionKey.ID,
+		public: public, captures: captures, store: store, coreStateDir: coreStateDir,
 	}
 }
 
@@ -255,6 +286,17 @@ func dialResponsesProfileWebSocket(
 	headers http.Header,
 ) *websocket.Conn {
 	t.Helper()
+	connection, _ := dialResponsesProfileWebSocketWithResponse(t, public, secret, headers)
+	return connection
+}
+
+func dialResponsesProfileWebSocketWithResponse(
+	t *testing.T,
+	public *httptest.Server,
+	secret string,
+	headers http.Header,
+) (*websocket.Conn, *http.Response) {
+	t.Helper()
 	requestHeaders := http.Header{
 		"Authorization": []string{"Bearer " + secret},
 		"Openai-Beta":   []string{"responses_websockets=2026-02-06"},
@@ -271,7 +313,7 @@ func dialResponsesProfileWebSocket(
 	if response.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("WebSocket handshake = %d", response.StatusCode)
 	}
-	return connection
+	return connection, response
 }
 
 func writeResponsesProfileEvents(connection *websocket.Conn, responseID string, hidden bool) {
@@ -297,6 +339,11 @@ func writeResponsesProfileEvents(connection *websocket.Conn, responseID string, 
 func responsesProfileResponseID(number int) string {
 	identifier, _ := json.Marshal(number)
 	return "resp_profile_" + string(identifier)
+}
+
+func responsesProfileProviderRequestID(number int) string {
+	identifier, _ := json.Marshal(number)
+	return "provider-ws-profile-" + string(identifier)
 }
 
 func isSyntheticResponsesProfilePrewarm(payload []byte) bool {

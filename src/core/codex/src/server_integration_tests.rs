@@ -208,9 +208,20 @@ async fn codex_api_key_route_streams_upstream_and_aggregates_for_non_streaming_c
         .await
         .expect("response body")
         .to_bytes();
+    let returned = serde_json::from_slice::<serde_json::Value>(&body).expect("response JSON");
+    let response_id = returned["id"].as_str().expect("response ID");
+    assert_ne!(response_id, "resp_api_key");
+    assert_eq!(returned["object"], "response");
+    assert_eq!(returned["output"], serde_json::json!([]));
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&body).expect("response JSON"),
-        serde_json::json!({"id":"resp_api_key","object":"response","output":[]})
+        uuid::Uuid::parse_str(
+            response_id
+                .strip_prefix("resp_")
+                .expect("response alias prefix")
+        )
+        .expect("response alias UUID")
+        .get_version_num(),
+        7
     );
 
     let upstream: serde_json::Value =

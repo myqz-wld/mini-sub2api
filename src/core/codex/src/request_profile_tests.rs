@@ -79,3 +79,26 @@ fn originator_never_changes_the_credential_dimension() {
     assert_eq!(profile.credential_kind(), CredentialKind::OpenAiApiKey);
     assert!(profile.emulates_codex());
 }
+
+#[test]
+fn identity_and_transport_capabilities_are_independent() {
+    let openai = UpstreamProfile::CodexOpenAi149;
+    let subscription = UpstreamProfile::CodexSubscription149;
+    let bare = UpstreamProfile::BareOpenAi;
+
+    assert!(openai.uses_identity_state());
+    assert!(subscription.uses_identity_state());
+    assert!(!bare.uses_identity_state());
+
+    assert!(!openai.uses_subscription_transport());
+    assert!(subscription.uses_subscription_transport());
+    assert!(!bare.uses_subscription_transport());
+
+    assert!(openai.allows_openai_controls());
+    assert!(!subscription.allows_openai_controls());
+    assert!(!bare.allows_openai_controls());
+    assert!(!openai.uses_oauth_refresh());
+    assert!(subscription.uses_oauth_refresh());
+    assert!(!openai.uses_http_zstd());
+    assert!(subscription.uses_http_zstd());
+}

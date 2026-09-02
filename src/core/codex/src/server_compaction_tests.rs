@@ -8,6 +8,7 @@ use axum::extract::State as AxumState;
 use axum::routing::post as axum_post;
 use bytes::Bytes;
 use http::HeaderValue;
+use http_body_util::BodyExt;
 use serde_json::Value;
 
 #[derive(Clone, Default)]
@@ -28,7 +29,12 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
                  body: Bytes| async move {
                     *capture.headers.lock().await = Some(headers);
                     *capture.body.lock().await = Some(body);
-                    (StatusCode::OK, "captured")
+                    (
+                        StatusCode::OK,
+                        [(http::header::CONTENT_TYPE, "text/event-stream")],
+                        "event: response.completed\n\
+                         data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compaction\",\"output\":[]}}\n\n",
+                    )
                 },
             ),
         )
@@ -53,6 +59,7 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
         )
         .await
         .expect("OAuth record");
+    let request_state = vault.request_state().clone();
     let state = app_state(vault);
     let turn_metadata = serde_json::json!({
         "installation_id": "compaction-conflict",
@@ -109,6 +116,19 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
         .await
         .expect("ordinary Responses compaction request");
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(persisted_window(&request_state, account_id), 0);
+    let downstream = response
+        .into_body()
+        .collect()
+        .await
+        .expect("completed compaction response")
+        .to_bytes();
+    assert!(
+        std::str::from_utf8(&downstream)
+            .expect("downstream SSE")
+            .contains("response.completed")
+    );
+    assert_eq!(persisted_window(&request_state, account_id), 1);
     let captured_headers = capture.headers.lock().await;
     let captured_headers = captured_headers.as_ref().expect("captured headers");
     assert!(!captured_headers.contains_key("x-codex-installation-id"));
@@ -196,4 +216,18 @@ fn installation_from_metadata(raw: &str) -> String {
         .and_then(Value::as_str)
         .expect("installation")
         .to_string()
+}
+
+fn persisted_window(store: &crate::request_state_store::RequestStateStore, namespace: &str) -> u64 {
+    let state: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(store.state_path_for_test(namespace)).expect("request state"),
+    )
+    .expect("request state JSON");
+    state["scopes"]
+        .as_object()
+        .and_then(|scopes| scopes.values().next())
+        .and_then(|scope| scope["conversations"].as_object())
+        .and_then(|conversations| conversations.values().next())
+        .and_then(|conversation| conversation["windowNumber"].as_u64())
+        .expect("committed window")
 }

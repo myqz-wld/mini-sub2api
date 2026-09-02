@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 type lifecycleCapture struct {
@@ -86,6 +87,76 @@ func TestWebSocketPersistsSequentialTurnsAndExcludesPrewarmFromAggregates(t *tes
 	if len(capture.frames) != 3 || capture.frames[0] != prewarm ||
 		capture.frames[1] != inference || capture.frames[2] != control {
 		t.Fatalf("relayed frames = %#v", capture.frames)
+	}
+}
+
+func TestWebSocketConsumesPrivateProviderRequestIDAndPersistsItPerOperation(t *testing.T) {
+	coreServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gatewayRequestID := request.Header.Get(protocolv1.RequestIDHeader)
+		writer.Header().Set(protocolv1.ProviderRequestIDHeader, "provider-handshake")
+		writer.Header().Set("X-Request-Id", gatewayRequestID)
+		writer.Header().Set("Session-Id", "must-not-cross")
+		writer.Header().Set("X-Provider-Future-Id", "must-not-cross")
+		connection, err := websocket.Accept(writer, request, nil)
+		if err != nil {
+			return
+		}
+		defer connection.CloseNow()
+		if _, _, err := connection.Read(context.Background()); err != nil {
+			return
+		}
+		control, _ := json.Marshal(protocolv1.ProviderRequestIDControl{
+			Type: protocolv1.ProviderRequestIDEventType, ProviderRequestID: "provider-turn",
+		})
+		if connection.Write(context.Background(), websocket.MessageText, control) != nil {
+			return
+		}
+		_ = writeCompletedEvent(connection, 3)
+	}))
+	t.Cleanup(coreServer.Close)
+	store, _, key := setupHTTPTest(t)
+	core := &loopbackWebSocketCore{url: coreServer.URL}
+	_, publicServer := startPublicWebSocketServer(t, store, core)
+	connection, response, err := dialPublicWebSocket(t, publicServer.URL, key.Secret, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	gatewayRequestID := response.Header.Get("X-Mini-Sub2Api-Request-Id")
+	if response.Header.Get("X-Request-Id") != gatewayRequestID || gatewayRequestID == "" {
+		t.Fatalf("public request ID aliases = %#v", response.Header)
+	}
+	if response.Header.Get(protocolv1.ProviderRequestIDHeader) != "" ||
+		response.Header.Get("Session-Id") != "" || response.Header.Get("X-Provider-Future-Id") != "" {
+		t.Fatalf("private upgrade headers crossed = %#v", response.Header)
+	}
+
+	writeWebSocketText(t, connection, `{"type":"response.create","model":"test"}`)
+	if event := readWebSocketText(t, connection); !containsEventType(event, "response.completed") {
+		t.Fatalf("private control crossed publicly: %q", event)
+	}
+	history := waitForHistory(t, store, key.ID, 1)
+	if history[0].ProviderRequestID == nil || *history[0].ProviderRequestID != "provider-turn" {
+		t.Fatalf("WebSocket provider diagnostic history = %#v", history)
+	}
+}
+
+func TestProviderRequestIDControlRejectsMalformedReservedEvents(t *testing.T) {
+	valid := []byte(`{"type":"mini_sub2api.provider_request_id","providerRequestId":"provider-ok"}`)
+	if value, control, ok := parseProviderRequestIDControl(valid); !control || !ok || value != "provider-ok" {
+		t.Fatalf("valid control = %q/%t/%t", value, control, ok)
+	}
+	for _, payload := range [][]byte{
+		[]byte(`{"type":"mini_sub2api.provider_request_id","providerRequestId":"contains space"}`),
+		[]byte(`{"type":"mini_sub2api.provider_request_id","providerRequestId":"provider","extra":true}`),
+		[]byte(`{"type":"mini_sub2api.provider_request_id"}`),
+	} {
+		if _, control, ok := parseProviderRequestIDControl(payload); !control || ok {
+			t.Fatalf("malformed reserved event = %q/%t/%t", payload, control, ok)
+		}
+	}
+	if _, control, ok := parseProviderRequestIDControl([]byte(`{"type":"response.created"}`)); control || ok {
+		t.Fatalf("public event classified as control = %t/%t", control, ok)
 	}
 }
 

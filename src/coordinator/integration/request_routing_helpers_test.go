@@ -14,24 +14,54 @@ import (
 
 var loopbackResponseSequence atomic.Uint64
 
-func writeLoopbackResponsesResult(writer http.ResponseWriter, body []byte, responseID string) {
+func writeLoopbackResponsesResult(
+	writer http.ResponseWriter,
+	body []byte,
+	responseID string,
+) (string, string) {
 	var request map[string]any
 	if err := json.Unmarshal(body, &request); err != nil {
 		http.Error(writer, "invalid captured request", http.StatusInternalServerError)
-		return
+		return "", ""
 	}
 	responseID = fmt.Sprintf("%s_%d", responseID, loopbackResponseSequence.Add(1))
+	providerRequestID := "provider-" + responseID
+	writer.Header().Set("X-Request-Id", providerRequestID)
+	writer.Header().Set("Openai-Request-Id", "secondary-"+providerRequestID)
+	writer.Header().Set("Openai-Model", "gpt-loopback")
+	writer.Header().Set("Server-Timing", "provider;dur=2")
+	writer.Header().Set("X-Codex-Installation-Id", "must-not-cross")
+	writer.Header().Set("X-Unrecognized-Provider-Extension", "must-not-cross")
+	if request["model"] == "profile-non2xx" {
+		writer.Header().Set("Content-Type", "text/plain")
+		writer.WriteHeader(http.StatusTooManyRequests)
+		_, _ = fmt.Fprintf(
+			writer,
+			"raw provider response_id=%s conversation=conv_private request=request_private",
+			responseID,
+		)
+		return responseID, providerRequestID
+	}
+	terminalType := "response.completed"
+	if request["model"] == "response.failed" || request["model"] == "response.incomplete" {
+		terminalType = request["model"].(string)
+	}
+	errorObject := ""
+	if terminalType != "response.completed" {
+		errorObject = `,"error":{"message":"opaque resp_raw conversation_raw","id":"opaque_nested_id"}`
+	}
 	response := fmt.Sprintf(
-		`{"id":%q,"object":"response","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`,
-		responseID,
+		`{"id":%q,"object":"response","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}%s}`,
+		responseID, errorObject,
 	)
 	if request["stream"] == true {
 		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = fmt.Fprintf(writer, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
-		return
+		_, _ = fmt.Fprintf(writer, "event: %s\ndata: {\"type\":%q,\"response\":%s}\n\n", terminalType, terminalType, response)
+		return responseID, providerRequestID
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	_, _ = io.WriteString(writer, response)
+	return responseID, providerRequestID
 }
 
 func canonicalExpectedTools(tools []any) []any {

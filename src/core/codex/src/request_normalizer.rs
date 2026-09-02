@@ -1,6 +1,5 @@
 use crate::fingerprint::FingerprintMode;
-#[cfg(test)]
-use crate::legacy_test_pseudonym::RequestPseudonymizer;
+use crate::request_compaction::PendingCompaction;
 use crate::request_identity;
 use crate::request_identity_evidence::RequestIdentityEvidence;
 use crate::request_identity_projection::ResolvedRequestIdentity;
@@ -14,7 +13,7 @@ use serde_json::Value;
 #[path = "request_emulation_overlay.rs"]
 mod overlay;
 
-pub(crate) use request_identity::SubscriptionTransport as EmulationTransport;
+pub(crate) use request_identity::CodexTransport as EmulationTransport;
 
 #[derive(Debug)]
 pub struct PreparedEmulatedRequest {
@@ -22,22 +21,13 @@ pub struct PreparedEmulatedRequest {
     pub body: Bytes,
     pub(crate) synthesized_item_ids: Vec<String>,
     pub(crate) resolved_identity: Option<ResolvedRequestIdentity>,
-}
-
-#[cfg(test)]
-pub type PreparedSubscriptionRequest = PreparedEmulatedRequest;
-
-#[derive(Clone, Copy)]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct SubscriptionIdentity<'a> {
-    pub(crate) account_namespace: &'a str,
-    pub(crate) downstream_scope: &'a str,
+    pub(crate) pending_compaction: Option<PendingCompaction>,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct SubscriptionStateContext<'a> {
+pub(crate) struct CodexStateContext<'a> {
     pub(crate) account_ref: &'a str,
-    pub(crate) account_namespace: &'a str,
+    pub(crate) state_namespace: &'a str,
     pub(crate) downstream_scope: &'a str,
     pub(crate) fingerprint_mode: FingerprintMode,
     pub(crate) store: &'a RequestStateStore,
@@ -62,34 +52,29 @@ struct InvalidStatefulProjection {
 /// normalization are applied. `BareOpenAi` is deliberately rejected: callers must retain its
 /// separate opaque-body path rather than treating normalization failure as permission to fall back
 /// to bare forwarding.
-pub(crate) fn prepare_emulated_request(
+#[cfg(test)]
+pub(crate) fn prepare_codex_overlay_for_test(
     upstream_profile: UpstreamProfile,
     transport: EmulationTransport,
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    subscription_identity: Option<SubscriptionIdentity<'_>>,
 ) -> Result<PreparedEmulatedRequest, ()> {
-    prepare_emulated_request_inner(
-        upstream_profile,
-        transport,
-        headers,
-        body,
-        max_bytes,
-        subscription_identity,
-        false,
-        true,
-    )
+    prepare_codex_overlay(upstream_profile, transport, headers, body, max_bytes)
 }
 
-pub(crate) async fn prepare_stateful_subscription_request(
+pub(crate) async fn prepare_stateful_codex_request(
+    upstream_profile: UpstreamProfile,
     transport: EmulationTransport,
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    context: SubscriptionStateContext<'_>,
+    context: CodexStateContext<'_>,
     headers_already_projected: bool,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
+    if !upstream_profile.uses_identity_state() {
+        return Err(StatefulPrepareError::InvalidRequest);
+    }
     if has_non_identity_encoding(headers) {
         return Err(StatefulPrepareError::InvalidRequest);
     }
@@ -98,22 +83,11 @@ pub(crate) async fn prepare_stateful_subscription_request(
     let caller = caller
         .as_object()
         .ok_or(StatefulPrepareError::InvalidRequest)?;
+    validate_serialized_identity(caller, headers, headers_already_projected)?;
     let evidence =
         RequestIdentityEvidence::extract(caller, headers, transport, headers_already_projected);
-    let pending = prepare_emulated_request_inner(
-        UpstreamProfile::CodexSubscription149,
-        transport,
-        headers,
-        body,
-        max_bytes,
-        Some(SubscriptionIdentity {
-            account_namespace: context.account_namespace,
-            downstream_scope: context.downstream_scope,
-        }),
-        headers_already_projected,
-        false,
-    )
-    .map_err(|_| StatefulPrepareError::InvalidRequest)?;
+    let pending = prepare_codex_overlay(upstream_profile, transport, headers, body, max_bytes)
+        .map_err(|_| StatefulPrepareError::InvalidRequest)?;
     let mut value = serde_json::from_slice::<Value>(&pending.body)
         .map_err(|_| StatefulPrepareError::InvalidRequest)?;
     let mut object = value
@@ -127,7 +101,7 @@ pub(crate) async fn prepare_stateful_subscription_request(
     let prepared = context
         .store
         .edit(
-            context.account_namespace,
+            context.state_namespace,
             context.account_ref,
             context.downstream_scope,
             move |editor| {
@@ -150,6 +124,7 @@ pub(crate) async fn prepare_stateful_subscription_request(
                         body: Bytes::from(encoded),
                         synthesized_item_ids: projection.synthesized_item_ids,
                         resolved_identity: Some(projection.identity),
+                        pending_compaction: projection.pending_compaction,
                     })
                 })()
                 .map_err(|source| InvalidStatefulProjection { source }.into())
@@ -170,16 +145,12 @@ pub(crate) async fn prepare_stateful_subscription_request(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn prepare_emulated_request_inner(
+fn prepare_codex_overlay(
     upstream_profile: UpstreamProfile,
     transport: EmulationTransport,
     headers: &HeaderMap,
     body: Bytes,
     max_bytes: usize,
-    subscription_identity: Option<SubscriptionIdentity<'_>>,
-    _headers_already_projected: bool,
-    pseudonymize_subscription: bool,
 ) -> Result<PreparedEmulatedRequest, ()> {
     if has_non_identity_encoding(headers) {
         return Err(());
@@ -192,29 +163,8 @@ fn prepare_emulated_request_inner(
         .expect("caller object was cloned above");
     let mut prepared_headers = headers.clone();
 
-    match (upstream_profile, subscription_identity) {
-        (UpstreamProfile::BareOpenAi, _) => return Err(()),
-        (UpstreamProfile::CodexOpenAi149, None) => {}
-        (UpstreamProfile::CodexSubscription149, Some(_identity)) => {
-            if pseudonymize_subscription {
-                #[cfg(not(test))]
-                return Err(());
-                #[cfg(test)]
-                {
-                    let pseudonymizer = RequestPseudonymizer::new(
-                        _identity.account_namespace,
-                        _identity.downstream_scope,
-                    );
-                    if _headers_already_projected {
-                        pseudonymizer.apply_body_only(object)?;
-                    } else {
-                        pseudonymizer.apply(&mut prepared_headers, object)?;
-                    }
-                }
-            }
-        }
-        (UpstreamProfile::CodexOpenAi149, Some(_))
-        | (UpstreamProfile::CodexSubscription149, None) => return Err(()),
+    if !upstream_profile.emulates_codex() {
+        return Err(());
     }
 
     let synthesized_item_ids =
@@ -228,51 +178,8 @@ fn prepare_emulated_request_inner(
         body: Bytes::from(encoded),
         synthesized_item_ids,
         resolved_identity: None,
+        pending_compaction: None,
     })
-}
-
-#[cfg(test)]
-pub fn prepare_subscription_request(
-    headers: &HeaderMap,
-    body: Bytes,
-    max_bytes: usize,
-    account_namespace: &str,
-    downstream_scope: &str,
-    _request_id: &str,
-) -> Result<PreparedSubscriptionRequest, ()> {
-    prepare_emulated_request(
-        UpstreamProfile::CodexSubscription149,
-        EmulationTransport::Http,
-        headers,
-        body,
-        max_bytes,
-        Some(SubscriptionIdentity {
-            account_namespace,
-            downstream_scope,
-        }),
-    )
-}
-
-#[cfg(test)]
-pub fn prepare_websocket_subscription_request(
-    headers: &HeaderMap,
-    body: Bytes,
-    max_bytes: usize,
-    account_namespace: &str,
-    downstream_scope: &str,
-    _request_id: &str,
-) -> Result<PreparedSubscriptionRequest, ()> {
-    prepare_emulated_request(
-        UpstreamProfile::CodexSubscription149,
-        EmulationTransport::WebSocket,
-        headers,
-        body,
-        max_bytes,
-        Some(SubscriptionIdentity {
-            account_namespace,
-            downstream_scope,
-        }),
-    )
 }
 
 fn has_non_identity_encoding(headers: &HeaderMap) -> bool {
@@ -283,6 +190,91 @@ fn has_non_identity_encoding(headers: &HeaderMap) -> bool {
             let value = value.trim();
             !value.is_empty() && !value.eq_ignore_ascii_case("identity")
         })
+}
+
+fn validate_serialized_identity(
+    object: &serde_json::Map<String, Value>,
+    headers: &HeaderMap,
+    headers_already_projected: bool,
+) -> Result<(), StatefulPrepareError> {
+    if let Some(raw) = object
+        .get("client_metadata")
+        .and_then(Value::as_object)
+        .and_then(|metadata| metadata.get(crate::lifecycle_carriers::TURN_METADATA_HEADER))
+    {
+        let raw = raw.as_str().ok_or(StatefulPrepareError::InvalidRequest)?;
+        if serde_json::from_str::<Value>(raw)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .is_none()
+        {
+            return Err(StatefulPrepareError::InvalidRequest);
+        }
+    }
+    if !headers_already_projected
+        && let Some(raw) = headers.get(crate::lifecycle_carriers::TURN_METADATA_HEADER)
+    {
+        let raw = raw
+            .to_str()
+            .map_err(|_| StatefulPrepareError::InvalidRequest)?;
+        if serde_json::from_str::<Value>(raw)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .is_none()
+        {
+            return Err(StatefulPrepareError::InvalidRequest);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) struct CodexStateTestHarness {
+    _temp: tempfile::TempDir,
+    store: RequestStateStore,
+}
+
+#[cfg(test)]
+impl CodexStateTestHarness {
+    pub(crate) fn new() -> Self {
+        let temp = tempfile::tempdir().expect("stateful test directory");
+        let accounts = temp.path().join("accounts");
+        std::fs::create_dir(&accounts).expect("stateful test accounts directory");
+        Self {
+            _temp: temp,
+            store: RequestStateStore::new(accounts),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn prepare(
+        &self,
+        profile: UpstreamProfile,
+        transport: EmulationTransport,
+        headers: &HeaderMap,
+        body: Bytes,
+        max_bytes: usize,
+        account_ref: &str,
+        state_namespace: &str,
+        downstream_scope: &str,
+    ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
+        prepare_stateful_codex_request(
+            profile,
+            transport,
+            headers,
+            body,
+            max_bytes,
+            CodexStateContext {
+                account_ref,
+                state_namespace,
+                downstream_scope,
+                fingerprint_mode: FingerprintMode::Device,
+                store: &self.store,
+            },
+            false,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

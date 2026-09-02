@@ -29,7 +29,7 @@ var knownCoreErrors = map[string]bool{
 }
 
 func detectCoreError(response *http.Response, requestID string) (protocolv1.CoreError, bool) {
-	if response.StatusCode < 400 {
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return protocolv1.CoreError{}, false
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxCoreErrorBytes+1))

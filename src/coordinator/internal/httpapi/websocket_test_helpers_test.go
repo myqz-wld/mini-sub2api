@@ -13,6 +13,7 @@ import (
 	"github.com/coder/websocket"
 
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 type loopbackWebSocketCore struct {
@@ -35,9 +36,11 @@ func (*loopbackWebSocketCore) Forward(
 
 func (c *loopbackWebSocketCore) DialWebSocket(
 	ctx context.Context,
-	_, _, _ string,
+	_, _, requestID string,
 	headers http.Header,
 ) (*websocket.Conn, *http.Response, error) {
+	headers = headers.Clone()
+	headers.Set(protocolv1.RequestIDHeader, requestID)
 	c.mu.Lock()
 	c.calls++
 	c.headers = headers.Clone()

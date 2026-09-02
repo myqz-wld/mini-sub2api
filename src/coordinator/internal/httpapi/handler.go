@@ -88,7 +88,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		return
 	}
 	if route.Adapter != "codex" {
-		h.finish(requestID, started, storage.RequestUpstreamErr, http.StatusBadGateway, nil, nil, nil)
+		h.finish(requestID, started, storage.RequestUpstreamErr, http.StatusBadGateway, nil, nil, nil, nil)
 		writeOpenAIError(writer, http.StatusBadGateway, "adapter_unavailable", "The selected adapter is unavailable.", requestID)
 		return
 	}
@@ -108,7 +108,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		if request.Context().Err() != nil {
 			terminal = storage.RequestDisconnected
 		}
-		h.finish(requestID, started, terminal, status, nil, nil, nil)
+		h.finish(requestID, started, terminal, status, nil, nil, nil, nil)
 		writeOpenAIError(writer, status, code, message, requestID)
 		return
 	}
@@ -126,23 +126,25 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		if request.Context().Err() != nil {
 			terminal = storage.RequestDisconnected
 		}
-		h.finish(requestID, started, terminal, status, nil, nil, nil)
+		h.finish(requestID, started, terminal, status, nil, nil, nil, nil)
 		writeOpenAIError(writer, status, "upstream_unavailable", "The upstream service is unavailable.", requestID)
 		return
 	}
 	defer response.Body.Close()
+	providerRequestID := providerRequestIDFromHeaders(response.Header)
 	if coreError, ok := detectCoreError(response, requestID); ok {
+		ttfb := copyResponseHeaders(writer.Header(), response.Header, requestID)
 		if coreError.Code == "credential_requires_login" {
 			_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
 		}
-		h.finish(requestID, started, storage.RequestUpstreamErr, response.StatusCode, nil, nil, nil)
+		h.finish(requestID, started, storage.RequestUpstreamErr, response.StatusCode, ttfb, nil, nil, providerRequestID)
 		writeOpenAIErrorWithFailure(
 			writer, response.StatusCode, coreError.Code, coreError.Message, requestID,
 			coreError.FailureMetadata,
 		)
 		return
 	}
-	ttfb := copyResponseHeaders(writer.Header(), response.Header)
+	ttfb := copyResponseHeaders(writer.Header(), response.Header, requestID)
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
 	declareFailureTrailers(writer.Header())
 	writer.WriteHeader(response.StatusCode)
@@ -158,7 +160,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	if streamResult == streamClientDisconnected {
 		terminal = storage.RequestDisconnected
 	}
-	h.finish(requestID, started, terminal, response.StatusCode, ttfb, usage, nil)
+	h.finish(requestID, started, terminal, response.StatusCode, ttfb, usage, nil, providerRequestID)
 }
 
 func (h *Handler) finish(
@@ -169,6 +171,7 @@ func (h *Handler) finish(
 	ttfb *time.Duration,
 	usage *storage.TokenUsage,
 	completedAt *time.Time,
+	providerRequestID *string,
 ) {
 	completed := h.clock().UTC()
 	if completedAt != nil {
@@ -178,12 +181,13 @@ func (h *Handler) finish(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := h.store.FinalizeRequest(ctx, requestID, storage.RequestResult{
-		CompletedAt: completed,
-		Status:      status,
-		HTTPStatus:  &code,
-		TTFB:        ttfb,
-		Duration:    completed.Sub(started),
-		Usage:       usage,
+		CompletedAt:       completed,
+		Status:            status,
+		HTTPStatus:        &code,
+		TTFB:              ttfb,
+		Duration:          completed.Sub(started),
+		Usage:             usage,
+		ProviderRequestID: providerRequestID,
 	})
 	if err != nil {
 		h.logger.Printf("request %s history finalization failed: %v", requestID, err)

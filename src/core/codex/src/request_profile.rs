@@ -52,8 +52,24 @@ impl UpstreamProfile {
         !matches!(self, Self::BareOpenAi)
     }
 
-    pub(crate) const fn uses_codex_subscription(self) -> bool {
+    pub(crate) const fn uses_identity_state(self) -> bool {
+        self.emulates_codex()
+    }
+
+    pub(crate) const fn uses_subscription_transport(self) -> bool {
         matches!(self, Self::CodexSubscription149)
+    }
+
+    pub(crate) const fn uses_oauth_refresh(self) -> bool {
+        self.uses_subscription_transport()
+    }
+
+    pub(crate) const fn uses_http_zstd(self) -> bool {
+        self.uses_subscription_transport()
+    }
+
+    pub(crate) const fn allows_openai_controls(self) -> bool {
+        matches!(self, Self::CodexOpenAi149)
     }
 }
 
