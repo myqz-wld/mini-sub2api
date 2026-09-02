@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::request_state_types::WireIdDomain;
 use crate::request_state_types::WireIdEntry;
 use crate::request_state_types::WireIdOrigin;
+use crate::request_state_types::WireIdOwner;
 use crate::request_state_types::validate_wire_id;
 
 impl RequestStateEditor<'_> {
@@ -122,6 +123,41 @@ impl RequestStateEditor<'_> {
             .map(|_| downstream_id)
     }
 
+    pub(crate) fn wire_from_upstream_response(
+        &mut self,
+        upstream_id: &str,
+        owner: Option<&WireIdOwner>,
+    ) -> Result<String> {
+        let downstream_id = self.wire_from_upstream(WireIdDomain::Response, upstream_id)?;
+        if let Some(owner) = owner {
+            self.set_response_owner(upstream_id, owner)?;
+        }
+        Ok(downstream_id)
+    }
+
+    pub(crate) fn response_owner_from_downstream(
+        &mut self,
+        downstream_id: &str,
+    ) -> Result<Option<WireIdOwner>> {
+        validate_wire_id(downstream_id)?;
+        let downstream_lookup = self
+            .keys
+            .wire_downstream(WireIdDomain::Response, downstream_id);
+        let Some(entry) = self.scope().wire_ids.get(&downstream_lookup) else {
+            return Ok(None);
+        };
+        anyhow::ensure!(
+            entry.domain == WireIdDomain::Response && entry.downstream_id == downstream_id,
+            "response wire ID downstream collision"
+        );
+        let owner = entry.owner.clone();
+        self.touch_wire(&downstream_lookup)?;
+        if let Some(owner) = &owner {
+            self.protect_owner(owner)?;
+        }
+        Ok(owner)
+    }
+
     fn insert_wire_pair(
         &mut self,
         domain: WireIdDomain,
@@ -145,6 +181,7 @@ impl RequestStateEditor<'_> {
             downstream_id: downstream_id.to_string(),
             upstream_id: upstream_id.to_string(),
             upstream_lookup: upstream_lookup.clone(),
+            owner: None,
             last_seen_day: self.day,
         };
         let scope = self.scope_mut();
@@ -157,6 +194,66 @@ impl RequestStateEditor<'_> {
             .wire_ids
             .insert((self.scope_key.clone(), downstream_lookup));
         Ok(upstream_id.to_string())
+    }
+
+    fn set_response_owner(&mut self, upstream_id: &str, owner: &WireIdOwner) -> Result<()> {
+        self.protect_owner(owner)?;
+        let upstream_lookup = self.keys.wire_upstream(WireIdDomain::Response, upstream_id);
+        let downstream_lookup = self
+            .scope()
+            .wire_upstream_index
+            .get(&upstream_lookup)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("response wire ID mapping is missing"))?;
+        let changed = {
+            let entry = self
+                .scope_mut()
+                .wire_ids
+                .get_mut(&downstream_lookup)
+                .ok_or_else(|| anyhow::anyhow!("response wire ID reverse index is dangling"))?;
+            anyhow::ensure!(
+                entry.domain == WireIdDomain::Response && entry.upstream_id == upstream_id,
+                "response wire ID upstream collision"
+            );
+            match &entry.owner {
+                Some(existing) => {
+                    anyhow::ensure!(
+                        existing == owner,
+                        "response request identity relationship changed"
+                    );
+                    false
+                }
+                None => {
+                    entry.owner = Some(owner.clone());
+                    true
+                }
+            }
+        };
+        self.changed |= changed;
+        self.protected
+            .wire_ids
+            .insert((self.scope_key.clone(), downstream_lookup));
+        Ok(())
+    }
+
+    fn protect_owner(&mut self, owner: &WireIdOwner) -> Result<()> {
+        let (_, conversation) = self
+            .conversation_by_id(&owner.session_id)
+            .ok_or_else(|| anyhow::anyhow!("response owner session is missing"))?;
+        anyhow::ensure!(
+            conversation.id == owner.session_id,
+            "response owner session changed"
+        );
+        if owner.thread_id != owner.session_id {
+            let (_, thread) = self
+                .child_thread_by_id(&owner.thread_id)
+                .ok_or_else(|| anyhow::anyhow!("response owner thread is missing"))?;
+            anyhow::ensure!(
+                thread.session_id == owner.session_id,
+                "response owner thread crosses sessions"
+            );
+        }
+        Ok(())
     }
 
     fn unique_wire_alias(

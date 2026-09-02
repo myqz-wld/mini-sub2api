@@ -6,6 +6,7 @@ use axum::extract::State as AxumState;
 use axum::routing::post as axum_post;
 use bytes::Bytes;
 use http::HeaderValue;
+use std::fs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -24,6 +25,78 @@ struct OAuthMockState {
     fingerprint_headers: Arc<Mutex<Vec<String>>>,
     inference_call_ids: Arc<Mutex<Vec<Option<String>>>>,
     bodies: Arc<Mutex<Vec<Bytes>>>,
+}
+
+#[tokio::test]
+async fn corrupt_request_state_is_a_retryable_503_before_upstream_delivery() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let app = Router::new().route(
+        "/responses",
+        axum_post({
+            let calls = Arc::clone(&calls);
+            move || {
+                let calls = Arc::clone(&calls);
+                async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    StatusCode::OK
+                }
+            }
+        }),
+    );
+    let upstream = spawn_loopback(app).await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let account_id = "chatgpt-state-unavailable-http";
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: test_jwt(Some(account_id), 7200),
+                access_token: test_jwt(None, 7200),
+                refresh_token: "refresh-state-unavailable".to_string(),
+                account_id: account_id.to_string(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(2)),
+                issuer: upstream.base_url.clone(),
+                client_id: "client-state-unavailable".to_string(),
+            },
+            format!("{}/responses", upstream.base_url),
+            crate::fingerprint::FingerprintMode::Device,
+        )
+        .await
+        .expect("OAuth record");
+    vault
+        .request_state()
+        .edit(
+            account_id,
+            &metadata.account_ref,
+            "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            |editor| editor.installation_id(crate::fingerprint::FingerprintMode::Device, None),
+        )
+        .await
+        .expect("initial state");
+    fs::write(
+        vault.request_state().state_path_for_test(account_id),
+        b"{corrupt",
+    )
+    .expect("corrupt state");
+    let state = app_state(vault);
+    let error = call_core(
+        &state,
+        &metadata.account_ref,
+        Bytes::from_static(br#"{"model":"gpt-5.4","input":"hello"}"#),
+    )
+    .await
+    .expect_err("state failure");
+    assert!(matches!(error, CoreFailure::StateUnavailable));
+    assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        error.failure(),
+        crate::error::failure(
+            mini_sub2api_protocol_v1::RetryAdvice::Safe,
+            mini_sub2api_protocol_v1::FailurePhase::Internal,
+            mini_sub2api_protocol_v1::DeliveryState::NotDelivered,
+        )
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
@@ -208,7 +281,8 @@ async fn concurrent_oauth_401s_share_one_forced_refresh() {
                     |AxumState(state): AxumState<OAuthMockState>,
                      headers: HeaderMap,
                      body: Bytes| async move {
-                        state.inference_calls.fetch_add(1, Ordering::SeqCst);
+                        let call_index =
+                            state.inference_calls.fetch_add(1, Ordering::SeqCst);
                         state.bodies.lock().await.push(body);
                         if let Some(device) = header_text(&headers, "x-codex-installation-id") {
                             state.fingerprint_headers.lock().await.push(device);
@@ -226,13 +300,15 @@ async fn concurrent_oauth_401s_share_one_forced_refresh() {
                                 .expect("old-token barrier")
                                 .wait()
                                 .await;
-                            return (StatusCode::UNAUTHORIZED, "old token");
+                            return (StatusCode::UNAUTHORIZED, "old token".to_string());
                         }
                         let expected = format!("Bearer {}", state.new_access);
                         assert_eq!(auth.as_deref(), Some(expected.as_str()));
                         (
                             StatusCode::OK,
-                            "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_refreshed\",\"object\":\"response\"}}\n\n",
+                            format!(
+                                "event: response.completed\ndata: {{\"type\":\"response.completed\",\"response\":{{\"id\":\"resp_refreshed_{call_index}\",\"object\":\"response\"}}}}\n\n"
+                            ),
                         )
                     },
                 ),

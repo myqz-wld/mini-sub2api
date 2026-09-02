@@ -4,10 +4,12 @@ use serde_json::Value;
 
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
+use crate::request_state_types::WireIdOwner;
 
 pub(crate) fn translate_response_ids(
     editor: &mut RequestStateEditor<'_>,
     value: &mut Value,
+    owner: Option<&WireIdOwner>,
 ) -> Result<()> {
     let Some(object) = value.as_object_mut() else {
         return Ok(());
@@ -17,7 +19,6 @@ pub(crate) fn translate_response_ids(
         .and_then(Value::as_str)
         .map(str::to_string);
     for (name, domain) in [
-        ("response_id", WireIdDomain::Response),
         ("previous_response_id", WireIdDomain::Response),
         ("item_id", WireIdDomain::Item),
         ("output_item_id", WireIdDomain::Item),
@@ -36,16 +37,17 @@ pub(crate) fn translate_response_ids(
     ] {
         translate_field(editor, object, name, domain)?;
     }
+    translate_response_field(editor, object, "response_id", owner)?;
     translate_conversation(editor, object)?;
 
     if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
-        translate_response_object(editor, response)?;
+        translate_response_object(editor, response, owner)?;
     }
     if let Some(item) = object.get_mut("item").and_then(Value::as_object_mut) {
-        translate_item(editor, item)?;
+        translate_item(editor, item, owner)?;
     }
     if let Some(items) = object.get_mut("output").and_then(Value::as_array_mut) {
-        translate_items(editor, items)?;
+        translate_items(editor, items, owner)?;
     }
     if let Some(metadata) = object
         .get_mut("client_metadata")
@@ -59,7 +61,7 @@ pub(crate) fn translate_response_ids(
             || object.contains_key("output")
             || object.contains_key("usage"));
     if is_terminal_response {
-        translate_field(editor, object, "id", WireIdDomain::Response)?;
+        translate_response_field(editor, object, "id", owner)?;
     }
     Ok(())
 }
@@ -67,8 +69,9 @@ pub(crate) fn translate_response_ids(
 fn translate_response_object(
     editor: &mut RequestStateEditor<'_>,
     response: &mut Map<String, Value>,
+    owner: Option<&WireIdOwner>,
 ) -> Result<()> {
-    translate_field(editor, response, "id", WireIdDomain::Response)?;
+    translate_response_field(editor, response, "id", owner)?;
     translate_field(
         editor,
         response,
@@ -78,7 +81,7 @@ fn translate_response_object(
     translate_field(editor, response, "stream_id", WireIdDomain::Stream)?;
     translate_conversation(editor, response)?;
     if let Some(items) = response.get_mut("output").and_then(Value::as_array_mut) {
-        translate_items(editor, items)?;
+        translate_items(editor, items, owner)?;
     }
     if let Some(metadata) = response
         .get_mut("client_metadata")
@@ -89,10 +92,14 @@ fn translate_response_object(
     Ok(())
 }
 
-fn translate_items(editor: &mut RequestStateEditor<'_>, items: &mut [Value]) -> Result<()> {
+fn translate_items(
+    editor: &mut RequestStateEditor<'_>,
+    items: &mut [Value],
+    owner: Option<&WireIdOwner>,
+) -> Result<()> {
     for item in items {
         if let Some(item) = item.as_object_mut() {
-            translate_item(editor, item)?;
+            translate_item(editor, item, owner)?;
         }
     }
     Ok(())
@@ -101,18 +108,19 @@ fn translate_items(editor: &mut RequestStateEditor<'_>, items: &mut [Value]) -> 
 fn translate_item(
     editor: &mut RequestStateEditor<'_>,
     item: &mut Map<String, Value>,
+    owner: Option<&WireIdOwner>,
 ) -> Result<()> {
     for (name, domain) in [
         ("id", WireIdDomain::Item),
         ("item_id", WireIdDomain::Item),
         ("output_item_id", WireIdDomain::Item),
         ("call_id", WireIdDomain::Call),
-        ("response_id", WireIdDomain::Response),
         ("approval_request_id", WireIdDomain::Approval),
         ("approval_id", WireIdDomain::Approval),
     ] {
         translate_field(editor, item, name, domain)?;
     }
+    translate_response_field(editor, item, "response_id", owner)?;
     if let Some(caller) = item.get_mut("caller").and_then(Value::as_object_mut) {
         translate_field(editor, caller, "caller_id", WireIdDomain::Item)?;
     }
@@ -131,6 +139,25 @@ fn translate_item(
     {
         translate_identity_metadata(editor, metadata)?;
     }
+    Ok(())
+}
+
+fn translate_response_field(
+    editor: &mut RequestStateEditor<'_>,
+    object: &mut Map<String, Value>,
+    name: &str,
+    owner: Option<&WireIdOwner>,
+) -> Result<()> {
+    let Some(raw) = object.get(name).and_then(Value::as_str).map(str::to_string) else {
+        return Ok(());
+    };
+    if raw.is_empty() {
+        return Ok(());
+    }
+    object.insert(
+        name.to_string(),
+        Value::String(editor.wire_from_upstream_response(&raw, owner)?),
+    );
     Ok(())
 }
 
@@ -270,7 +297,7 @@ mod tests {
                 "output":{"file_id":"file_keep","vector_store_id":"vs_keep","opaque_id":"opaque_keep"}
             }
         });
-        translate_response_ids(&mut editor, &mut event).expect("translate response");
+        translate_response_ids(&mut editor, &mut event, None).expect("translate response");
         assert_eq!(event["response_id"], "resp_down");
         assert_eq!(
             event["item"]["internal_chat_message_metadata_passthrough"]["turn_id"],

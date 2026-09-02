@@ -136,7 +136,16 @@ pub(crate) struct WireIdEntry {
     pub(crate) downstream_id: String,
     pub(crate) upstream_id: String,
     pub(crate) upstream_lookup: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) owner: Option<WireIdOwner>,
     pub(crate) last_seen_day: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct WireIdOwner {
+    pub(crate) session_id: String,
+    pub(crate) thread_id: String,
 }
 
 impl PersistedRequestState {
@@ -252,6 +261,7 @@ impl ScopeState {
             validate_optional_uuid_v7(entry.current_turn_id.as_deref(), "child thread turn")?;
             validate_day(entry.last_seen_day)?;
         }
+        validate_thread_relationships(self)?;
         for entry in self.turns.values() {
             validate_uuid_version(&entry.id, 7, "turn")?;
             validate_uuid_version(&entry.thread_id, 7, "turn thread")?;
@@ -262,6 +272,7 @@ impl ScopeState {
             anyhow::ensure!(entry.started_at_unix_ms >= 0, "invalid turn start time");
             validate_day(entry.last_seen_day)?;
         }
+        validate_turn_relationships(self)?;
         for (thread_id, current_turn_id) in self
             .conversations
             .values()
@@ -285,6 +296,10 @@ impl ScopeState {
             validate_prefixed_uuid_v7(&entry.id)?;
             if let Some(turn_id) = &entry.turn_id {
                 validate_uuid_version(turn_id, 7, "item turn")?;
+                anyhow::ensure!(
+                    self.turns.values().any(|turn| turn.id == *turn_id),
+                    "generated item turn is dangling"
+                );
             }
             if let Some(create_time) = entry.create_time_micros {
                 anyhow::ensure!(create_time >= 0, "invalid item create time");
@@ -293,6 +308,10 @@ impl ScopeState {
         }
         for entry in self.compaction_markers.values() {
             validate_uuid_version(&entry.thread_id, 7, "compaction thread")?;
+            anyhow::ensure!(
+                thread_belongs_to_session(self, &entry.thread_id).is_some(),
+                "compaction thread is dangling"
+            );
             validate_day(entry.last_seen_day)?;
         }
         for (downstream_lookup, entry) in &self.wire_ids {
@@ -303,6 +322,19 @@ impl ScopeState {
                 "wire ID pair is not pseudonymized"
             );
             validate_lookup_key(&entry.upstream_lookup)?;
+            if let Some(owner) = &entry.owner {
+                anyhow::ensure!(
+                    entry.domain == WireIdDomain::Response,
+                    "only response wire IDs may own request identity"
+                );
+                validate_uuid_version(&owner.session_id, 7, "wire owner session")?;
+                validate_uuid_version(&owner.thread_id, 7, "wire owner thread")?;
+                anyhow::ensure!(
+                    thread_belongs_to_session(self, &owner.thread_id)
+                        .is_some_and(|session| session == owner.session_id),
+                    "wire ID owner is dangling"
+                );
+            }
             validate_day(entry.last_seen_day)?;
             anyhow::ensure!(
                 self.wire_upstream_index.get(&entry.upstream_lookup) == Some(downstream_lookup),
@@ -321,6 +353,109 @@ impl ScopeState {
         }
         Ok(())
     }
+}
+
+fn validate_thread_relationships(scope: &ScopeState) -> Result<()> {
+    for child in scope.child_threads.values() {
+        anyhow::ensure!(
+            scope
+                .conversations
+                .values()
+                .any(|conversation| conversation.id == child.session_id),
+            "child session is dangling"
+        );
+        if let Some(parent_id) = &child.parent_thread_id {
+            anyhow::ensure!(parent_id != &child.id, "child thread is its own parent");
+            anyhow::ensure!(
+                thread_belongs_to_session(scope, parent_id)
+                    .is_some_and(|session| session == child.session_id),
+                "parent thread is dangling or crosses sessions"
+            );
+        }
+        let mut current = child.parent_thread_id.as_deref();
+        for _ in 0..=scope.child_threads.len() {
+            let Some(parent_id) = current else {
+                break;
+            };
+            if parent_id == child.session_id {
+                current = None;
+                break;
+            }
+            let parent = scope
+                .child_threads
+                .values()
+                .find(|candidate| candidate.id == parent_id)
+                .ok_or_else(|| anyhow::anyhow!("parent thread is dangling"))?;
+            current = parent.parent_thread_id.as_deref();
+        }
+        anyhow::ensure!(current.is_none(), "child thread ancestry contains a cycle");
+    }
+    Ok(())
+}
+
+fn validate_turn_relationships(scope: &ScopeState) -> Result<()> {
+    for turn in scope.turns.values() {
+        let session = thread_belongs_to_session(scope, &turn.thread_id)
+            .ok_or_else(|| anyhow::anyhow!("turn thread is dangling"))?;
+        let root = scope
+            .turns
+            .values()
+            .find(|candidate| candidate.id == turn.root_turn_id)
+            .ok_or_else(|| anyhow::anyhow!("root turn is dangling"))?;
+        anyhow::ensure!(
+            root.root_turn_id == root.id,
+            "root turn does not identify itself"
+        );
+        anyhow::ensure!(
+            thread_belongs_to_session(scope, &root.thread_id) == Some(session),
+            "root turn crosses sessions"
+        );
+        if let Some(parent_id) = &turn.parent_turn_id {
+            anyhow::ensure!(parent_id != &turn.id, "turn is its own parent");
+            let parent = scope
+                .turns
+                .values()
+                .find(|candidate| candidate.id == *parent_id)
+                .ok_or_else(|| anyhow::anyhow!("parent turn is dangling"))?;
+            anyhow::ensure!(
+                parent.root_turn_id == turn.root_turn_id,
+                "parent turn crosses roots"
+            );
+            anyhow::ensure!(
+                thread_belongs_to_session(scope, &parent.thread_id) == Some(session),
+                "parent turn crosses sessions"
+            );
+        }
+        let mut current = turn.parent_turn_id.as_deref();
+        for _ in 0..=scope.turns.len() {
+            let Some(parent_id) = current else {
+                break;
+            };
+            let parent = scope
+                .turns
+                .values()
+                .find(|candidate| candidate.id == parent_id)
+                .ok_or_else(|| anyhow::anyhow!("parent turn is dangling"))?;
+            current = parent.parent_turn_id.as_deref();
+        }
+        anyhow::ensure!(current.is_none(), "turn ancestry contains a cycle");
+    }
+    Ok(())
+}
+
+fn thread_belongs_to_session<'a>(scope: &'a ScopeState, thread_id: &str) -> Option<&'a str> {
+    if let Some(conversation) = scope
+        .conversations
+        .values()
+        .find(|conversation| conversation.id == thread_id)
+    {
+        return Some(conversation.id.as_str());
+    }
+    scope
+        .child_threads
+        .values()
+        .find(|thread| thread.id == thread_id)
+        .map(|thread| thread.session_id.as_str())
 }
 
 fn validate_global_caps(state: &PersistedRequestState) -> Result<()> {

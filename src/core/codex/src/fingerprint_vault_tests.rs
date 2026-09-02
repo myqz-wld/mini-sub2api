@@ -268,6 +268,7 @@ async fn startup_cleans_sidecar_after_older_binary_removal_receipt() {
         account_ref: metadata.account_ref.clone(),
         kind: RemovalKind::ServiceOnly,
         completed_at: Utc::now(),
+        request_state_ref: None,
     };
     write_json_atomically(
         &vault.accounts_dir,

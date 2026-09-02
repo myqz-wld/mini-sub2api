@@ -1,6 +1,7 @@
 use super::*;
 use crate::fingerprint::FingerprintMode;
 use crate::request_state_store::RequestStateStore;
+use crate::response_translation::ResponseStateContext;
 use http::HeaderValue;
 use serde_json::Value;
 use std::fs;
@@ -314,4 +315,250 @@ async fn oversized_schema_id_is_an_invalid_request_not_a_state_outage() {
     .expect_err("oversized ID must fail");
     assert_eq!(error, StatefulPrepareError::InvalidRequest);
     assert!(!store.state_path_for_test(NAMESPACE).exists());
+}
+
+#[tokio::test]
+async fn responses_conversation_anchors_fallback_but_carrier_free_calls_stay_distinct() {
+    let (_temp, store) = store();
+    let request = |conversation: Option<&str>, text: &str| {
+        let mut value = serde_json::json!({
+            "model":"gpt-5.4",
+            "input":[{"type":"message","role":"user","content":text}]
+        });
+        if let Some(conversation) = conversation {
+            value
+                .as_object_mut()
+                .expect("request")
+                .insert("conversation".to_string(), conversation.into());
+        }
+        value
+    };
+    let a = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request(Some("conv-downstream-a"), "same"),
+        )
+        .await,
+    );
+    let b = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request(Some("conv-downstream-b"), "same"),
+        )
+        .await,
+    );
+    let a_next = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request(Some("conv-downstream-a"), "different"),
+        )
+        .await,
+    );
+    assert_ne!(
+        a["client_metadata"]["session_id"],
+        b["client_metadata"]["session_id"]
+    );
+    assert_eq!(
+        a["client_metadata"]["session_id"],
+        a_next["client_metadata"]["session_id"]
+    );
+
+    let first_free = value(&prepare(&store, &HeaderMap::new(), request(None, "identical")).await);
+    let second_free = value(&prepare(&store, &HeaderMap::new(), request(None, "identical")).await);
+    assert_ne!(
+        first_free["client_metadata"]["session_id"],
+        second_free["client_metadata"]["session_id"]
+    );
+}
+
+#[tokio::test]
+async fn previous_response_alias_restores_its_conversation_and_thread_owner() {
+    let (temp, store) = store();
+    let first = prepare(
+        &store,
+        &HeaderMap::new(),
+        serde_json::json!({
+            "model":"gpt-5.4",
+            "input":[{"type":"message","id":"msg_first","role":"user","content":"first"}]
+        }),
+    )
+    .await;
+    let first_value = value(&first);
+    let first_identity = first.resolved_identity.as_ref().expect("identity");
+    let response_state =
+        ResponseStateContext::new(ACCOUNT_REF, NAMESPACE, SCOPE, &store, Some(first_identity));
+    let translated = response_state
+        .translate_value(serde_json::json!({
+            "type":"response.completed",
+            "response":{"id":"resp_provider_first","output":[]}
+        }))
+        .await
+        .expect("translate response");
+    let alias = translated["response"]["id"]
+        .as_str()
+        .expect("response alias");
+    assert_ne!(alias, "resp_provider_first");
+
+    let reopened = RequestStateStore::new(temp.path().join("accounts"));
+    let next = value(
+        &prepare(
+            &reopened,
+            &HeaderMap::new(),
+            serde_json::json!({
+                "model":"gpt-5.4",
+                "previous_response_id":alias,
+                "input":[{"type":"message","id":"msg_next","role":"user","content":"next"}]
+            }),
+        )
+        .await,
+    );
+    assert_eq!(
+        next["client_metadata"]["session_id"],
+        first_value["client_metadata"]["session_id"]
+    );
+    assert_eq!(
+        next["client_metadata"]["thread_id"],
+        first_value["client_metadata"]["thread_id"]
+    );
+    assert_ne!(
+        next["client_metadata"]["turn_id"],
+        first_value["client_metadata"]["turn_id"]
+    );
+}
+
+#[tokio::test]
+async fn equal_user_content_uses_item_identity_and_tool_history_reuses_active_turn() {
+    let (_temp, store) = store();
+    let request = |input: Value| {
+        serde_json::json!({
+            "model":"gpt-5.4",
+            "input":input,
+            "client_metadata":{"session_id":"equal-content-session"}
+        })
+    };
+    let first = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request(serde_json::json!([{
+                "type":"message","id":"msg_equal_1","role":"user","content":"repeat"
+            }])),
+        )
+        .await,
+    );
+    let second_body = request(serde_json::json!([{
+        "type":"message","id":"msg_equal_2","role":"user","content":"repeat"
+    }]));
+    let second = value(&prepare(&store, &HeaderMap::new(), second_body.clone()).await);
+    let retry = value(&prepare(&store, &HeaderMap::new(), second_body).await);
+    assert_ne!(
+        first["client_metadata"]["turn_id"],
+        second["client_metadata"]["turn_id"]
+    );
+    assert_eq!(
+        second["client_metadata"]["turn_id"],
+        retry["client_metadata"]["turn_id"]
+    );
+
+    let tool = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request(serde_json::json!([
+                {"type":"message","id":"msg_equal_2","role":"user","content":"repeat"},
+                {"type":"function_call_output","call_id":"call_equal","output":"done"}
+            ])),
+        )
+        .await,
+    );
+    assert_eq!(
+        tool["client_metadata"]["turn_id"],
+        second["client_metadata"]["turn_id"]
+    );
+}
+
+#[tokio::test]
+async fn compaction_is_idempotent_per_turn_and_independent_across_turns_and_threads() {
+    let (_temp, store) = store();
+    let request = |session: &str, turn: &str| {
+        let metadata = serde_json::json!({
+            "session_id":session,
+            "thread_id":session,
+            "turn_id":turn,
+            "request_kind":"compaction",
+            "compaction":{
+                "trigger":"manual",
+                "reason":"user_requested",
+                "implementation":"responses_compaction_v2",
+                "phase":"standalone_turn",
+                "strategy":"memento"
+            }
+        });
+        serde_json::json!({
+            "model":"gpt-5.4",
+            "input":[
+                {"type":"message","role":"user","content":"history"},
+                {"type":"compaction_trigger"}
+            ],
+            "client_metadata":{"x-codex-turn-metadata":metadata.to_string()}
+        })
+    };
+    let first = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request("compact-session-a", "compact-turn-a1"),
+        )
+        .await,
+    );
+    let retry = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request("compact-session-a", "compact-turn-a1"),
+        )
+        .await,
+    );
+    let second = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request("compact-session-a", "compact-turn-a2"),
+        )
+        .await,
+    );
+    let other = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request("compact-session-b", "compact-turn-b1"),
+        )
+        .await,
+    );
+    assert_eq!(
+        first["client_metadata"]["x-codex-window-id"],
+        retry["client_metadata"]["x-codex-window-id"]
+    );
+    assert!(
+        first["client_metadata"]["x-codex-window-id"]
+            .as_str()
+            .is_some_and(|window| window.ends_with(":0"))
+    );
+    assert!(
+        second["client_metadata"]["x-codex-window-id"]
+            .as_str()
+            .is_some_and(|window| window.ends_with(":1"))
+    );
+    assert!(
+        other["client_metadata"]["x-codex-window-id"]
+            .as_str()
+            .is_some_and(|window| window.ends_with(":0"))
+    );
+    assert_ne!(
+        first["client_metadata"]["session_id"],
+        other["client_metadata"]["session_id"]
+    );
 }

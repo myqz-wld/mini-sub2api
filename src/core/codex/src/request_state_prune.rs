@@ -208,25 +208,15 @@ impl PersistedRequestState {
         match kind {
             EntryKind::Conversation => {
                 let id = &scope.conversations[key].id;
-                !scope.child_threads.iter().any(|(child_key, child)| {
-                    child.session_id == *id
-                        && protected
-                            .child_threads
-                            .contains(&(scope_key.to_string(), child_key.clone()))
-                }) && !protected_turn_for_thread(scope, scope_key, id, protected)
+                !protected_conversation_graph(scope, scope_key, id, protected)
             }
             EntryKind::ChildThread => {
                 let id = &scope.child_threads[key].id;
-                !protected_turn_for_thread(scope, scope_key, id, protected)
+                !protected_thread_graph(scope, scope_key, id, protected)
             }
             EntryKind::Turn => {
                 let id = &scope.turns[key].id;
-                !scope.generated_items.iter().any(|(item_key, item)| {
-                    item.turn_id.as_deref() == Some(id.as_str())
-                        && protected
-                            .generated_items
-                            .contains(&(scope_key.to_string(), item_key.clone()))
-                })
+                !protected_turn_graph(scope, scope_key, id, protected)
             }
             _ => true,
         }
@@ -244,52 +234,19 @@ impl PersistedRequestState {
             }
             EntryKind::Conversation => {
                 if let Some(entry) = scope.conversations.remove(key) {
-                    remove_wire_pairs(
-                        scope,
-                        WireIdDomain::Session,
-                        std::slice::from_ref(&entry.id),
-                    );
-                    remove_wire_pairs(scope, WireIdDomain::Thread, std::slice::from_ref(&entry.id));
-                    remove_thread_graph(scope, &entry.id);
-                    let child_ids = scope
-                        .child_threads
-                        .iter()
-                        .filter(|(_, child)| child.session_id == entry.id)
-                        .map(|(_, child)| child.id.clone())
-                        .collect::<Vec<_>>();
-                    scope
-                        .child_threads
-                        .retain(|_, child| child.session_id != entry.id);
-                    for child_id in child_ids {
-                        remove_wire_pairs(
-                            scope,
-                            WireIdDomain::Thread,
-                            std::slice::from_ref(&child_id),
-                        );
-                        remove_thread_graph(scope, &child_id);
-                    }
+                    remove_conversation_graph(scope, &entry.id);
                 }
             }
             EntryKind::ChildThread => {
-                if let Some(entry) = scope.child_threads.remove(key) {
-                    remove_wire_pairs(scope, WireIdDomain::Thread, std::slice::from_ref(&entry.id));
-                    remove_thread_graph(scope, &entry.id);
+                if let Some(entry) = scope.child_threads.get(key) {
+                    let root = entry.id.clone();
+                    remove_child_thread_graph(scope, &root);
                 }
             }
             EntryKind::Turn => {
-                if let Some(entry) = scope.turns.remove(key) {
-                    clear_current_turn(scope, &entry.id);
-                    remove_wire_pairs(scope, WireIdDomain::Turn, std::slice::from_ref(&entry.id));
-                    let item_ids = scope
-                        .generated_items
-                        .values()
-                        .filter(|item| item.turn_id.as_deref() == Some(entry.id.as_str()))
-                        .map(|item| item.id.clone())
-                        .collect::<Vec<_>>();
-                    scope
-                        .generated_items
-                        .retain(|_, item| item.turn_id.as_deref() != Some(entry.id.as_str()));
-                    remove_wire_pairs(scope, WireIdDomain::Item, &item_ids);
+                if let Some(entry) = scope.turns.get(key) {
+                    let root = entry.id.clone();
+                    remove_turn_graph(scope, &root);
                 }
             }
             EntryKind::GeneratedItem => {
@@ -334,18 +291,204 @@ fn entry_keys(scope: &ScopeState, kind: EntryKind) -> impl Iterator<Item = &str>
     keys.into_iter().map(String::as_str)
 }
 
-fn protected_turn_for_thread(
+fn protected_conversation_graph(
+    scope: &ScopeState,
+    scope_key: &str,
+    session_id: &str,
+    protected: &ProtectedStateKeys,
+) -> bool {
+    let thread_ids = std::iter::once(session_id.to_string())
+        .chain(
+            scope
+                .child_threads
+                .values()
+                .filter(|thread| thread.session_id == session_id)
+                .map(|thread| thread.id.clone()),
+        )
+        .collect::<Vec<_>>();
+    protected_thread_ids(scope, scope_key, &thread_ids, protected)
+        || protected_owned_response(scope, scope_key, session_id, None, protected)
+}
+
+fn protected_thread_graph(
     scope: &ScopeState,
     scope_key: &str,
     thread_id: &str,
     protected: &ProtectedStateKeys,
 ) -> bool {
-    scope.turns.iter().any(|(turn_key, turn)| {
-        turn.thread_id == thread_id
+    let thread_ids = descendant_thread_ids(scope, thread_id);
+    protected_thread_ids(scope, scope_key, &thread_ids, protected)
+        || thread_ids
+            .iter()
+            .any(|id| protected_owned_response(scope, scope_key, "", Some(id), protected))
+}
+
+fn protected_thread_ids(
+    scope: &ScopeState,
+    scope_key: &str,
+    thread_ids: &[String],
+    protected: &ProtectedStateKeys,
+) -> bool {
+    scope.child_threads.iter().any(|(key, thread)| {
+        thread_ids.contains(&thread.id)
+            && protected
+                .child_threads
+                .contains(&(scope_key.to_string(), key.clone()))
+    }) || scope.turns.iter().any(|(key, turn)| {
+        thread_ids.contains(&turn.thread_id)
             && protected
                 .turns
-                .contains(&(scope_key.to_string(), turn_key.clone()))
+                .contains(&(scope_key.to_string(), key.clone()))
+    }) || scope.generated_items.iter().any(|(key, item)| {
+        item.turn_id.as_ref().is_some_and(|turn_id| {
+            scope
+                .turns
+                .values()
+                .any(|turn| turn.id == *turn_id && thread_ids.contains(&turn.thread_id))
+        }) && protected
+            .generated_items
+            .contains(&(scope_key.to_string(), key.clone()))
     })
+}
+
+fn protected_turn_graph(
+    scope: &ScopeState,
+    scope_key: &str,
+    turn_id: &str,
+    protected: &ProtectedStateKeys,
+) -> bool {
+    let turn_ids = descendant_turn_ids(scope, turn_id);
+    scope.turns.iter().any(|(key, turn)| {
+        turn_ids.contains(&turn.id)
+            && protected
+                .turns
+                .contains(&(scope_key.to_string(), key.clone()))
+    }) || scope.generated_items.iter().any(|(key, item)| {
+        item.turn_id
+            .as_ref()
+            .is_some_and(|id| turn_ids.contains(id))
+            && protected
+                .generated_items
+                .contains(&(scope_key.to_string(), key.clone()))
+    })
+}
+
+fn protected_owned_response(
+    scope: &ScopeState,
+    scope_key: &str,
+    session_id: &str,
+    thread_id: Option<&str>,
+    protected: &ProtectedStateKeys,
+) -> bool {
+    scope.wire_ids.iter().any(|(key, entry)| {
+        entry.owner.as_ref().is_some_and(|owner| {
+            (session_id.is_empty() || owner.session_id == session_id)
+                && thread_id.is_none_or(|thread| owner.thread_id == thread)
+        }) && protected
+            .wire_ids
+            .contains(&(scope_key.to_string(), key.clone()))
+    })
+}
+
+fn remove_conversation_graph(scope: &mut ScopeState, session_id: &str) {
+    let thread_ids = std::iter::once(session_id.to_string())
+        .chain(
+            scope
+                .child_threads
+                .values()
+                .filter(|thread| thread.session_id == session_id)
+                .map(|thread| thread.id.clone()),
+        )
+        .collect::<Vec<_>>();
+    scope
+        .child_threads
+        .retain(|_, thread| thread.session_id != session_id);
+    remove_wire_pairs(scope, WireIdDomain::Session, &[session_id.to_string()]);
+    remove_wire_pairs(scope, WireIdDomain::Thread, &thread_ids);
+    for thread_id in &thread_ids {
+        remove_thread_graph(scope, thread_id);
+    }
+    remove_owned_response_pairs(scope, |owner| owner.session_id == session_id);
+}
+
+fn remove_child_thread_graph(scope: &mut ScopeState, thread_id: &str) {
+    let thread_ids = descendant_thread_ids(scope, thread_id);
+    scope
+        .child_threads
+        .retain(|_, thread| !thread_ids.contains(&thread.id));
+    remove_wire_pairs(scope, WireIdDomain::Thread, &thread_ids);
+    for id in &thread_ids {
+        remove_thread_graph(scope, id);
+    }
+    remove_owned_response_pairs(scope, |owner| thread_ids.contains(&owner.thread_id));
+}
+
+fn descendant_thread_ids(scope: &ScopeState, root: &str) -> Vec<String> {
+    let mut ids = vec![root.to_string()];
+    loop {
+        let mut changed = false;
+        for child in scope.child_threads.values() {
+            if child
+                .parent_thread_id
+                .as_ref()
+                .is_some_and(|parent| ids.contains(parent))
+                && !ids.contains(&child.id)
+            {
+                ids.push(child.id.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            return ids;
+        }
+    }
+}
+
+fn descendant_turn_ids(scope: &ScopeState, root: &str) -> Vec<String> {
+    let mut ids = vec![root.to_string()];
+    loop {
+        let mut changed = false;
+        for turn in scope.turns.values() {
+            if (turn.root_turn_id == root
+                || turn
+                    .parent_turn_id
+                    .as_ref()
+                    .is_some_and(|parent| ids.contains(parent)))
+                && !ids.contains(&turn.id)
+            {
+                ids.push(turn.id.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            return ids;
+        }
+    }
+}
+
+fn remove_turn_graph(scope: &mut ScopeState, turn_id: &str) {
+    let turn_ids = descendant_turn_ids(scope, turn_id);
+    let item_ids = scope
+        .generated_items
+        .values()
+        .filter(|item| {
+            item.turn_id
+                .as_ref()
+                .is_some_and(|id| turn_ids.contains(id))
+        })
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    for id in &turn_ids {
+        clear_current_turn(scope, id);
+    }
+    scope.turns.retain(|_, turn| !turn_ids.contains(&turn.id));
+    scope.generated_items.retain(|_, item| {
+        item.turn_id
+            .as_ref()
+            .is_none_or(|id| !turn_ids.contains(id))
+    });
+    remove_wire_pairs(scope, WireIdDomain::Turn, &turn_ids);
+    remove_wire_pairs(scope, WireIdDomain::Item, &item_ids);
 }
 
 fn remove_thread_graph(scope: &mut ScopeState, thread_id: &str) {
@@ -378,6 +521,23 @@ fn remove_thread_graph(scope: &mut ScopeState, thread_id: &str) {
     remove_wire_pairs(scope, WireIdDomain::Item, &item_ids);
 }
 
+fn remove_owned_response_pairs(
+    scope: &mut ScopeState,
+    predicate: impl Fn(&crate::request_state_types::WireIdOwner) -> bool,
+) {
+    let keys = scope
+        .wire_ids
+        .iter()
+        .filter(|(_, entry)| entry.owner.as_ref().is_some_and(&predicate))
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    for key in keys {
+        if let Some(entry) = scope.wire_ids.remove(&key) {
+            scope.wire_upstream_index.remove(&entry.upstream_lookup);
+        }
+    }
+}
+
 fn clear_current_turn(scope: &mut ScopeState, turn_id: &str) {
     for entry in scope.conversations.values_mut() {
         if entry.current_turn_id.as_deref() == Some(turn_id) {
@@ -405,5 +565,115 @@ fn remove_wire_pairs(scope: &mut ScopeState, domain: WireIdDomain, upstream_ids:
         if let Some(entry) = scope.wire_ids.remove(&key) {
             scope.wire_upstream_index.remove(&entry.upstream_lookup);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request_state_editor::RequestStateEditor;
+    use crate::request_state_lookup::LookupKeyFactory;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn protected_descendants_retain_ancestors_and_cascade_removal_never_dangles() {
+        let owner = "acct_prune_graph";
+        let namespace = "prune-graph-namespace";
+        let scope_raw = "prune-graph-scope";
+        let keys = LookupKeyFactory::new(namespace, scope_raw);
+        let scope_key = keys.scope_key();
+        let root_key = keys.identity("conversation", "root");
+        let parent_thread_key = keys.identity("thread", "parent");
+        let child_thread_key = keys.identity("thread", "child");
+        let root_turn_key = keys.identity("turn", "root");
+        let parent_turn_key = keys.identity("turn", "parent");
+        let child_turn_key = keys.identity("turn", "child");
+        let mut state = PersistedRequestState::new(BTreeSet::from([owner.to_string()]));
+        let (
+            root_id,
+            parent_thread_id,
+            child_thread_id,
+            root_turn_id,
+            parent_turn_id,
+            child_turn_id,
+        ) = {
+            let mut editor =
+                RequestStateEditor::new(&mut state, keys, owner, 1, 86_400_000).expect("editor");
+            let root = editor.conversation(&root_key).expect("root");
+            let parent = editor
+                .child_thread(&parent_thread_key, &root.id, Some(&root.id))
+                .expect("parent thread");
+            let child = editor
+                .child_thread(&child_thread_key, &root.id, Some(&parent.id))
+                .expect("child thread");
+            let root_turn = editor
+                .turn(&root_turn_key, &root.id, None, None)
+                .expect("root turn");
+            let parent_turn = editor
+                .turn(
+                    &parent_turn_key,
+                    &parent.id,
+                    Some(&root_turn.id),
+                    Some(&root_turn.id),
+                )
+                .expect("parent turn");
+            let child_turn = editor
+                .turn(
+                    &child_turn_key,
+                    &child.id,
+                    Some(&root_turn.id),
+                    Some(&parent_turn.id),
+                )
+                .expect("child turn");
+            (
+                root.id,
+                parent.id,
+                child.id,
+                root_turn.id,
+                parent_turn.id,
+                child_turn.id,
+            )
+        };
+        state.validate().expect("valid graph");
+
+        let mut protected = ProtectedStateKeys::default();
+        protected
+            .child_threads
+            .insert((scope_key.clone(), child_thread_key.clone()));
+        protected
+            .turns
+            .insert((scope_key.clone(), child_turn_key.clone()));
+        assert!(!state.removable(
+            EntryKind::ChildThread,
+            &scope_key,
+            &parent_thread_key,
+            &protected,
+        ));
+        assert!(!state.removable(EntryKind::Turn, &scope_key, &root_turn_key, &protected,));
+
+        state.remove_entry(EntryKind::Turn, &scope_key, &root_turn_key);
+        let scope = &state.scopes[&scope_key];
+        assert!(
+            scope.turns.values().all(|turn| {
+                ![&root_turn_id, &parent_turn_id, &child_turn_id].contains(&&turn.id)
+            })
+        );
+        assert!(
+            scope
+                .conversations
+                .values()
+                .any(|entry| entry.id == root_id)
+        );
+        state.validate().expect("valid after turn cascade");
+
+        state.remove_entry(EntryKind::ChildThread, &scope_key, &parent_thread_key);
+        let scope = &state.scopes[&scope_key];
+        assert!(
+            scope
+                .child_threads
+                .values()
+                .all(|thread| { thread.id != parent_thread_id && thread.id != child_thread_id })
+        );
+        state.validate().expect("valid after thread cascade");
     }
 }

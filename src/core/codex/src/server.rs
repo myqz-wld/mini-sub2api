@@ -184,7 +184,7 @@ async fn responses_inner(
             .await
             .map_err(|error| match error {
                 StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
-                StatefulPrepareError::StateUnavailable => CoreFailure::UnknownAccount,
+                StatefulPrepareError::StateUnavailable => CoreFailure::StateUnavailable,
             })?
         } else {
             prepare_emulated_request(
@@ -262,6 +262,7 @@ async fn responses_inner(
                 namespace,
                 &pseudonym_scope,
                 state.vault.request_state(),
+                resolved_identity.as_ref(),
             )
         })
     });

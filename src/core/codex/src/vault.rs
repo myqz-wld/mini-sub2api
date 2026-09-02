@@ -41,6 +41,8 @@ pub struct RemovalReceipt {
     pub account_ref: String,
     pub kind: RemovalKind,
     pub completed_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) request_state_ref: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -482,7 +484,13 @@ fn complete_removal_locked(
         Err(error) => return Err(error),
     };
     let receipt_path = receipt_path(accounts_dir, account_ref)?;
-    let receipt = match read_optional_receipt(&receipt_path)? {
+    let record_state_ref = record.as_ref().and_then(|record| match &record.material {
+        CredentialMaterial::CodexOAuth { account_id, .. } => {
+            Some(RequestStateStore::state_ref_for_namespace(account_id))
+        }
+        CredentialMaterial::OpenAiApiKey { .. } => None,
+    });
+    let mut receipt = match read_optional_receipt(&receipt_path)? {
         Some(existing) => {
             anyhow::ensure!(
                 existing.account_ref == account_ref,
@@ -501,22 +509,37 @@ fn complete_removal_locked(
                 account_ref: account_ref.to_string(),
                 kind: requested_kind,
                 completed_at: Utc::now(),
+                request_state_ref: record_state_ref.clone(),
             };
             write_json_atomically(accounts_dir, &receipt_path, &receipt)?;
             receipt
         }
     };
-    if let Some(VaultRecord {
-        material: CredentialMaterial::CodexOAuth { account_id, .. },
-        ..
-    }) = &record
-    {
-        RequestStateStore::new(accounts_dir.to_path_buf()).remove_owner(account_id, account_ref)?;
+    if let Some(record_state_ref) = record_state_ref {
+        match receipt.request_state_ref.as_deref() {
+            Some(existing) => anyhow::ensure!(
+                existing == record_state_ref,
+                "credential removal receipt state identity mismatch"
+            ),
+            None => {
+                receipt.request_state_ref = Some(record_state_ref);
+                write_json_atomically(accounts_dir, &receipt_path, &receipt)?;
+            }
+        }
     }
-    match std::fs::remove_file(record_path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).context("removing credential record"),
+    if let Some(state_ref) = receipt.request_state_ref.as_deref() {
+        anyhow::ensure!(
+            RequestStateStore::valid_state_ref(state_ref),
+            "invalid credential removal state reference"
+        );
+        RequestStateStore::new(accounts_dir.to_path_buf())
+            .remove_credential_owner(state_ref, account_ref)?;
+    } else {
+        match std::fs::remove_file(record_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("removing credential record"),
+        }
     }
     fingerprint::remove_if_exists(accounts_dir, account_ref)?;
     sync_directory(accounts_dir);

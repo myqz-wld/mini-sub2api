@@ -267,8 +267,13 @@ mod tests {
             )
             .await
             .expect("seed mappings");
-        let context =
-            ResponseStateContext::new("acct_sse_translation", "namespace-sse", "scope-sse", &store);
+        let context = ResponseStateContext::new(
+            "acct_sse_translation",
+            "namespace-sse",
+            "scope-sse",
+            &store,
+            None,
+        );
         let event = concat!(
             "event: response.completed\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_upstream\",",

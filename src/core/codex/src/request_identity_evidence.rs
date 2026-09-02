@@ -11,6 +11,7 @@ const WINDOW_HEADER: &str = "x-codex-window-id";
 pub(crate) struct RequestIdentityEvidence {
     pub(crate) installation: Option<String>,
     pub(crate) conversation: Option<String>,
+    pub(crate) responses_conversation: Option<String>,
     pub(crate) thread: Option<String>,
     pub(crate) parent_thread: Option<String>,
     pub(crate) forked_from_thread: Option<String>,
@@ -19,6 +20,7 @@ pub(crate) struct RequestIdentityEvidence {
     pub(crate) root_turn: Option<String>,
     pub(crate) parent_turn: Option<String>,
     pub(crate) items: Vec<ItemIdentityEvidence>,
+    pub(crate) new_user_submission: bool,
     pub(crate) window_number: Option<u64>,
     pub(crate) request_kind: String,
 }
@@ -28,6 +30,7 @@ pub(crate) struct ItemIdentityEvidence {
     pub(crate) id: Option<String>,
     pub(crate) turn_id: Option<String>,
     pub(crate) had_create_time: bool,
+    pub(crate) is_user: bool,
 }
 
 impl RequestIdentityEvidence {
@@ -121,6 +124,7 @@ impl RequestIdentityEvidence {
                 .or_else(|| header("x-codex-installation-id"))
                 .or_else(|| header_turn_text("installation_id")),
             conversation,
+            responses_conversation: responses_conversation(object),
             thread,
             parent_thread,
             forked_from_thread,
@@ -129,6 +133,7 @@ impl RequestIdentityEvidence {
             root_turn,
             parent_turn,
             items: item_evidence(object),
+            new_user_submission: new_user_submission(object),
             window_number: window.as_deref().and_then(window_number),
             request_kind,
         }
@@ -208,9 +213,33 @@ fn item_evidence(object: &Map<String, Value>) -> Vec<ItemIdentityEvidence> {
                 had_create_time: metadata
                     .and_then(|metadata| metadata.get("create_time"))
                     .is_some_and(Value::is_number),
+                is_user: item.get("role").and_then(Value::as_str) == Some("user"),
             }
         })
         .collect()
+}
+
+fn responses_conversation(object: &Map<String, Value>) -> Option<String> {
+    match object.get("conversation")? {
+        Value::String(value) => nonempty(value),
+        Value::Object(conversation) => conversation
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(nonempty),
+        _ => None,
+    }
+}
+
+fn new_user_submission(object: &Map<String, Value>) -> bool {
+    match object.get("input") {
+        Some(Value::String(value)) => !value.is_empty(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .rev()
+            .find_map(Value::as_object)
+            .is_some_and(|item| item.get("role").and_then(Value::as_str) == Some("user")),
+        _ => false,
+    }
 }
 
 fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {

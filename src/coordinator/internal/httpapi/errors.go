@@ -16,6 +16,7 @@ var knownCoreErrors = map[string]bool{
 	"unsupported_protocol":        true,
 	"invalid_request":             true,
 	"unknown_account":             true,
+	"state_unavailable":           true,
 	"credential_disabled":         true,
 	"credential_requires_login":   true,
 	"credential_busy":             true,

@@ -18,6 +18,8 @@ pub enum CoreFailure {
     InvalidRequest,
     #[error("unknown account")]
     UnknownAccount,
+    #[error("request identity state unavailable")]
+    StateUnavailable,
     #[error("credential requires sign-in")]
     CredentialRequiresLogin,
     #[error("upstream connection failed")]
@@ -41,6 +43,7 @@ impl CoreFailure {
             Self::UnsupportedProtocol => "unsupported_protocol",
             Self::InvalidRequest => "invalid_request",
             Self::UnknownAccount => "unknown_account",
+            Self::StateUnavailable => "state_unavailable",
             Self::CredentialRequiresLogin => "credential_requires_login",
             Self::UpstreamConnectFailed => "upstream_connect_failed",
             Self::UpstreamDeliveryUnknown => "upstream_delivery_unknown",
@@ -56,6 +59,7 @@ impl CoreFailure {
             Self::InvalidInternalAuth => StatusCode::UNAUTHORIZED,
             Self::UnsupportedProtocol | Self::InvalidRequest => StatusCode::BAD_REQUEST,
             Self::UnknownAccount => StatusCode::NOT_FOUND,
+            Self::StateUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::CredentialRequiresLogin | Self::UpstreamAuthFailed => StatusCode::UNAUTHORIZED,
             Self::UpstreamConnectFailed
             | Self::UpstreamDeliveryUnknown
@@ -71,6 +75,7 @@ impl CoreFailure {
             Self::UnsupportedProtocol => "The internal protocol version is unsupported.",
             Self::InvalidRequest => "The request is invalid.",
             Self::UnknownAccount => "The selected credential is unavailable.",
+            Self::StateUnavailable => "The request identity state is unavailable.",
             Self::CredentialRequiresLogin => "The selected credential requires sign-in.",
             Self::UpstreamConnectFailed => "The upstream service is unavailable.",
             Self::UpstreamDeliveryUnknown => "The upstream request may have been delivered.",
@@ -96,6 +101,11 @@ impl CoreFailure {
             Self::UnknownAccount | Self::CredentialRequiresLogin => failure(
                 RetryAdvice::Never,
                 FailurePhase::Credential,
+                DeliveryState::NotDelivered,
+            ),
+            Self::StateUnavailable => failure(
+                RetryAdvice::Safe,
+                FailurePhase::Internal,
                 DeliveryState::NotDelivered,
             ),
             Self::UpstreamConnectFailed => failure(
@@ -178,6 +188,7 @@ mod tests {
             CoreFailure::UnsupportedProtocol,
             CoreFailure::InvalidRequest,
             CoreFailure::UnknownAccount,
+            CoreFailure::StateUnavailable,
             CoreFailure::CredentialRequiresLogin,
             CoreFailure::UpstreamConnectFailed,
             CoreFailure::UpstreamDeliveryUnknown,

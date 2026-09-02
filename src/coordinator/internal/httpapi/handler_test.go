@@ -267,6 +267,59 @@ func TestCoreRequiresLoginIsMappedAndCredentialIsMarked(t *testing.T) {
 	}
 }
 
+func TestCoreStateUnavailablePreservesRetryableNotDeliveredFailure(t *testing.T) {
+	store, _, key := setupHTTPTest(t)
+	core := &fakeCore{response: func(_ context.Context, requestID string) (*http.Response, error) {
+		body, _ := json.Marshal(protocolv1.ErrorEnvelope{Error: protocolv1.CoreError{
+			Code: "state_unavailable", Message: "The request identity state is unavailable.",
+			RequestID: requestID,
+			FailureMetadata: protocolv1.FailureMetadata{
+				RetryAdvice: protocolv1.RetrySafe, Phase: protocolv1.PhaseInternal,
+				DeliveryState: protocolv1.DeliveryNotDelivered,
+			},
+		}})
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+		}, nil
+	}}
+	server := httptest.NewServer(NewHandler(store, core, nil))
+	t.Cleanup(server.Close)
+	request, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/responses",
+		strings.NewReader("{}"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+key.Secret)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, expected := range []string{
+		"\"code\":\"state_unavailable\"",
+		"\"retryAdvice\":\"safe\"",
+		"\"phase\":\"internal\"",
+		"\"deliveryState\":\"not_delivered\"",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("public error missing %s: %q", expected, text)
+		}
+	}
+}
+
 func TestClientCancellationClosesCoreBodyAndRecordsPartial(t *testing.T) {
 	store, _, key := setupHTTPTest(t)
 	closed := make(chan struct{})

@@ -17,6 +17,25 @@ use http::HeaderMap;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ClientPrepareError {
+    Protocol,
+    StateUnavailable,
+}
+
+impl From<()> for ClientPrepareError {
+    fn from((): ()) -> Self {
+        Self::Protocol
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("invalid WebSocket state projection")]
+struct InvalidWebSocketStateProjection {
+    #[source]
+    source: anyhow::Error,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) struct PreparedClientText {
     pub(crate) text: String,
@@ -35,7 +54,7 @@ pub(crate) async fn prepare_client_text(
     fingerprint: &FingerprintSnapshot,
     state_store: &RequestStateStore,
     identity_binding: &mut Option<ResolvedRequestIdentity>,
-) -> Result<PreparedClientText, ()> {
+) -> Result<PreparedClientText, ClientPrepareError> {
     let text = if profile.uses_codex_subscription() {
         seed_socket_identity(text, identity_binding.as_ref())?
     } else {
@@ -64,19 +83,22 @@ pub(crate) async fn prepare_client_text(
                     account_ref,
                     pseudonym_scope,
                     move |editor| {
-                        let object = filtered
-                            .as_object_mut()
-                            .ok_or_else(|| anyhow::anyhow!("inject frame is not an object"))?;
-                        crate::request_wire_ids::translate_request_ids(
-                            editor,
-                            object,
-                            &BTreeSet::new(),
-                        )?;
-                        Ok(filtered)
+                        (|| {
+                            let object = filtered
+                                .as_object_mut()
+                                .ok_or_else(|| anyhow::anyhow!("inject frame is not an object"))?;
+                            crate::request_wire_ids::translate_request_ids(
+                                editor,
+                                object,
+                                &BTreeSet::new(),
+                            )?;
+                            Ok(filtered)
+                        })()
+                        .map_err(|source| InvalidWebSocketStateProjection { source }.into())
                     },
                 )
                 .await
-                .map_err(|_| ())?;
+                .map_err(classify_state_edit_error)?;
             let text = encode_frame_bounded(&filtered, MAX_WEBSOCKET_MESSAGE_BYTES)?;
             return Ok(PreparedClientText {
                 text,
@@ -102,20 +124,23 @@ pub(crate) async fn prepare_client_text(
                     account_ref,
                     pseudonym_scope,
                     move |editor| {
-                        let mut value = value;
-                        let object = value
-                            .as_object_mut()
-                            .ok_or_else(|| anyhow::anyhow!("control frame is not an object"))?;
-                        crate::request_wire_ids::translate_request_ids(
-                            editor,
-                            object,
-                            &BTreeSet::new(),
-                        )?;
-                        Ok(value)
+                        (|| {
+                            let mut value = value;
+                            let object = value
+                                .as_object_mut()
+                                .ok_or_else(|| anyhow::anyhow!("control frame is not an object"))?;
+                            crate::request_wire_ids::translate_request_ids(
+                                editor,
+                                object,
+                                &BTreeSet::new(),
+                            )?;
+                            Ok(value)
+                        })()
+                        .map_err(|source| InvalidWebSocketStateProjection { source }.into())
                     },
                 )
                 .await
-                .map_err(|_| ())?;
+                .map_err(classify_state_edit_error)?;
             let text = if translated == original {
                 text
             } else {
@@ -158,7 +183,14 @@ pub(crate) async fn prepare_client_text(
                 true,
             )
             .await
-            .map_err(|_| ())?
+            .map_err(|error| match error {
+                crate::request_normalizer::StatefulPrepareError::InvalidRequest => {
+                    ClientPrepareError::Protocol
+                }
+                crate::request_normalizer::StatefulPrepareError::StateUnavailable => {
+                    ClientPrepareError::StateUnavailable
+                }
+            })?
         } else {
             prepare_emulated_request(
                 profile,
@@ -201,6 +233,17 @@ pub(crate) async fn prepare_client_text(
         create_value: Some(value),
         synthesized_item_ids,
     })
+}
+
+fn classify_state_edit_error(error: anyhow::Error) -> ClientPrepareError {
+    if error
+        .downcast_ref::<InvalidWebSocketStateProjection>()
+        .is_some()
+    {
+        ClientPrepareError::Protocol
+    } else {
+        ClientPrepareError::StateUnavailable
+    }
 }
 
 fn seed_socket_identity(

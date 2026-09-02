@@ -476,6 +476,109 @@ async fn duplicate_credentials_share_state_until_the_last_owner_is_removed() {
     assert!(!path.exists());
 }
 
+#[tokio::test]
+async fn concurrent_duplicate_owner_removals_leave_no_credential_or_state() {
+    let temp = TempDir::new().expect("temp dir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let first = vault
+        .create_oauth(
+            oauth_material("concurrent-one"),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("first credential");
+    let second = vault
+        .create_oauth(
+            oauth_material("concurrent-two"),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("second credential");
+    for owner in [&first.account_ref, &second.account_ref] {
+        vault
+            .request_state()
+            .edit_at(NAMESPACE, owner, SCOPE, DAY_MS, |editor| {
+                editor.installation_id(FingerprintMode::Device, None)
+            })
+            .await
+            .expect("owner state");
+    }
+    let state_path = vault.request_state().state_path_for_test(NAMESPACE);
+    let first_ref = first.account_ref.clone();
+    let second_ref = second.account_ref.clone();
+    let (first_result, second_result) = tokio::join!(
+        vault.remove(&first_ref, RemovalKind::ServiceOnly),
+        vault.remove(&second_ref, RemovalKind::ServiceOnly),
+    );
+    first_result.expect("remove first");
+    second_result.expect("remove second");
+    assert!(!state_path.exists());
+    for account_ref in [first_ref, second_ref] {
+        assert!(
+            !temp
+                .path()
+                .join("accounts")
+                .join(format!("{account_ref}.json"))
+                .exists()
+        );
+    }
+}
+
+#[tokio::test]
+async fn corrupt_state_never_blocks_owner_removal_and_final_owner_deletes_it() {
+    let temp = TempDir::new().expect("temp dir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let first = vault
+        .create_oauth(
+            oauth_material("corrupt-one"),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("first credential");
+    let second = vault
+        .create_oauth(
+            oauth_material("corrupt-two"),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("second credential");
+    for owner in [&first.account_ref, &second.account_ref] {
+        vault
+            .request_state()
+            .edit_at(NAMESPACE, owner, SCOPE, DAY_MS, |editor| {
+                editor.installation_id(FingerprintMode::Device, None)
+            })
+            .await
+            .expect("owner state");
+    }
+    let state_path = vault.request_state().state_path_for_test(NAMESPACE);
+    let corrupt = b"{not-valid-request-state";
+    fs::write(&state_path, corrupt).expect("corrupt state");
+
+    vault
+        .remove(&first.account_ref, RemovalKind::ServiceOnly)
+        .await
+        .expect("corrupt state must not block non-final owner removal");
+    assert_eq!(fs::read(&state_path).expect("preserved state"), corrupt);
+    assert!(
+        !temp
+            .path()
+            .join("accounts")
+            .join(format!("{}.json", first.account_ref))
+            .exists()
+    );
+
+    vault
+        .remove(&second.account_ref, RemovalKind::ServiceOnly)
+        .await
+        .expect("corrupt state must not block final owner removal");
+    assert!(!state_path.exists());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn symlink_state_is_rejected_without_touching_its_target() {
