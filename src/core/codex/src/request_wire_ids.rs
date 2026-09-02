@@ -13,6 +13,20 @@ use crate::lifecycle_carriers::wire_rules;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
 
+pub(crate) fn strip_inline_history_item_ids(object: &mut Map<String, Value>) {
+    if object.get("store").and_then(Value::as_bool) != Some(false) {
+        return;
+    }
+    let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items.iter_mut().filter_map(Value::as_object_mut) {
+        if item.get("type").and_then(Value::as_str) != Some("item_reference") {
+            item.remove("id");
+        }
+    }
+}
+
 pub(crate) fn translate_request_ids(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,

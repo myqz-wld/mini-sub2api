@@ -159,7 +159,7 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
     assert_eq!(turn_metadata(&first_value)["session_id"], session);
     assert_eq!(turn_metadata(&first_value)["thread_id"], thread);
     assert_eq!(turn_metadata(&first_value)["turn_id"], turn);
-    assert_ne!(first_value["input"][0]["id"], "msg_downstream_real");
+    assert!(first_value["input"][0].get("id").is_none());
 
     let state = fs::read_to_string(store.state_path_for_test(NAMESPACE)).expect("state file");
     for raw in [
@@ -176,7 +176,7 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
     for discarded_conflict in ["cache-conflict", "root-turn-conflict"] {
         assert!(!state.contains(discarded_conflict));
     }
-    assert!(state.contains("msg_downstream_real"));
+    assert!(!state.contains("msg_downstream_real"));
     assert!(
         !state.contains("hello"),
         "request content leaked into state"
@@ -251,7 +251,7 @@ async fn both_codex_profiles_reuse_the_same_identity_contract_after_reopen() {
             );
         }
         assert_ne!(first["response_id"], "resp_downstream");
-        assert_ne!(first["input"][0]["id"], "msg_downstream");
+        assert!(first["input"][0].get("id").is_none());
     }
 }
 
@@ -327,7 +327,7 @@ async fn missing_turn_reuses_for_tool_roundtrip_and_changes_for_new_user() {
         .iter()
         .find(|item| item["role"] == "user")
         .expect("user");
-    let first_item_id = first_user["id"].as_str().expect("item id").to_string();
+    assert!(first_user.get("id").is_none());
     let first_create_time =
         first_user["internal_chat_message_metadata_passthrough"]["create_time"].clone();
 
@@ -345,7 +345,7 @@ async fn missing_turn_reuses_for_tool_roundtrip_and_changes_for_new_user() {
         .iter()
         .find(|item| item["role"] == "user")
         .expect("user");
-    assert_eq!(repeated_user["id"], first_item_id);
+    assert!(repeated_user.get("id").is_none());
     assert_eq!(
         repeated_user["internal_chat_message_metadata_passthrough"]["create_time"],
         first_create_time

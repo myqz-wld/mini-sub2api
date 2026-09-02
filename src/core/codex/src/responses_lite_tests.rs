@@ -61,6 +61,21 @@ fn groups_default_tools_and_matches_item_identity_metadata() {
 }
 
 #[test]
+fn preserves_explicit_item_reference_when_stripping_legacy_inline_ids() {
+    let mut request = serde_json::json!({
+        "input": [
+            {"type":"message","id":"legacy-message","role":"user","content":[]},
+            {"type":"item_reference","id":"legacy-reference"}
+        ]
+    });
+
+    canonicalize_request_items(request.as_object_mut().expect("request"), Some("high"));
+
+    assert!(request["input"][0].get("id").is_none());
+    assert_eq!(request["input"][1]["id"], "legacy-reference");
+}
+
+#[test]
 fn canonicalizes_nested_additional_properties_schema() {
     let tools = canonicalize_tools(vec![serde_json::json!({
         "type": "function",

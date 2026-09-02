@@ -137,7 +137,6 @@ fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
     let normalized = prepare_openai(explicit.clone(), EmulationTransport::Http);
     for name in [
         "tool_choice",
-        "parallel_tool_calls",
         "reasoning",
         "include",
         "service_tier",
@@ -147,6 +146,7 @@ fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
     ] {
         assert_eq!(normalized[name], explicit[name], "explicit field {name}");
     }
+    assert_eq!(normalized["parallel_tool_calls"], false);
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
 
@@ -245,7 +245,7 @@ fn lite_relocation_preserves_controls_and_filters_structured_tools() {
     assert_eq!(normalized["input"][3]["role"], "user");
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
-    assert_eq!(normalized["parallel_tool_calls"], true);
+    assert_eq!(normalized["parallel_tool_calls"], false);
     assert!(normalized.get("future_top_level").is_none());
 }
 

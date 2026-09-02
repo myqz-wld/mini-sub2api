@@ -94,9 +94,13 @@ pub(crate) fn merge_request_defaults(
     object
         .entry("tool_choice".to_string())
         .or_insert_with(|| Value::String("auto".to_string()));
-    object
-        .entry("parallel_tool_calls".to_string())
-        .or_insert(Value::Bool(!profile.responses_lite));
+    if profile.responses_lite {
+        object.insert("parallel_tool_calls".to_string(), Value::Bool(false));
+    } else {
+        object
+            .entry("parallel_tool_calls".to_string())
+            .or_insert(Value::Bool(true));
+    }
     merge_reasoning(object, profile);
     merge_text(object, profile);
     merge_include(object);
@@ -201,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_controls_and_nulls_are_never_replaced_by_defaults() {
+    fn explicit_controls_and_nulls_are_preserved_except_lite_parallel_tool_calls() {
         let mut request = serde_json::json!({
             "store": true,
             "stream": false,
@@ -211,7 +215,8 @@ mod tests {
             "text": null,
             "include": null
         });
-        let expected = request.clone();
+        let mut expected = request.clone();
+        expected["parallel_tool_calls"] = Value::Bool(false);
         merge_request_defaults(
             request.as_object_mut().expect("object"),
             model_profile("gpt-5.6-sol"),

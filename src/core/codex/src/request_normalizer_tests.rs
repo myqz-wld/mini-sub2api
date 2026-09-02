@@ -107,11 +107,7 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
         7
     );
     for index in [3, 4] {
-        assert!(
-            value["input"][index]["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("msg_"))
-        );
+        assert!(value["input"][index].get("id").is_none());
         assert_eq!(
             value["input"][index]["internal_chat_message_metadata_passthrough"]["turn_id"],
             turn_id

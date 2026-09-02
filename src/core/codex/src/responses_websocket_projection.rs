@@ -94,6 +94,7 @@ fn project_item(value: &Value) -> Value {
     let Some(object) = projected.as_object_mut() else {
         return projected;
     };
+    object.remove("id");
     object.remove("internal_chat_message_metadata_passthrough");
     projected
 }

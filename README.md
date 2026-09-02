@@ -129,10 +129,13 @@ never changes authentication or credential visibility.
 
 - Codex profiles pin the 0.149.0 user agent, `originator`, `version`, base prompt, supported
   request fields, and model defaults. Unknown structured members are removed; documented
-  schemas and free-form payloads stay opaque.
+  schemas and free-form payloads stay opaque. Responses Lite always forces
+  `parallel_tool_calls:false`.
 - Emulated HTTP always uses `store:false`, `stream:true`, and SSE upstream. A non-streaming caller
   receives the terminal Responses object, bounded to 64 MiB. Supported downstream zstd is decoded
-  before the caller's original streaming preference is evaluated.
+  before the caller's original streaming preference is evaluated. Inline history drops ordinary
+  top-level item IDs after local identity resolution; `call_id` and explicit `item_reference.id`
+  carriers remain available for their schema-defined relationships.
 - Both Codex profiles persist a UUIDv4 installation identity plus UUIDv7 conversation, thread, and
   turn identities, and translate schema-recognized lifecycle IDs in both directions. API-key state
   is isolated by local credential; duplicate OAuth credentials share their ChatGPT-account state.

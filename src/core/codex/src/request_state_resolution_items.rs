@@ -81,10 +81,6 @@ pub(super) fn project_items(
             )?;
             if is_synthesized {
                 item.insert("id".to_string(), Value::String(assignment.id.clone()));
-                editor.wire_from_upstream(
-                    crate::request_state_types::WireIdDomain::Item,
-                    &assignment.id,
-                )?;
                 generated_upstream.insert(assignment.id);
             }
             if add_create_time && let Some(micros) = assignment.create_time_micros {

@@ -176,6 +176,9 @@ pub(crate) fn stamp(object: &mut Map<String, Value>, turn_id: Option<&str>) {
 }
 
 pub(crate) fn strip_unprefixed_id(object: &mut Map<String, Value>) {
+    if object.get("type").and_then(Value::as_str) == Some("item_reference") {
+        return;
+    }
     if object.get("id").and_then(Value::as_str).is_some_and(|id| {
         !id.is_empty()
             && !id

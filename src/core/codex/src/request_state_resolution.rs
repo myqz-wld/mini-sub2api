@@ -11,6 +11,7 @@ use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
 use crate::request_state_types::WireIdOwner;
+use crate::request_wire_ids::strip_inline_history_item_ids;
 use crate::request_wire_ids::translate_request_ids;
 
 #[path = "request_state_resolution_items.rs"]
@@ -193,10 +194,11 @@ pub(crate) fn resolve_and_project(
     )?;
     crate::request_identity_projection::apply(headers, object, &identity)
         .map_err(|_| anyhow::anyhow!("projecting request identity"))?;
+    strip_inline_history_item_ids(object);
     translate_request_ids(editor, object, &generated_upstream_ids)?;
     Ok(ResolvedProjection {
         identity,
-        synthesized_item_ids: generated_upstream_ids.into_iter().collect(),
+        synthesized_item_ids: Vec::new(),
         pending_compaction,
     })
 }
