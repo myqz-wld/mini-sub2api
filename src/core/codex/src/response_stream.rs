@@ -20,6 +20,10 @@ use mini_sub2api_protocol_v1::ErrorEnvelope;
 use mini_sub2api_protocol_v1::FAILURE_PHASE_TRAILER;
 use mini_sub2api_protocol_v1::FailureMetadata;
 use mini_sub2api_protocol_v1::FailurePhase;
+use mini_sub2api_protocol_v1::RESPONSE_TERMINAL_COMPLETED;
+use mini_sub2api_protocol_v1::RESPONSE_TERMINAL_FAILED;
+use mini_sub2api_protocol_v1::RESPONSE_TERMINAL_HEADER;
+use mini_sub2api_protocol_v1::RESPONSE_TERMINAL_INCOMPLETE;
 use mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER;
 use mini_sub2api_protocol_v1::RetryAdvice;
 use std::convert::Infallible;
@@ -184,10 +188,11 @@ async fn build_non_streaming_response(
         append_bounded(&mut bytes, &chunk, MAX_NON_STREAMING_RESPONSE_BYTES)?;
     }
     let terminal = terminal_response_from_sse(&bytes)?;
+    let terminal_kind = terminal.kind;
     let mut response = terminal.response;
     if let Some(state) = response_state {
         response = state
-            .translate_terminal_value(response, terminal.kind == TerminalKind::Completed)
+            .translate_terminal_value(response, terminal_kind == TerminalKind::Completed)
             .await
             .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     }
@@ -195,6 +200,7 @@ async fn build_non_streaming_response(
     builder
         .header(http::header::CONTENT_TYPE, "application/json")
         .header(CORE_TTFB_HEADER, ttfb_ms.to_string())
+        .header(RESPONSE_TERMINAL_HEADER, terminal_kind.as_str())
         .body(Body::from(body))
         .map_err(|_| CoreFailure::UpstreamResponseFailed)
 }
@@ -249,6 +255,16 @@ enum TerminalKind {
     Completed,
     Failed,
     Incomplete,
+}
+
+impl TerminalKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => RESPONSE_TERMINAL_COMPLETED,
+            Self::Failed => RESPONSE_TERMINAL_FAILED,
+            Self::Incomplete => RESPONSE_TERMINAL_INCOMPLETE,
+        }
+    }
 }
 
 struct TerminalResponse {
@@ -342,6 +358,10 @@ mod tests {
             );
             let terminal = terminal_response_from_sse(body.as_bytes()).expect("terminal response");
             assert_eq!(terminal.kind, expected);
+            assert_eq!(
+                terminal.kind.as_str(),
+                event_type.trim_start_matches("response.")
+            );
             assert_eq!(terminal.response["id"], "resp_terminal");
         }
     }

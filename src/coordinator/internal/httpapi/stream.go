@@ -13,6 +13,7 @@ type streamOutcome int
 
 const (
 	streamComplete streamOutcome = iota
+	streamResponseFailed
 	streamUpstreamError
 	streamClientDisconnected
 )
@@ -40,7 +41,11 @@ func streamBody(
 			}
 		}
 		if readErr == io.EOF {
-			return observer.Usage(), streamComplete
+			observedUsage := observer.Usage()
+			if observer.TerminalStatus() == usage.TerminalUpstreamError {
+				return observedUsage, streamResponseFailed
+			}
+			return observedUsage, streamComplete
 		}
 		if readErr != nil {
 			select {

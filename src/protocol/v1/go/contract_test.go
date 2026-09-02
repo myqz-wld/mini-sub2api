@@ -81,3 +81,18 @@ func TestProviderRequestIDControlShape(t *testing.T) {
 		t.Fatalf("control JSON = %s", encoded)
 	}
 }
+
+func TestResponseTerminalHeaderContract(t *testing.T) {
+	if ResponseTerminalHeader != "X-Mini-Sub2Api-Response-Terminal" {
+		t.Fatalf("terminal header = %q", ResponseTerminalHeader)
+	}
+	got := []string{
+		ResponseTerminalCompleted, ResponseTerminalFailed, ResponseTerminalIncomplete,
+	}
+	want := []string{"completed", "failed", "incomplete"}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("terminal value %d = %q, want %q", index, got[index], want[index])
+		}
+	}
+}

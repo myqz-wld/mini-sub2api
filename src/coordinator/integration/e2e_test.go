@@ -14,7 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -460,21 +459,4 @@ func assertLoopbackURL(t *testing.T, raw string) {
 	if ip == nil || !ip.IsLoopback() {
 		t.Fatalf("integration endpoint is not loopback: %s", raw)
 	}
-}
-
-func findCoreBinary(t *testing.T) string {
-	t.Helper()
-	path := os.Getenv("MINI_SUB2API_CORE_CODEX_BINARY")
-	if path == "" {
-		_, source, _, _ := runtime.Caller(0)
-		path = filepath.Join(filepath.Dir(source), "..", "..", "..", "build", "cargo-target", "debug", "mini-sub2api-core-codex")
-	}
-	path, _ = filepath.Abs(path)
-	if info, err := os.Stat(path); err != nil || info.IsDir() {
-		if os.Getenv("MINI_SUB2API_REQUIRE_E2E") == "1" {
-			t.Fatalf("required Rust core binary not found at %s", path)
-		}
-		t.Skipf("Rust core binary not built at %s", path)
-	}
-	return path
 }

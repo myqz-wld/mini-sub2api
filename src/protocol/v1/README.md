@@ -263,6 +263,10 @@ frames.
   discards the raw provider body and returns a bounded core error with the gateway request ID and
   `never/upstream_response/delivered`; its safe status and allowlisted headers remain.
 - The core adds `X-Mini-Sub2Api-Core-TTFB-Ms` after receiving upstream response headers.
+- For an aggregated Codex response, the core adds the optional private
+  `X-Mini-Sub2Api-Response-Terminal` header with `completed`, `failed`, or `incomplete`. The
+  coordinator consumes it only for local accounting and never forwards it publicly. Streaming
+  terminal types remain in the SSE body and do not use this header.
 - Every streamed response declares the three failure trailers. They remain empty on clean EOF; a
   provider-body failure emits `X-Mini-Sub2Api-Failure-Phase`,
   `X-Mini-Sub2Api-Delivery-State`, and `X-Mini-Sub2Api-Retry-Advice` as the final trailer block.

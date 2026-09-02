@@ -17,7 +17,16 @@ type Observer struct {
 	disabled        bool
 	buffer          []byte
 	usage           *storage.TokenUsage
+	terminal        TerminalStatus
 }
+
+type TerminalStatus uint8
+
+const (
+	TerminalUnknown TerminalStatus = iota
+	TerminalCompleted
+	TerminalUpstreamError
+)
 
 func NewObserver(contentType string) *Observer {
 	mediaType, _, err := mime.ParseMediaType(contentType)
@@ -54,6 +63,20 @@ func looksLikeSSE(buffer []byte) bool {
 }
 
 func (o *Observer) Usage() *storage.TokenUsage {
+	o.finish()
+	if o.usage == nil {
+		return nil
+	}
+	copy := *o.usage
+	return &copy
+}
+
+func (o *Observer) TerminalStatus() TerminalStatus {
+	o.finish()
+	return o.terminal
+}
+
+func (o *Observer) finish() {
 	if !o.streaming && !o.disabled && len(o.buffer) > 0 {
 		o.acceptJSON(o.buffer)
 		o.buffer = nil
@@ -64,11 +87,6 @@ func (o *Observer) Usage() *storage.TokenUsage {
 		}
 		o.buffer = nil
 	}
-	if o.usage == nil {
-		return nil
-	}
-	copy := *o.usage
-	return &copy
 }
 
 func (o *Observer) consumeSSEEvents() {
@@ -87,9 +105,29 @@ func (o *Observer) consumeSSEEvents() {
 }
 
 func (o *Observer) acceptJSON(data []byte) {
-	usage, ok := parseUsage(data)
-	if ok {
+	var envelope responseEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return
+	}
+	o.observeTerminal(envelope.Type, envelope.Status)
+	if usage, ok := usageFromEnvelope(&envelope); ok {
 		o.usage = &usage
+	}
+}
+
+func (o *Observer) observeTerminal(eventType, responseStatus string) {
+	switch eventType {
+	case "response.completed":
+		o.terminal = TerminalCompleted
+	case "response.failed", "response.incomplete", "error":
+		o.terminal = TerminalUpstreamError
+	default:
+		switch responseStatus {
+		case "completed":
+			o.terminal = TerminalCompleted
+		case "failed", "incomplete":
+			o.terminal = TerminalUpstreamError
+		}
 	}
 }
 
@@ -128,6 +166,7 @@ func eventData(event []byte) []byte {
 
 type responseEnvelope struct {
 	Type     string         `json:"type"`
+	Status   string         `json:"status"`
 	Usage    *responseUsage `json:"usage"`
 	Response *struct {
 		Usage *responseUsage `json:"usage"`
@@ -152,6 +191,10 @@ func parseUsage(data []byte) (storage.TokenUsage, bool) {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return storage.TokenUsage{}, false
 	}
+	return usageFromEnvelope(&envelope)
+}
+
+func usageFromEnvelope(envelope *responseEnvelope) (storage.TokenUsage, bool) {
 	value := envelope.Usage
 	if value == nil && envelope.Response != nil {
 		value = envelope.Response.Usage

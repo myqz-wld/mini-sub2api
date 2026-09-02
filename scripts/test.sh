@@ -27,7 +27,6 @@ if find src/coordinator -name '*.go' -print -quit 2>/dev/null | grep -q .; then
   fi
   mise exec -- go vet ./src/coordinator/...
   NO_PROXY="127.0.0.1,::1" no_proxy="127.0.0.1,::1" \
-    MINI_SUB2API_REQUIRE_E2E=1 \
     MINI_SUB2API_CORE_CODEX_BINARY="$repo_root/build/cargo-target/debug/mini-sub2api-core-codex" \
     mise exec -- go test -race ./src/coordinator/...
 fi
