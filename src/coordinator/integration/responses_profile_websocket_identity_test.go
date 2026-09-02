@@ -111,7 +111,6 @@ func TestCodexProfilesRestoreWebSocketResponseOwnershipAfterReconnect(t *testing
 			firstConnection := dialResponsesProfileWebSocket(t, fixture.public, profile.secret, headers)
 			firstFrame := mustRequestJSON(t, map[string]any{
 				"type": "response.create", "model": "gpt-5.4",
-				"conversation": "ws-conversation-" + profile.name,
 				"input": []any{map[string]any{
 					"type": "message", "id": "msg-ws-first-" + profile.name,
 					"role": "user", "content": "first",

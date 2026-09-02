@@ -4,6 +4,7 @@ use crate::request_identity;
 use crate::request_identity_evidence::RequestIdentityEvidence;
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_profile::UpstreamProfile;
+use crate::request_state_editor::RequiredWireReferenceUnavailable;
 use crate::request_state_resolution::resolve_and_project;
 use crate::request_state_store::RequestStateStore;
 use bytes::Bytes;
@@ -127,12 +128,18 @@ pub(crate) async fn prepare_stateful_codex_request(
                         pending_compaction: projection.pending_compaction,
                     })
                 })()
-                .map_err(|source| InvalidStatefulProjection { source }.into())
+                .map_err(classify_projection_error)
             },
         )
         .await;
     prepared.map_err(|error| {
-        if let Some(invalid) = error.downcast_ref::<InvalidStatefulProjection>() {
+        if let Some(reference) = error.downcast_ref::<RequiredWireReferenceUnavailable>() {
+            tracing::warn!(
+                event = "required_request_reference_unavailable",
+                domain = ?reference.domain,
+            );
+            StatefulPrepareError::StateUnavailable
+        } else if let Some(invalid) = error.downcast_ref::<InvalidStatefulProjection>() {
             tracing::debug!(
                 event = "invalid_stateful_request",
                 error = %invalid.source,
@@ -143,6 +150,17 @@ pub(crate) async fn prepare_stateful_codex_request(
             StatefulPrepareError::StateUnavailable
         }
     })
+}
+
+fn classify_projection_error(source: anyhow::Error) -> anyhow::Error {
+    if source
+        .downcast_ref::<RequiredWireReferenceUnavailable>()
+        .is_some()
+    {
+        source
+    } else {
+        InvalidStatefulProjection { source }.into()
+    }
 }
 
 fn prepare_codex_overlay(

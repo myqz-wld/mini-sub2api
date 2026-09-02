@@ -1,4 +1,5 @@
 use super::*;
+use crate::request_state_types::WireIdDomain;
 use crate::server::internal_router;
 use crate::test_support::spawn_loopback;
 use crate::upstream_request::websocket_url;
@@ -93,7 +94,6 @@ async fn subscription_create_normalization_preserves_websocket_fields() {
         "stream_id": "stream-caller",
         "background": true,
         "stream": true,
-        "previous_response_id": "resp_previous",
         "client_metadata": {"custom": "kept"}
     })
     .to_string();
@@ -120,7 +120,7 @@ async fn subscription_create_normalization_preserves_websocket_fields() {
     assert_ne!(value["stream_id"], "stream-caller");
     assert!(value.get("background").is_none());
     assert!(value.get("stream").is_none());
-    assert_ne!(value["previous_response_id"], "resp_previous");
+    assert!(value.get("previous_response_id").is_none());
     assert_eq!(value["client_metadata"]["custom"], "kept");
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert_eq!(value["store"], false);
@@ -150,18 +150,27 @@ async fn valid_non_create_application_event_is_byte_exact() {
 
 #[tokio::test]
 async fn subscription_control_frame_ids_are_stable_and_pseudonymized() {
+    let (_temp, store) = request_state_store();
+    let (response_alias, call_alias) = store
+        .edit(ACCOUNT_NAMESPACE, ACCOUNT_REF, PSEUDONYM_SCOPE, |editor| {
+            Ok((
+                editor.wire_from_upstream(WireIdDomain::Response, "resp_provider")?,
+                editor.wire_from_upstream(WireIdDomain::Call, "call_provider")?,
+            ))
+        })
+        .await
+        .expect("seed control references");
     let original = serde_json::json!({
         "type":"response.append_input_item",
-        "response_id":"resp_downstream",
+        "response_id":response_alias,
         "item":{
             "type":"function_call_output",
             "id":"item_downstream",
-            "call_id":"call_downstream",
+            "call_id":call_alias,
             "output":{"opaque_id":"opaque_keep"}
         }
     })
     .to_string();
-    let (_temp, store) = request_state_store();
     let mut identity = None;
     let mut first_headers = HeaderMap::new();
     let first = prepare_client_text(
@@ -193,9 +202,9 @@ async fn subscription_control_frame_ids_are_stable_and_pseudonymized() {
     .expect("second control frame");
     assert_eq!(first.text, second.text);
     let value: Value = serde_json::from_str(&first.text).expect("control JSON");
-    assert_ne!(value["response_id"], "resp_downstream");
+    assert_eq!(value["response_id"], "resp_provider");
     assert_ne!(value["item"]["id"], "item_downstream");
-    assert_ne!(value["item"]["call_id"], "call_downstream");
+    assert_eq!(value["item"]["call_id"], "call_provider");
     assert_eq!(value["item"]["output"]["opaque_id"], "opaque_keep");
 }
 
@@ -794,3 +803,6 @@ mod initial_tests;
 
 #[path = "responses_websocket_diagnostics_tests.rs"]
 mod diagnostics_tests;
+
+#[path = "responses_websocket_reference_tests.rs"]
+mod reference_tests;

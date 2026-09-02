@@ -137,8 +137,6 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	fixture := newResponsesProfileWebSocketFixture(t)
 	frame := responsesProfileRequest("gpt-5.4", []any{responsesProfileMessage("explicit-state")})
 	frame["type"] = "response.create"
-	frame["previous_response_id"] = "caller-previous"
-	frame["conversation"] = "caller-conversation"
 	frame["generate"] = false
 	frame["stream_id"] = "caller-stream"
 	encoded := mustRequestJSON(t, frame)
@@ -150,11 +148,8 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	value := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 	assertWebSocketProfileCredentialBoundary(t, captures[0], true)
 	assertResponsesProfileSurface(t, value, false, true, true)
-	previous, previousOK := value["previous_response_id"].(string)
-	conversation, conversationOK := value["conversation"].(string)
 	stream, streamOK := value["stream_id"].(string)
-	if !previousOK || !conversationOK || !streamOK || previous == "caller-previous" ||
-		conversation == "caller-conversation" || stream == "caller-stream" || value["generate"] != false {
+	if !streamOK || stream == "caller-stream" || value["generate"] != false {
 		t.Fatal("explicit WebSocket state was not retained through pseudonymization")
 	}
 }
@@ -351,7 +346,7 @@ func isSyntheticResponsesProfilePrewarm(payload []byte) bool {
 	if json.Unmarshal(payload, &value) != nil || value["generate"] != false {
 		return false
 	}
-	for _, carrier := range []string{"previous_response_id", "conversation"} {
+	for _, carrier := range []string{"previous_response_id", "conversation", "stream_id"} {
 		if _, exists := value[carrier]; exists {
 			return false
 		}

@@ -40,6 +40,48 @@ fn reversible_scalar_carriers_have_an_explicit_domain() {
 }
 
 #[test]
+fn request_reference_requirements_are_owned_by_the_contract() {
+    let rule = |container, name| {
+        wire_rules(CarrierDirection::Request, container)
+            .find(|rule| rule.name == name)
+            .unwrap_or_else(|| panic!("missing request carrier {container:?}/{name}"))
+    };
+    assert_eq!(
+        request_wire_mapping(
+            rule(CarrierContainer::TopLevel, "previous_response_id"),
+            None,
+        ),
+        RequestWireMapping::RequireProviderExisting
+    );
+    assert_eq!(
+        request_wire_mapping(rule(CarrierContainer::TopLevel, "conversation"), None),
+        RequestWireMapping::RequireProviderExisting
+    );
+    assert_eq!(
+        request_wire_mapping(rule(CarrierContainer::TopLevel, "stream_id"), None),
+        RequestWireMapping::Allocate
+    );
+    let item_id = rule(CarrierContainer::Item, "id");
+    assert_eq!(
+        request_wire_mapping(item_id, Some("message")),
+        RequestWireMapping::Allocate
+    );
+    assert_eq!(
+        request_wire_mapping(item_id, Some("item_reference")),
+        RequestWireMapping::RequireExisting
+    );
+    let call_id = rule(CarrierContainer::Item, "call_id");
+    assert_eq!(
+        request_wire_mapping(call_id, Some("function_call")),
+        RequestWireMapping::Allocate
+    );
+    assert_eq!(
+        request_wire_mapping(call_id, Some("function_call_output")),
+        RequestWireMapping::RequireExisting
+    );
+}
+
+#[test]
 fn every_persisted_wire_domain_is_owned_by_the_contract() {
     let domains = all_rules()
         .filter(|rule| rule.use_case == CarrierUse::Wire)
@@ -195,11 +237,30 @@ fn request_and_response_carriers_round_trip_through_one_contract() {
         86_400_000,
     )
     .expect("editor");
+    let response_alias = editor
+        .wire_from_upstream(WireIdDomain::Response, "resp_up")
+        .expect("response mapping");
+    let previous_response_alias = editor
+        .wire_from_upstream(WireIdDomain::Response, "resp_previous_up")
+        .expect("previous response mapping");
+    let conversation_alias = editor
+        .wire_from_upstream(WireIdDomain::Conversation, "conv_up")
+        .expect("conversation mapping");
+    for (domain, downstream) in [
+        (WireIdDomain::Call, "call_down"),
+        (WireIdDomain::Approval, "approval_down"),
+        (WireIdDomain::Item, "caller_down"),
+        (WireIdDomain::Approval, "safety_down"),
+    ] {
+        editor
+            .wire_from_downstream(domain, downstream)
+            .expect("reference mapping");
+    }
     let mut request = serde_json::json!({
-        "response_id":"resp_down",
-        "previous_response_id":"resp_previous_down",
+        "response_id":response_alias,
+        "previous_response_id":previous_response_alias,
         "stream_id":"stream_down",
-        "conversation":{"id":"conv_down"},
+        "conversation":{"id":conversation_alias},
         "input":[{
             "type":"function_call_output",
             "id":"item_down",
@@ -232,10 +293,10 @@ fn request_and_response_carriers_round_trip_through_one_contract() {
     });
     translate_response_ids(&mut editor, &mut response, None).expect("response translate");
 
-    assert_eq!(response["id"], "resp_down");
-    assert_eq!(response["previous_response_id"], "resp_previous_down");
+    assert_eq!(response["id"], response_alias);
+    assert_eq!(response["previous_response_id"], previous_response_alias);
     assert_eq!(response["stream_id"], "stream_down");
-    assert_eq!(response["conversation"]["id"], "conv_down");
+    assert_eq!(response["conversation"]["id"], conversation_alias);
     assert_eq!(response["output"][0]["id"], "item_down");
     assert_eq!(response["output"][0]["call_id"], "call_down");
     assert_eq!(
@@ -265,8 +326,11 @@ fn special_shapes_preserve_generated_items_and_translate_windows_only() {
     editor
         .bind_wire_pair(WireIdDomain::Thread, "thread_down", "thread_up")
         .expect("thread pair");
+    let conversation_alias = editor
+        .wire_from_upstream(WireIdDomain::Conversation, "conversation_up")
+        .expect("conversation mapping");
     let mut request = serde_json::json!({
-        "conversation":"conversation_down",
+        "conversation":conversation_alias,
         "input":[{
             "id":"msg_generated",
             "content":[{"type":"input_text","text":"opaque"}]
@@ -282,7 +346,7 @@ fn special_shapes_preserve_generated_items_and_translate_windows_only() {
     )
     .expect("request translate");
     assert_eq!(request["input"][0]["id"], "msg_generated");
-    assert_ne!(request["conversation"], "conversation_down");
+    assert_eq!(request["conversation"], "conversation_up");
 
     let nested = serde_json::json!({
         "thread_id":"thread_up",

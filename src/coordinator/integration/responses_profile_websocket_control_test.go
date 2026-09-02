@@ -22,6 +22,13 @@ func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
 				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
 					"type": "response.created", "response": map[string]any{"id": responseID},
 				}))
+				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
+					"type": "response.output_item.done", "response_id": responseID,
+					"item": map[string]any{
+						"type": "function_call", "id": "fc-control-provider",
+						"call_id": "call-control-provider", "name": "lookup", "arguments": "{}",
+					},
+				}))
 			case "response.append_input_item":
 				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
 					"type": "response.completed", "response": map[string]any{
@@ -51,7 +58,7 @@ func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
 				http.Header{"Originator": []string{"codex_exec"}},
 			)
 			defer connection.CloseNow()
-			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.4","conversation":"control-conversation","input":[]}`)
+			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.4","generate":true,"input":[],"client_metadata":{"session_id":"control-conversation"}}`)
 			createdText := readE2EWebSocketText(t, connection)
 			var created map[string]any
 			if json.Unmarshal([]byte(createdText), &created) != nil {
@@ -61,12 +68,22 @@ func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
 			if publicResponseID == "" {
 				t.Fatal("created event omitted response alias")
 			}
+			callText := readE2EWebSocketText(t, connection)
+			var callEvent map[string]any
+			if json.Unmarshal([]byte(callText), &callEvent) != nil {
+				t.Fatalf("call event = %q", callText)
+			}
+			callItem, _ := callEvent["item"].(map[string]any)
+			publicCallID, _ := callItem["call_id"].(string)
+			if publicCallID == "" || publicCallID == "call-control-provider" {
+				t.Fatalf("call ID was not translated: %#v", callEvent)
+			}
 			createCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
 			control := mustRequestJSON(t, map[string]any{
 				"type": "response.append_input_item", "response_id": publicResponseID,
 				"item": map[string]any{
 					"type": "function_call_output", "id": "item-control-downstream",
-					"call_id": "call-control-downstream",
+					"call_id": publicCallID,
 					"output":  map[string]any{"opaque_id": "opaque-must-stay"},
 				},
 			})
@@ -86,7 +103,7 @@ func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
 				t.Fatalf("control response alias was not restored: %#v", upstreamControl)
 			}
 			item, _ := upstreamControl["item"].(map[string]any)
-			if item["id"] == "item-control-downstream" || item["call_id"] == "call-control-downstream" {
+			if item["id"] == "item-control-downstream" || item["call_id"] != "call-control-provider" {
 				t.Fatalf("control item IDs were not pseudonymized: %#v", item)
 			}
 			output, _ := item["output"].(map[string]any)

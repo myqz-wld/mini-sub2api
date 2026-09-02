@@ -7,6 +7,7 @@ use crate::request_normalizer::CodexStateContext;
 use crate::request_normalizer::EmulationTransport;
 use crate::request_normalizer::prepare_stateful_codex_request;
 use crate::request_profile::UpstreamProfile;
+use crate::request_state_editor::RequiredWireReferenceUnavailable;
 use crate::request_state_store::RequestStateStore;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket_inject;
@@ -95,7 +96,7 @@ pub(crate) async fn prepare_client_text(
                             )?;
                             Ok(filtered)
                         })()
-                        .map_err(|source| InvalidWebSocketStateProjection { source }.into())
+                        .map_err(classify_projection_error)
                     },
                 )
                 .await
@@ -139,7 +140,7 @@ pub(crate) async fn prepare_client_text(
                             )?;
                             Ok(value)
                         })()
-                        .map_err(|source| InvalidWebSocketStateProjection { source }.into())
+                        .map_err(classify_projection_error)
                     },
                 )
                 .await
@@ -239,13 +240,30 @@ pub(crate) async fn prepare_client_text(
 }
 
 fn classify_state_edit_error(error: anyhow::Error) -> ClientPrepareError {
-    if error
+    if let Some(reference) = error.downcast_ref::<RequiredWireReferenceUnavailable>() {
+        tracing::warn!(
+            event = "required_request_reference_unavailable",
+            domain = ?reference.domain,
+        );
+        ClientPrepareError::StateUnavailable
+    } else if error
         .downcast_ref::<InvalidWebSocketStateProjection>()
         .is_some()
     {
         ClientPrepareError::Protocol
     } else {
         ClientPrepareError::StateUnavailable
+    }
+}
+
+fn classify_projection_error(source: anyhow::Error) -> anyhow::Error {
+    if source
+        .downcast_ref::<RequiredWireReferenceUnavailable>()
+        .is_some()
+    {
+        source
+    } else {
+        InvalidWebSocketStateProjection { source }.into()
     }
 }
 

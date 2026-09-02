@@ -243,11 +243,6 @@ mod tests {
                 "scope-sse",
                 |editor| {
                     editor.bind_wire_pair(
-                        WireIdDomain::Response,
-                        "resp_downstream",
-                        "resp_upstream",
-                    )?;
-                    editor.bind_wire_pair(
                         WireIdDomain::Turn,
                         "turn_downstream",
                         "turn_upstream",
@@ -292,7 +287,11 @@ mod tests {
         let text = std::str::from_utf8(&bytes).expect("translated SSE");
         let payload = data_payload(text).expect("SSE data");
         let value: serde_json::Value = serde_json::from_str(&payload).expect("event JSON");
-        assert_eq!(value["response"]["id"], "resp_downstream");
+        let response_alias = value["response"]["id"]
+            .as_str()
+            .expect("response alias")
+            .to_string();
+        assert_ne!(response_alias, "resp_upstream");
         assert_eq!(
             value["response"]["output"][0]["internal_chat_message_metadata_passthrough"]["turn_id"],
             "turn_downstream"
@@ -315,7 +314,7 @@ mod tests {
                 "scope-sse",
                 move |editor| {
                     let mut request = serde_json::json!({
-                        "previous_response_id":"resp_downstream",
+                        "previous_response_id":response_alias,
                         "input":[{"type":"function_call_output","id":item_alias,"call_id":call_alias,"output":"ok"}]
                     })
                     .as_object()

@@ -466,3 +466,7 @@ mod compaction_integration_tests;
 #[cfg(test)]
 #[path = "server_response_privacy_tests.rs"]
 mod response_privacy_tests;
+
+#[cfg(test)]
+#[path = "server_reference_tests.rs"]
+mod reference_integration_tests;

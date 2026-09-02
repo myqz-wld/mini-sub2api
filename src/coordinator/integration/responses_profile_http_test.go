@@ -119,7 +119,7 @@ func TestCodexProfilesPreserveDownstreamZstdStreamPreference(t *testing.T) {
 			t.Run(profile.name+"_"+mode, func(t *testing.T) {
 				body := mustRequestJSON(t, map[string]any{
 					"model": "gpt-5.4", "input": []any{}, "stream": stream,
-					"conversation": profile.name + "-zstd-" + mode,
+					"client_metadata": map[string]any{"session_id": profile.name + "-zstd-" + mode},
 				})
 				compressed := encoder.EncodeAll(body, nil)
 				headers := profile.headers.Clone()
@@ -176,8 +176,6 @@ func responsesProfileHTTPBodies(t *testing.T, model string) ([]byte, []byte) {
 		responsesProfileMessage("second"),
 	}
 	second := responsesProfileRequest(model, secondInput)
-	second["previous_response_id"] = "explicit-profile-previous"
-	second["conversation"] = "explicit-profile-conversation"
 	return mustRequestJSON(t, first), mustRequestJSON(t, second)
 }
 
@@ -210,7 +208,7 @@ func responsesProfileRequest(model string, input []any) map[string]any {
 				"unsupported_context_sentinel": true,
 			},
 		},
-		"conversation": "profile-conversation", "max_output_tokens": 31, "max_tool_calls": 2,
+		"max_output_tokens": 31, "max_tool_calls": 2,
 		"metadata": map[string]any{
 			"profile": "matrix", "opaque_metadata_sentinel": "retain",
 		},
@@ -261,9 +259,7 @@ func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicit
 	assertResponsesProfileSurface(t, value, lite, false, subscription)
 	if hasExplicitPrevious {
 		previous, previousOK := value["previous_response_id"].(string)
-		conversation, conversationOK := value["conversation"].(string)
-		if !previousOK || !conversationOK || previous == "explicit-profile-previous" ||
-			conversation == "explicit-profile-conversation" {
+		if !previousOK || previous == "explicit-profile-previous" {
 			t.Fatal("stateful Codex HTTP continuation IDs were not pseudonymized")
 		}
 		if !containsResponseProfileItem(value["input"], "function_call") ||

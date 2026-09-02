@@ -23,6 +23,13 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
 					"type": "response.created", "response": map[string]any{"id": responseID},
 				}))
+				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
+					"type": "response.output_item.done", "response_id": responseID,
+					"item": map[string]any{
+						"type": "function_call", "id": "fc-inject-provider",
+						"call_id": "call-inject-provider", "name": "lookup", "arguments": "{}",
+					},
+				}))
 			case "response.inject":
 				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
 					"type": "response.completed", "response": map[string]any{
@@ -45,7 +52,7 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			connection := dialResponsesProfileWebSocket(t, fixture.public, test.secret, test.headers)
 			defer connection.CloseNow()
-			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.4","input":[],"previous_response_id":"caller-parent"}`)
+			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.4","generate":true,"input":[]}`)
 			createdEvent := readE2EWebSocketText(t, connection)
 			if !bytes.Contains([]byte(createdEvent), []byte("response.created")) {
 				t.Fatal("create did not become active before inject")
@@ -58,12 +65,27 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 			if downstreamResponseID == "" {
 				t.Fatal("created event omitted response id")
 			}
+			callEventText := readE2EWebSocketText(t, connection)
+			var callEvent map[string]any
+			if json.Unmarshal([]byte(callEventText), &callEvent) != nil {
+				t.Fatal("function call event was not JSON")
+			}
+			callItem, _ := callEvent["item"].(map[string]any)
+			publicCallID, _ := callItem["call_id"].(string)
+			if test.emulated && (publicCallID == "" || publicCallID == "call-inject-provider") {
+				t.Fatalf("function call ID was not translated: %#v", callEvent)
+			}
 			createCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
 			if test.name == "codex_api_key" && createCapture.Headers.Get("Version") != "0.149.0" {
 				t.Fatal("Codex API-key WebSocket profile did not pin version 0.149.0")
 			}
+			callID := "call_1"
+			if test.emulated {
+				callID = publicCallID
+			}
 			inject := ` {"type":"response.inject","response_id":"` + downstreamResponseID +
-				`","input":[{"type":"function_call_output","id":"fco_profile","call_id":"call_1","output":{"opaque":true,"unknown":true},"unsupported_item":true}],"unsupported_top":true} `
+				`","input":[{"type":"function_call_output","id":"fco_profile","call_id":"` + callID +
+				`","output":{"opaque":true,"unknown":true},"unsupported_item":true}],"unsupported_top":true} `
 			writeE2EWebSocketText(t, connection, inject)
 			if event := readE2EWebSocketText(t, connection); !bytes.Contains([]byte(event), []byte("response.completed")) {
 				t.Fatal("inject did not complete the active response")
@@ -83,6 +105,9 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 				t.Fatal("emulated response.inject kept an unsupported top-level field")
 			}
 			input := value["input"].([]any)[0].(map[string]any)
+			if input["call_id"] != "call-inject-provider" {
+				t.Fatalf("emulated response.inject did not restore call ID: %#v", input)
+			}
 			if _, exists := input["unsupported_item"]; exists {
 				t.Fatal("emulated response.inject kept an unsupported item field")
 			}

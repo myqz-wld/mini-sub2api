@@ -254,7 +254,6 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
                 "input": "hello",
                 "tools": [],
                 "generate": false,
-                "previous_response_id": "resp_previous",
                 "client_metadata": {
                     "custom": "kept",
                     "x-codex-installation-id": "frame-conflict",
@@ -334,7 +333,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     );
     assert_eq!(value["type"], "response.create");
     assert_eq!(value["generate"], false);
-    assert_ne!(value["previous_response_id"], "resp_previous");
+    assert!(value.get("previous_response_id").is_none());
     assert_eq!(value["client_metadata"]["custom"], "kept");
     assert_eq!(
         value["client_metadata"]["ws_request_header_x_openai_internal_codex_responses_lite"],
@@ -621,16 +620,12 @@ async fn first_subscription_create_reports_state_unavailable_before_provider_con
 }
 
 #[tokio::test]
-async fn state_failure_on_control_frame_preserves_attempted_delivery() {
+async fn missing_control_reference_preserves_attempted_delivery() {
     let fixture = holding_oauth_fixture(
         "chatgpt-websocket-attempted-control-state-unavailable",
         HoldingProviderEvent::None,
     )
     .await;
-    let state_path = fixture
-        .vault
-        .request_state()
-        .state_path_for_test(&fixture.account_id);
     let core = spawn_internal(app_state(fixture.vault.clone())).await;
     let handshake = internal_handshake(&core.base_url, &fixture.account_ref)
         .upgrade()
@@ -646,8 +641,6 @@ async fn state_failure_on_control_frame_preserves_attempted_delivery() {
     tokio::time::timeout(Duration::from_secs(2), create_seen)
         .await
         .expect("provider did not receive create");
-    fs::write(&state_path, b"{corrupt").expect("corrupt request state");
-
     socket
         .send(DownstreamMessage::Text(stateful_inject(
             "resp_not_observed",
@@ -819,7 +812,7 @@ fn stateful_create(turn: &str) -> String {
     serde_json::json!({
         "type":"response.create",
         "model":"gpt-5.4",
-        "previous_response_id":format!("resp_parent_{turn}"),
+        "generate":true,
         "input":[{"type":"message","id":format!("msg_{turn}"),"role":"user","content":turn}],
         "client_metadata":{"session_id":"state-outage-session","turn_id":turn}
     })
@@ -888,6 +881,9 @@ async fn holding_oauth_upstream(
         })
         .into_response()
 }
+
+#[path = "responses_websocket_oauth_reference_tests.rs"]
+mod reference_tests;
 
 async fn oauth_upstream(
     AxumState(state): AxumState<OAuthWebSocketState>,

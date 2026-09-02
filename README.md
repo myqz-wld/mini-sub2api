@@ -139,6 +139,10 @@ never changes authentication or credential visibility.
 - Request state remains schema v1 with no historical compatibility branch. Each private file is
   limited to 16 MiB; completed detail becomes pruneable after 30 days. Compaction advances its
   window only after the matching `response.completed` is persisted.
+- Historical response/conversation and control/item/call/approval references must resolve an
+  existing reversible mapping. A missing required reference fails locally as `state_unavailable`
+  before upstream delivery; new sessions, stream IDs, and request-local definitions still allocate
+  fresh pseudonyms.
 - Sandbox permission meaning is preserved, while `seatbelt`, `seccomp`, or
   `windows_sandbox` is derived from the gateway OS. Caller `workspaces` values remain unchanged.
 - Provider response headers are default-denied. Public provider request-ID headers contain only the

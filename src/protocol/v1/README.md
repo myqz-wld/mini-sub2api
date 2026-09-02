@@ -189,8 +189,8 @@ serialized metadata copies. Conflicting root carriers do not create unrelated id
 explicit parent, fork, or subagent relationship creates a distinct child-thread UUIDv7 while the
 session continues to reference the root. Ordinary turns are persisted UUIDv7 values; tool loops
 reuse the active thread turn and a new logical user message creates a new one. Prewarm retains its
-official empty turn ID. Top-level Responses conversations provide a separate fallback relationship
-anchor; a delivered response alias records its projected session/thread owner so a later
+official empty turn ID. A previously mapped top-level Responses conversation provides a separate
+fallback relationship anchor; a delivered response alias records its projected session/thread owner so a later
 `previous_response_id` restores the same graph after restart. Without any stable carrier, separate
 requests do not correlate by matching prompt content.
 
@@ -211,7 +211,9 @@ state, and bounded reversible wire-ID pairs. Completed turn/item/compaction/wire
 for LRU pruning after 30 days; conversation identity is capacity-LRU only.
 Ancestor eviction retains protected descendants or removes the complete descendant graph. Corrupt,
 oversized, or unsupported state is preserved and returns retryable `state_unavailable` before
-upstream delivery. It does not prevent credential removal; final-owner deletion removes the state
+upstream delivery. A historical provider response/conversation or schema reference that no longer
+has its required reversible mapping returns the same failure instead of allocating an unrelated
+upstream pseudonym. It does not prevent credential removal; final-owner deletion removes the state
 without decoding it.
 
 Request-state serialization remains version 1. There is no dual reader, downgrade shim, or
@@ -219,9 +221,12 @@ historical migration branch. The coordinator database alone has a transactional 
 migration that adds nullable `provider_request_id`; older request rows and interrupted operations
 retain `NULL`.
 
-Responses lifecycle IDs are translated transparently in both directions. Caller-origin response,
-conversation, stream, item, call, and approval IDs receive upstream pseudonyms and are restored on
-responses. Provider-origin IDs receive stable downstream aliases that resolve to the original on a
+Responses lifecycle IDs are translated transparently in both directions. Definition carriers such
+as new input-item IDs, stream IDs, and request-local call definitions allocate upstream pseudonyms;
+a definition earlier in one request may satisfy a later reference in that request. Historical
+provider response/conversation references and control/item/call/approval reference positions must
+resolve an existing mapping, and provider-owned references must come from an upstream-origin
+mapping. Provider-origin IDs receive stable downstream aliases that resolve to the original on a
 later request or `response.inject`. HTTP JSON/SSE and WebSocket events persist a new mapping before
 the first downstream-visible occurrence. Translation is schema-aware: file, vector-store, prompt,
 model, connector, tunnel, and skill IDs, plus encrypted and opaque/free-form values, are not
