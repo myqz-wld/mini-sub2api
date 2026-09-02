@@ -6,6 +6,8 @@ use axum::routing::post;
 use pretty_assertions::assert_eq;
 use reqwest_websocket::CloseCode as DownstreamCloseCode;
 use reqwest_websocket::Message as DownstreamMessage;
+use std::fs;
+use std::time::Duration;
 
 #[derive(Clone)]
 struct OAuthWebSocketState {
@@ -439,6 +441,103 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     }
 }
 
+#[tokio::test]
+async fn established_subscription_socket_reports_retryable_state_unavailable_failure() {
+    let account_id = "chatgpt-websocket-state-unavailable";
+    let state = OAuthWebSocketState {
+        old_access: test_jwt(None, 3600),
+        new_access: test_jwt(None, 7200),
+        new_id: test_jwt(Some(account_id), 7200),
+        handshake_calls: Arc::new(AtomicUsize::new(0)),
+        refresh_calls: Arc::new(AtomicUsize::new(0)),
+        headers: Arc::new(Mutex::new(None)),
+        frames: Arc::new(Mutex::new(Vec::new())),
+    };
+    let app = Router::new()
+        .route("/responses", get(oauth_upstream_unbounded))
+        .with_state(state.clone());
+    let upstream = spawn_loopback(app).await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: state.new_id.clone(),
+                access_token: state.new_access.clone(),
+                refresh_token: "refresh-state-unavailable".to_string(),
+                account_id: account_id.to_string(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                issuer: upstream.base_url.clone(),
+                client_id: "client-state-unavailable".to_string(),
+            },
+            format!("{}/responses", upstream.base_url),
+            crate::fingerprint::FingerprintMode::Device,
+        )
+        .await
+        .expect("OAuth record");
+    let state_path = vault.request_state().state_path_for_test(account_id);
+    let core = spawn_internal(app_state(vault)).await;
+    let handshake = internal_handshake(&core.base_url, &metadata.account_ref)
+        .upgrade()
+        .send()
+        .await
+        .expect("handshake");
+    let mut socket = handshake.into_websocket().await.expect("socket");
+    let create = |turn: &str| {
+        serde_json::json!({
+            "type":"response.create",
+            "model":"gpt-5.4",
+            "input":[{"type":"message","id":format!("msg_{turn}"),"role":"user","content":turn}],
+            "client_metadata":{"session_id":"state-outage-session","turn_id":turn}
+        })
+        .to_string()
+    };
+    socket
+        .send(DownstreamMessage::Text(create("turn-one")))
+        .await
+        .expect("first create");
+    let first = socket
+        .next()
+        .await
+        .expect("first completion")
+        .expect("valid completion");
+    assert!(matches!(first, DownstreamMessage::Text(_)));
+    let frames_before_state_outage = state.frames.lock().await.len();
+    fs::write(&state_path, b"{corrupt").expect("corrupt request state");
+
+    socket
+        .send(DownstreamMessage::Text(create("turn-two")))
+        .await
+        .expect("second create");
+    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("state outage close timeout")
+        .expect("state outage close")
+        .expect("valid state outage close");
+    let DownstreamMessage::Close { code, reason } = close else {
+        panic!("expected state outage close, got {close:?}");
+    };
+    assert_eq!(
+        u16::from(code),
+        mini_sub2api_protocol_v1::FAILURE_CLOSE_CODE
+    );
+    let failure: mini_sub2api_protocol_v1::FailureMetadata =
+        serde_json::from_str(&reason).expect("state outage failure metadata");
+    assert_eq!(
+        failure,
+        crate::error::failure(
+            mini_sub2api_protocol_v1::RetryAdvice::Safe,
+            mini_sub2api_protocol_v1::FailurePhase::Internal,
+            mini_sub2api_protocol_v1::DeliveryState::NotDelivered,
+        )
+    );
+    assert_eq!(
+        state.frames.lock().await.len(),
+        frames_before_state_outage,
+        "the state-unavailable create must not reach upstream"
+    );
+}
+
 async fn oauth_upstream(
     AxumState(state): AxumState<OAuthWebSocketState>,
     headers: HeaderMap,
@@ -485,4 +584,37 @@ async fn oauth_upstream(
         HeaderValue::from_static("provider-turn-state"),
     );
     response
+}
+
+async fn oauth_upstream_unbounded(
+    AxumState(state): AxumState<OAuthWebSocketState>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> AxumResponse {
+    state.handshake_calls.fetch_add(1, Ordering::SeqCst);
+    *state.headers.lock().await = Some(headers);
+    let capture = state.clone();
+    upgrade
+        .on_upgrade(move |mut socket| async move {
+            let mut index = 0_u64;
+            while let Some(Ok(InternalMessage::Text(frame))) = socket.next().await {
+                capture.frames.lock().await.push(frame.to_string());
+                let event = serde_json::json!({
+                    "type":"response.completed",
+                    "response":{
+                        "id":format!("resp_state_{index}"),
+                        "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
+                    }
+                });
+                index = index.saturating_add(1);
+                if socket
+                    .send(InternalMessage::Text(event.to_string().into()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        })
+        .into_response()
 }

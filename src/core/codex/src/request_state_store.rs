@@ -119,25 +119,53 @@ impl RequestStateStore {
         Ok(())
     }
 
-    pub(crate) fn remove_owner(
+    pub(crate) fn state_ref_for_namespace(account_namespace: &str) -> String {
+        LookupKeyFactory::account_state_ref(account_namespace)
+    }
+
+    pub(crate) fn valid_state_ref(state_ref: &str) -> bool {
+        valid_state_ref(state_ref)
+    }
+
+    pub(crate) fn remove_credential_owner(
         &self,
-        account_namespace: &str,
+        state_ref: &str,
         owner_account_ref: &str,
     ) -> Result<()> {
         validate_account_ref(owner_account_ref)?;
-        let state_ref = LookupKeyFactory::account_state_ref(account_namespace);
-        let _lock = lock_state(&self.accounts_dir, &state_ref)?;
-        let path = state_path(&self.accounts_dir, &state_ref);
-        let Some(mut state) = read_optional_state(&path)? else {
-            return Ok(());
+        anyhow::ensure!(
+            valid_state_ref(state_ref),
+            "invalid request state reference"
+        );
+        let _lock = lock_state(&self.accounts_dir, state_ref)?;
+        let credential_path = self.accounts_dir.join(format!("{owner_account_ref}.json"));
+        remove_path_if_exists(
+            &self.accounts_dir,
+            &credential_path,
+            "removing credential record",
+        )?;
+        let owners = match owners_for_state_ref(&self.accounts_dir, state_ref) {
+            Ok(owners) => owners,
+            Err(_) => {
+                tracing::warn!(event = "request_state_owner_reconciliation_deferred");
+                return Ok(());
+            }
         };
-        let mut owners = owners_for_namespace(&self.accounts_dir, account_namespace)?;
-        owners.remove(owner_account_ref);
-        state.owners = owners;
-        if state.owners.is_empty() {
+        let path = state_path(&self.accounts_dir, state_ref);
+        if owners.is_empty() {
             remove_file_if_exists(&self.accounts_dir, &path)?;
             return Ok(());
         }
+        let Some(mut state) = (match read_optional_state(&path) {
+            Ok(state) => state,
+            Err(_) => {
+                tracing::warn!(event = "corrupt_request_state_preserved_after_owner_removal");
+                return Ok(());
+            }
+        }) else {
+            return Ok(());
+        };
+        state.owners = owners;
         state.revision = next_revision(state.revision)?;
         state.validate()?;
         write_state(&self.accounts_dir, &path, &state)
@@ -190,7 +218,10 @@ where
     let mut state = match existing {
         Some(state) => state,
         None => {
-            let mut owners = owners_for_namespace(accounts_dir, account_namespace)?;
+            let mut owners = owners_for_state_ref(
+                accounts_dir,
+                &LookupKeyFactory::account_state_ref(account_namespace),
+            )?;
             owners.insert(owner_account_ref.to_string());
             PersistedRequestState::new(owners)
         }
@@ -287,7 +318,11 @@ fn write_bytes_atomically(accounts_dir: &Path, path: &Path, bytes: &[u8]) -> Res
     result
 }
 
-fn owners_for_namespace(accounts_dir: &Path, namespace: &str) -> Result<BTreeSet<String>> {
+fn owners_for_state_ref(accounts_dir: &Path, state_ref: &str) -> Result<BTreeSet<String>> {
+    anyhow::ensure!(
+        valid_state_ref(state_ref),
+        "invalid request state reference"
+    );
     let mut owners = BTreeSet::new();
     for entry in std::fs::read_dir(accounts_dir).context("scanning credential owners")? {
         let entry = entry.context("reading credential owner entry")?;
@@ -311,7 +346,8 @@ fn owners_for_namespace(accounts_dir: &Path, namespace: &str) -> Result<BTreeSet
         };
         if matches!(
             &record.material,
-            CredentialMaterial::CodexOAuth { account_id, .. } if account_id == namespace
+            CredentialMaterial::CodexOAuth { account_id, .. }
+                if LookupKeyFactory::account_state_ref(account_id) == state_ref
         ) {
             owners.insert(record.account_ref);
         }
@@ -382,10 +418,18 @@ fn next_revision(revision: u64) -> Result<u64> {
 }
 
 fn remove_file_if_exists(accounts_dir: &Path, path: &Path) -> Result<()> {
+    remove_path_if_exists(accounts_dir, path, "removing request state")
+}
+
+fn remove_path_if_exists(
+    accounts_dir: &Path,
+    path: &Path,
+    description: &'static str,
+) -> Result<()> {
     match std::fs::remove_file(path) {
         Ok(()) => sync_directory(accounts_dir),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).context("removing request state"),
+        Err(error) => return Err(error).context(description),
     }
     Ok(())
 }

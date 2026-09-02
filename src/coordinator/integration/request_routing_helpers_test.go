@@ -8,8 +8,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+var loopbackResponseSequence atomic.Uint64
 
 func writeLoopbackResponsesResult(writer http.ResponseWriter, body []byte, responseID string) {
 	var request map[string]any
@@ -17,6 +20,7 @@ func writeLoopbackResponsesResult(writer http.ResponseWriter, body []byte, respo
 		http.Error(writer, "invalid captured request", http.StatusInternalServerError)
 		return
 	}
+	responseID = fmt.Sprintf("%s_%d", responseID, loopbackResponseSequence.Add(1))
 	response := fmt.Sprintf(
 		`{"id":%q,"object":"response","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`,
 		responseID,

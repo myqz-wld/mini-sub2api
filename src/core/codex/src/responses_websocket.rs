@@ -6,6 +6,7 @@ use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_profile::{CallerKind, UpstreamProfile};
 use crate::response_translation::ResponseStateContext;
 use crate::responses_websocket_deferred::DeferredOAuthContext;
+use crate::responses_websocket_emulation::ClientPrepareError;
 pub(crate) use crate::responses_websocket_emulation::prepare_client_text;
 use crate::responses_websocket_http::{copy_headers, filtered_upgrade_headers, rejection_response};
 use crate::responses_websocket_state::{EventDisposition, OperationPhase, ResponsesWebSocketState};
@@ -202,11 +203,13 @@ pub(crate) async fn relay(
                 namespace,
                 &pseudonym_scope,
                 vault.request_state(),
+                identity.as_ref(),
             )
         })
     });
     let exit = {
         let client_continuation = Arc::clone(&continuation);
+        let client_response_state = response_state.clone();
         let client_to_upstream = async {
             if let Some(initial) = initial {
                 if !fingerprint_is_current(&vault, &account_ref, &fingerprint).await {
@@ -270,28 +273,44 @@ pub(crate) async fn relay(
                             &mut identity,
                         )
                         .await;
-                        match prepared.and_then(|prepared| {
-                            let Some(value) = prepared.create_value.as_ref() else {
-                                return Ok(prepared.text);
-                            };
-                            let mut continuation = continuation_guard(&client_continuation);
-                            if profile == UpstreamProfile::BareOpenAi {
-                                continuation.plan_public_create(value);
-                                Ok(prepared.text)
-                            } else {
-                                crate::responses_websocket_emulation::plan_public_text_with_synthesized_ids(
-                                    &mut continuation,
-                                    value,
-                                    &prepared.synthesized_item_ids,
-                                    MAX_WEBSOCKET_MESSAGE_BYTES,
-                                )
+                        match prepared {
+                            Err(ClientPrepareError::StateUnavailable) => {
+                                return RelayExit::StateUnavailable;
                             }
-                        }) {
+                            Err(ClientPrepareError::Protocol) => {
+                                upstream_close(UpstreamCloseCode::Protocol)
+                            }
                             Ok(prepared) => {
-                                create_attempt = is_create;
-                                UpstreamMessage::Text(prepared.into())
+                                let planned = if let Some(value) = prepared.create_value.as_ref() {
+                                    let mut continuation = continuation_guard(&client_continuation);
+                                    if profile == UpstreamProfile::BareOpenAi {
+                                        continuation.plan_public_create(value);
+                                        Ok(prepared.text)
+                                    } else {
+                                        crate::responses_websocket_emulation::plan_public_text_with_synthesized_ids(
+                                            &mut continuation,
+                                            value,
+                                            &prepared.synthesized_item_ids,
+                                            MAX_WEBSOCKET_MESSAGE_BYTES,
+                                        )
+                                    }
+                                } else {
+                                    Ok(prepared.text)
+                                };
+                                match planned {
+                                    Ok(prepared) => {
+                                        if is_create
+                                            && let Some(state) = client_response_state.as_ref()
+                                            && state.update_identity(identity.as_ref()).is_err()
+                                        {
+                                            return RelayExit::StateUnavailable;
+                                        }
+                                        create_attempt = is_create;
+                                        UpstreamMessage::Text(prepared.into())
+                                    }
+                                    Err(()) => upstream_close(UpstreamCloseCode::Protocol),
+                                }
                             }
-                            Err(()) => upstream_close(UpstreamCloseCode::Protocol),
                         }
                     }
                     Ok(InternalMessage::Binary(_)) => {
@@ -417,6 +436,15 @@ pub(crate) async fn relay(
                 .send(upstream_close(UpstreamCloseCode::Restart))
                 .await;
         }
+        RelayExit::StateUnavailable => {
+            continuation_guard(&continuation).reset();
+            let _ = internal_write
+                .send(failure_close(CoreFailure::StateUnavailable.failure()))
+                .await;
+            let _ = upstream_write
+                .send(upstream_close(UpstreamCloseCode::Restart))
+                .await;
+        }
         RelayExit::Policy => {
             continuation_guard(&continuation).reset();
             let _ = internal_write.send(internal_close(1008)).await;
@@ -439,6 +467,7 @@ enum RelayExit {
     Complete,
     StaleFingerprint,
     Failure(mini_sub2api_protocol_v1::FailureMetadata),
+    StateUnavailable,
     Policy,
     TooLarge,
 }

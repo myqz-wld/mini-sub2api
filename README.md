@@ -73,7 +73,9 @@ Every credential defaults to `--fingerprint-mode device`: subscription installat
 one persisted UUIDv4 per ChatGPT account, while `off` uses scoped persisted UUIDv4 values. Root
 conversation/thread and ordinary turn identities use stable UUIDv7 values. Subscription Responses
 correlation IDs are translated bidirectionally, so caller IDs are restored on responses and
-provider IDs receive stable downstream aliases. OpenAI API-key payloads remain transparent.
+provider IDs receive stable downstream aliases. Response aliases retain their conversation/thread
+owner across restarts, while otherwise carrier-free calls never correlate solely because their
+content matches. OpenAI API-key payloads remain transparent.
 
 ### 2. Create a downstream API key
 
@@ -293,8 +295,11 @@ Operational boundaries:
   relationships, windows, timestamps, and bounded schema-recognized raw ID pairs needed for
   transparent reversal—never request/response bodies, content, workspace values, credentials,
   opaque values, or tool arguments. Completed turn/item/compaction/wire detail becomes eligible for
-  LRU pruning after 30 days; conversation identity is capacity-LRU only. Corrupt or unsupported
-  state is preserved and the affected account fails before upstream delivery.
+  LRU pruning after 30 days; conversation identity is capacity-LRU only, and ancestor eviction
+  removes or retains a complete relationship graph rather than leaving dangling lineage. Corrupt or
+  unsupported state is preserved and the affected account returns retryable `state_unavailable`
+  before upstream delivery. Credential deletion remains available: non-final owners preserve corrupt
+  evidence and the final owner removes it.
 - SQLite stores credential metadata, downstream-key hashes, timing, status, and token counts. It
   does not store prompts, request bodies, response bodies, tool arguments, or generated content.
 - Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or

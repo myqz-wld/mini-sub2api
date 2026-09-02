@@ -11,6 +11,7 @@ use crate::request_identity_evidence::RequestIdentityEvidence;
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
+use crate::request_state_types::WireIdOwner;
 use crate::request_wire_ids::translate_request_ids;
 
 struct ResolvedTurn {
@@ -46,19 +47,42 @@ pub(crate) fn resolve_and_project(
         editor.bind_wire_pair(WireIdDomain::Installation, raw, &installation_id)?;
     }
 
+    let previous_owner = previous_response_owner(editor, object)?;
+    let mut conversation_from_previous = false;
     let conversation = match evidence.conversation.as_deref() {
         Some(raw) => resolve_conversation(editor, raw)?,
-        None => {
-            let anchor = conversation_anchor(object);
-            let key = editor.derived_lookup("conversation-fallback", &[anchor.as_slice()]);
-            editor.conversation(&key)?
-        }
+        None => match previous_owner.as_ref() {
+            Some(owner) => {
+                conversation_from_previous = true;
+                editor
+                    .conversation_by_id(&owner.session_id)
+                    .map(|(_, assignment)| assignment)
+                    .ok_or_else(|| anyhow::anyhow!("previous response session is missing"))?
+            }
+            None => match evidence.responses_conversation.as_deref() {
+                Some(raw) => {
+                    let key = editor.lookup("responses-conversation", raw);
+                    editor.conversation(&key)?
+                }
+                None => {
+                    let anchor = Uuid::now_v7();
+                    let key = editor.derived_lookup("conversation-fallback", &[anchor.as_bytes()]);
+                    editor.conversation(&key)?
+                }
+            },
+        },
     };
     if let Some(raw) = evidence.conversation.as_deref() {
         editor.bind_wire_pair(WireIdDomain::Session, raw, &conversation.id)?;
     }
-    let (thread_id, parent_thread_id, forked_from_thread_id, stored_window) =
-        resolve_thread(editor, evidence, &conversation.id)?;
+    let (thread_id, parent_thread_id, forked_from_thread_id, stored_window) = resolve_thread(
+        editor,
+        evidence,
+        &conversation.id,
+        conversation_from_previous
+            .then_some(previous_owner.as_ref())
+            .flatten(),
+    )?;
 
     let current_turn_raw = evidence
         .turn
@@ -74,12 +98,12 @@ pub(crate) fn resolve_and_project(
         });
     let turn_key = if let Some(raw) = current_turn_raw.as_deref() {
         turn_key_for_raw(editor, raw)?
-    } else if !has_user_message(object)
+    } else if !evidence.new_user_submission
         && let Some(current) = editor.current_turn_id(&thread_id)
     {
         turn_key_for_raw(editor, &current)?
     } else {
-        let anchor = turn_anchor(object);
+        let anchor = turn_anchor(object, evidence);
         editor.derived_lookup("turn-fallback", &[thread_id.as_bytes(), anchor.as_slice()])
     };
     let resolved_turn = resolve_turn(editor, evidence, &turn_key, &thread_id, &conversation.id)?;
@@ -123,8 +147,9 @@ pub(crate) fn resolve_and_project(
         editor.observe_window_number(&thread_id, window)?;
     }
     if evidence.request_kind == "compaction" {
-        let marker = compaction_anchor(object, &turn_key);
-        let marker_key = editor.derived_lookup("compaction", &[marker.as_slice()]);
+        let marker = compaction_anchor(object, evidence, current_turn_raw.is_some(), &turn_key);
+        let marker_key =
+            editor.derived_lookup("compaction", &[thread_id.as_bytes(), marker.as_slice()]);
         let next_window = editor.apply_compaction(&marker_key, &thread_id)?;
         output_window = explicit_window.unwrap_or_else(|| next_window.saturating_sub(1));
     }
@@ -179,8 +204,26 @@ fn resolve_thread(
     editor: &mut RequestStateEditor<'_>,
     evidence: &RequestIdentityEvidence,
     session_id: &str,
+    previous_owner: Option<&WireIdOwner>,
 ) -> Result<(String, Option<String>, Option<String>, u64)> {
     if !evidence.explicit_thread_lineage {
+        if let Some(owner) = previous_owner
+            && owner.thread_id != session_id
+        {
+            let (_, thread) = editor
+                .child_thread_by_id(&owner.thread_id)
+                .ok_or_else(|| anyhow::anyhow!("previous response thread is missing"))?;
+            anyhow::ensure!(
+                thread.session_id == session_id,
+                "previous response thread crosses sessions"
+            );
+            return Ok((
+                thread.id,
+                thread.parent_thread_id,
+                None,
+                thread.window_number,
+            ));
+        }
         let window = editor
             .window_number(session_id)
             .ok_or_else(|| anyhow::anyhow!("root conversation window is missing"))?;
@@ -502,53 +545,50 @@ fn set_create_time(item: &mut Map<String, Value>, micros: i64) -> Result<()> {
     Ok(())
 }
 
-fn conversation_anchor(object: &Map<String, Value>) -> Vec<u8> {
-    if let Some(anchor) = first_user_anchor(object) {
-        return anchor;
+fn previous_response_owner(
+    editor: &mut RequestStateEditor<'_>,
+    object: &Map<String, Value>,
+) -> Result<Option<WireIdOwner>> {
+    let Some(previous) = object
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    editor.response_owner_from_downstream(previous)
+}
+
+fn turn_anchor(object: &Map<String, Value>, evidence: &RequestIdentityEvidence) -> Vec<u8> {
+    if let Some(id) = evidence
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.is_user)
+        .and_then(|item| item.id.as_deref())
+    {
+        return id.as_bytes().to_vec();
     }
-    if let Some(previous) = object.get("previous_response_id").and_then(Value::as_str) {
-        return previous.as_bytes().to_vec();
+    if let Some(previous) = object
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        let mut anchor = previous.as_bytes().to_vec();
+        if let Some(user) = latest_user_anchor(object) {
+            anchor.extend_from_slice(&user);
+        }
+        return anchor;
     }
     Uuid::now_v7().as_bytes().to_vec()
 }
 
-fn turn_anchor(object: &Map<String, Value>) -> Vec<u8> {
-    let Some(items) = object.get("input").and_then(Value::as_array) else {
-        return Uuid::now_v7().as_bytes().to_vec();
-    };
-    let mut users = 0_u64;
-    let mut latest = None;
-    for item in items {
-        if item.get("role").and_then(Value::as_str) == Some("user") {
-            users = users.saturating_add(1);
-            latest = item.as_object().map(item_anchor);
-        }
-    }
-    match latest {
-        Some(mut anchor) => {
-            anchor.extend_from_slice(&users.to_be_bytes());
-            anchor
-        }
-        None => Uuid::now_v7().as_bytes().to_vec(),
-    }
-}
-
-fn has_user_message(object: &Map<String, Value>) -> bool {
-    object
-        .get("input")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items
-                .iter()
-                .any(|item| item.get("role").and_then(Value::as_str) == Some("user"))
-        })
-}
-
-fn first_user_anchor(object: &Map<String, Value>) -> Option<Vec<u8>> {
+fn latest_user_anchor(object: &Map<String, Value>) -> Option<Vec<u8>> {
     object
         .get("input")?
         .as_array()?
         .iter()
+        .rev()
         .find(|item| item.get("role").and_then(Value::as_str) == Some("user"))?
         .as_object()
         .map(item_anchor)
@@ -561,18 +601,29 @@ fn item_anchor(item: &Map<String, Value>) -> Vec<u8> {
     serde_json::to_vec(&Value::Object(item)).unwrap_or_default()
 }
 
-fn compaction_anchor(object: &Map<String, Value>, turn_key: &str) -> Vec<u8> {
-    let metadata = object
-        .get("client_metadata")
-        .and_then(Value::as_object)
-        .and_then(|metadata| metadata.get("x-codex-turn-metadata"))
-        .and_then(Value::as_str)
-        .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
-    if let Some(compaction) = metadata
-        .as_ref()
-        .and_then(|metadata| metadata.get("compaction"))
-    {
-        return serde_json::to_vec(compaction).unwrap_or_else(|_| turn_key.as_bytes().to_vec());
+fn compaction_anchor(
+    object: &Map<String, Value>,
+    evidence: &RequestIdentityEvidence,
+    has_explicit_turn: bool,
+    turn_key: &str,
+) -> Vec<u8> {
+    if has_explicit_turn {
+        return turn_key.as_bytes().to_vec();
     }
-    turn_key.as_bytes().to_vec()
+    if let Some(item_id) = evidence
+        .items
+        .iter()
+        .rev()
+        .find_map(|item| item.id.as_deref())
+    {
+        return item_id.as_bytes().to_vec();
+    }
+    if let Some(previous) = object
+        .get("previous_response_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        return previous.as_bytes().to_vec();
+    }
+    Uuid::now_v7().as_bytes().to_vec()
 }

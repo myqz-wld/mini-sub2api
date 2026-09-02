@@ -189,7 +189,10 @@ serialized metadata copies. Conflicting root carriers do not create unrelated id
 explicit parent, fork, or subagent relationship creates a distinct child-thread UUIDv7 while the
 session continues to reference the root. Ordinary turns are persisted UUIDv7 values; tool loops
 reuse the active thread turn and a new logical user message creates a new one. Prewarm retains its
-official empty turn ID.
+official empty turn ID. Top-level Responses conversations provide a separate fallback relationship
+anchor; a delivered response alias records its projected session/thread owner so a later
+`previous_response_id` restores the same graph after restart. Without any stable carrier, separate
+requests do not correlate by matching prompt content.
 
 Installation is a genuine persisted UUIDv4. `device` uses one UUIDv4 per upstream ChatGPT account;
 `off` uses a scoped UUIDv4 mapping. HMAC-SHA256 derives only private lookup keys from the account
@@ -203,8 +206,10 @@ is removed. Files are `0600`, atomically replaced under an account lock, limited
 contain multiple downstream scopes, conversations, child threads, turns, generated item metadata,
 window/compaction state, and bounded reversible wire-ID pairs. Completed turn/item/compaction/wire
 detail is eligible for LRU pruning after 30 days; conversation identity is capacity-LRU only.
-Corrupt, oversized, or unsupported state is preserved and fails the affected request before
-upstream delivery.
+Ancestor eviction retains protected descendants or removes the complete descendant graph. Corrupt,
+oversized, or unsupported state is preserved and returns retryable `state_unavailable` before
+upstream delivery. It does not prevent credential removal; final-owner deletion removes the state
+without decoding it.
 
 Responses lifecycle IDs are translated transparently in both directions. Caller-origin response,
 conversation, stream, item, call, and approval IDs receive upstream pseudonyms and are restored on
@@ -214,6 +219,8 @@ the first downstream-visible occurrence. Translation is schema-aware: file, vect
 model, connector, tunnel, and skill IDs, plus encrypted and opaque/free-form values, are not
 recursively rewritten. The raw-pair exception is limited to these enumerated IDs; bodies, content,
 tool arguments, credentials, workspace data, and opaque values are never persisted.
+Response wire records may additionally retain only their projected UUIDv7 session/thread owner; they
+do not persist request or response content.
 
 Standard Codex turn, prewarm, and compaction metadata always carries a legal sandbox pair. The core
 preserves a legal `sandbox_mode` permission meaning and derives `sandbox` from its own runtime:
@@ -334,7 +341,9 @@ handshakes and bounded HTTP rejection mapping.
 Codex `0.149.0` remote compaction v2 uses this same ordinary Responses path. Its
 `compaction_trigger` input item and `request_kind=compaction` metadata pass through normal
 subscription normalization, pseudonymization, and device convergence; no additional public or internal route is
-required.
+required. Compaction retry markers include the projected thread plus a stable operation carrier
+where one exists, so retries are idempotent while later or cross-thread compactions advance
+independently.
 
 Successful internal upgrades may expose only `openai-model`, `x-codex-turn-state`,
 `x-models-etag`, `x-reasoning-included`, `x-request-id`, and the core TTFB header to the
@@ -350,6 +359,7 @@ Before any upstream response bytes are sent, core errors use the JSON shape in `
 - `unsupported_protocol`
 - `invalid_request`
 - `unknown_account`
+- `state_unavailable`
 - `credential_disabled`
 - `credential_requires_login`
 - `credential_busy`
