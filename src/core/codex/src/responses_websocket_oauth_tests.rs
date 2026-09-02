@@ -8,6 +8,7 @@ use reqwest_websocket::CloseCode as DownstreamCloseCode;
 use reqwest_websocket::Message as DownstreamMessage;
 use std::fs;
 use std::time::Duration;
+use tokio::sync::Notify;
 
 #[derive(Clone)]
 struct OAuthWebSocketState {
@@ -18,6 +19,31 @@ struct OAuthWebSocketState {
     refresh_calls: Arc<AtomicUsize>,
     headers: Arc<Mutex<Option<HeaderMap>>>,
     frames: Arc<Mutex<Vec<String>>>,
+}
+
+#[derive(Clone, Copy)]
+enum HoldingProviderEvent {
+    None,
+    Immediate,
+    AfterRelease,
+}
+
+#[derive(Clone)]
+struct HoldingOAuthWebSocketState {
+    event: HoldingProviderEvent,
+    handshake_calls: Arc<AtomicUsize>,
+    frames: Arc<Mutex<Vec<String>>>,
+    create_seen: Arc<Notify>,
+    release_event: Arc<Notify>,
+}
+
+struct HoldingOAuthFixture {
+    _temp: tempfile::TempDir,
+    _upstream: crate::test_support::LoopbackServer,
+    state: HoldingOAuthWebSocketState,
+    vault: Vault,
+    account_ref: String,
+    account_id: String,
 }
 
 #[tokio::test]
@@ -536,6 +562,331 @@ async fn established_subscription_socket_reports_retryable_state_unavailable_fai
         frames_before_state_outage,
         "the state-unavailable create must not reach upstream"
     );
+}
+
+#[tokio::test]
+async fn first_subscription_create_reports_state_unavailable_before_provider_connect() {
+    let fixture = holding_oauth_fixture(
+        "chatgpt-websocket-first-state-unavailable",
+        HoldingProviderEvent::None,
+    )
+    .await;
+    fixture
+        .vault
+        .request_state()
+        .edit(
+            &fixture.account_id,
+            &fixture.account_ref,
+            "preseed-first-state-unavailable",
+            |editor| {
+                editor
+                    .installation_id(crate::fingerprint::FingerprintMode::Device, None)
+                    .map(|_| ())
+            },
+        )
+        .await
+        .expect("preseed request state");
+    let state_path = fixture
+        .vault
+        .request_state()
+        .state_path_for_test(&fixture.account_id);
+    fs::write(state_path, b"{corrupt").expect("corrupt request state");
+
+    let core = spawn_internal(app_state(fixture.vault.clone())).await;
+    let handshake = internal_handshake(&core.base_url, &fixture.account_ref)
+        .upgrade()
+        .send()
+        .await
+        .expect("handshake");
+    let mut socket = handshake.into_websocket().await.expect("socket");
+    socket
+        .send(DownstreamMessage::Text(stateful_create("first")))
+        .await
+        .expect("first create");
+    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("first-create failure timeout")
+        .expect("first-create failure")
+        .expect("valid first-create failure");
+    assert_eq!(
+        failure_metadata(close),
+        crate::error::failure(
+            mini_sub2api_protocol_v1::RetryAdvice::Safe,
+            mini_sub2api_protocol_v1::FailurePhase::Internal,
+            mini_sub2api_protocol_v1::DeliveryState::NotDelivered,
+        )
+    );
+    assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 0);
+    assert!(fixture.state.frames.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn state_failure_on_control_frame_preserves_attempted_delivery() {
+    let fixture = holding_oauth_fixture(
+        "chatgpt-websocket-attempted-control-state-unavailable",
+        HoldingProviderEvent::None,
+    )
+    .await;
+    let state_path = fixture
+        .vault
+        .request_state()
+        .state_path_for_test(&fixture.account_id);
+    let core = spawn_internal(app_state(fixture.vault.clone())).await;
+    let handshake = internal_handshake(&core.base_url, &fixture.account_ref)
+        .upgrade()
+        .send()
+        .await
+        .expect("handshake");
+    let mut socket = handshake.into_websocket().await.expect("socket");
+    let create_seen = fixture.state.create_seen.notified();
+    socket
+        .send(DownstreamMessage::Text(stateful_create("attempted")))
+        .await
+        .expect("create");
+    tokio::time::timeout(Duration::from_secs(2), create_seen)
+        .await
+        .expect("provider did not receive create");
+    fs::write(&state_path, b"{corrupt").expect("corrupt request state");
+
+    socket
+        .send(DownstreamMessage::Text(stateful_inject(
+            "resp_not_observed",
+        )))
+        .await
+        .expect("inject");
+    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("attempted failure timeout")
+        .expect("attempted failure")
+        .expect("valid attempted failure");
+    assert_eq!(
+        failure_metadata(close),
+        crate::error::failure(
+            mini_sub2api_protocol_v1::RetryAdvice::Ambiguous,
+            mini_sub2api_protocol_v1::FailurePhase::Internal,
+            mini_sub2api_protocol_v1::DeliveryState::PossiblyDelivered,
+        )
+    );
+    assert_eq!(fixture.state.frames.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn state_failure_on_control_frame_preserves_observed_delivery() {
+    let fixture = holding_oauth_fixture(
+        "chatgpt-websocket-observed-control-state-unavailable",
+        HoldingProviderEvent::Immediate,
+    )
+    .await;
+    let state_path = fixture
+        .vault
+        .request_state()
+        .state_path_for_test(&fixture.account_id);
+    let core = spawn_internal(app_state(fixture.vault.clone())).await;
+    let handshake = internal_handshake(&core.base_url, &fixture.account_ref)
+        .upgrade()
+        .send()
+        .await
+        .expect("handshake");
+    let mut socket = handshake.into_websocket().await.expect("socket");
+    socket
+        .send(DownstreamMessage::Text(stateful_create("observed")))
+        .await
+        .expect("create");
+    let event = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("provider event timeout")
+        .expect("provider event")
+        .expect("valid provider event");
+    let DownstreamMessage::Text(event) = event else {
+        panic!("expected provider event, got {event:?}");
+    };
+    let event: Value = serde_json::from_str(&event).expect("provider event JSON");
+    let response_id = event["response"]["id"]
+        .as_str()
+        .expect("downstream response id")
+        .to_string();
+    fs::write(&state_path, b"{corrupt").expect("corrupt request state");
+
+    socket
+        .send(DownstreamMessage::Text(stateful_inject(&response_id)))
+        .await
+        .expect("inject");
+    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("observed failure timeout")
+        .expect("observed failure")
+        .expect("valid observed failure");
+    assert_eq!(
+        failure_metadata(close),
+        crate::error::failure(
+            mini_sub2api_protocol_v1::RetryAdvice::Never,
+            mini_sub2api_protocol_v1::FailurePhase::Internal,
+            mini_sub2api_protocol_v1::DeliveryState::Delivered,
+        )
+    );
+    assert_eq!(fixture.state.frames.lock().await.len(), 1);
+}
+
+#[tokio::test]
+async fn websocket_translation_failure_after_provider_event_is_delivered() {
+    let fixture = holding_oauth_fixture(
+        "chatgpt-websocket-response-translation-state-unavailable",
+        HoldingProviderEvent::AfterRelease,
+    )
+    .await;
+    let state_path = fixture
+        .vault
+        .request_state()
+        .state_path_for_test(&fixture.account_id);
+    let core = spawn_internal(app_state(fixture.vault.clone())).await;
+    let handshake = internal_handshake(&core.base_url, &fixture.account_ref)
+        .upgrade()
+        .send()
+        .await
+        .expect("handshake");
+    let mut socket = handshake.into_websocket().await.expect("socket");
+    let create_seen = fixture.state.create_seen.notified();
+    socket
+        .send(DownstreamMessage::Text(stateful_create("translate")))
+        .await
+        .expect("create");
+    tokio::time::timeout(Duration::from_secs(2), create_seen)
+        .await
+        .expect("provider did not receive create");
+    fs::write(&state_path, b"{corrupt").expect("corrupt request state");
+    fixture.state.release_event.notify_one();
+
+    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("translation failure timeout")
+        .expect("translation failure")
+        .expect("valid translation failure");
+    assert_eq!(
+        failure_metadata(close),
+        crate::error::failure(
+            mini_sub2api_protocol_v1::RetryAdvice::Never,
+            mini_sub2api_protocol_v1::FailurePhase::WebSocketRelay,
+            mini_sub2api_protocol_v1::DeliveryState::Delivered,
+        )
+    );
+    assert_eq!(fixture.state.frames.lock().await.len(), 1);
+}
+
+async fn holding_oauth_fixture(
+    account_id: &str,
+    event: HoldingProviderEvent,
+) -> HoldingOAuthFixture {
+    let state = HoldingOAuthWebSocketState {
+        event,
+        handshake_calls: Arc::new(AtomicUsize::new(0)),
+        frames: Arc::new(Mutex::new(Vec::new())),
+        create_seen: Arc::new(Notify::new()),
+        release_event: Arc::new(Notify::new()),
+    };
+    let app = Router::new()
+        .route("/responses", get(holding_oauth_upstream))
+        .with_state(state.clone());
+    let upstream = spawn_loopback(app).await;
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: test_jwt(Some(account_id), 7200),
+                access_token: test_jwt(None, 7200),
+                refresh_token: format!("refresh-{account_id}"),
+                account_id: account_id.to_string(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                issuer: upstream.base_url.clone(),
+                client_id: format!("client-{account_id}"),
+            },
+            format!("{}/responses", upstream.base_url),
+            crate::fingerprint::FingerprintMode::Device,
+        )
+        .await
+        .expect("OAuth record");
+    HoldingOAuthFixture {
+        _temp: temp,
+        _upstream: upstream,
+        state,
+        vault,
+        account_ref: metadata.account_ref,
+        account_id: account_id.to_string(),
+    }
+}
+
+fn stateful_create(turn: &str) -> String {
+    serde_json::json!({
+        "type":"response.create",
+        "model":"gpt-5.4",
+        "previous_response_id":format!("resp_parent_{turn}"),
+        "input":[{"type":"message","id":format!("msg_{turn}"),"role":"user","content":turn}],
+        "client_metadata":{"session_id":"state-outage-session","turn_id":turn}
+    })
+    .to_string()
+}
+
+fn stateful_inject(response_id: &str) -> String {
+    serde_json::json!({
+        "type":"response.inject",
+        "response_id":response_id,
+        "input":[{
+            "type":"function_call_output",
+            "id":"fco_state_outage",
+            "call_id":"call_state_outage",
+            "output":"ok"
+        }]
+    })
+    .to_string()
+}
+
+fn failure_metadata(message: DownstreamMessage) -> mini_sub2api_protocol_v1::FailureMetadata {
+    let DownstreamMessage::Close { code, reason } = message else {
+        panic!("expected failure close, got {message:?}");
+    };
+    assert_eq!(
+        u16::from(code),
+        mini_sub2api_protocol_v1::FAILURE_CLOSE_CODE
+    );
+    serde_json::from_str(&reason).expect("failure metadata")
+}
+
+async fn holding_oauth_upstream(
+    AxumState(state): AxumState<HoldingOAuthWebSocketState>,
+    upgrade: WebSocketUpgrade,
+) -> AxumResponse {
+    state.handshake_calls.fetch_add(1, Ordering::SeqCst);
+    let capture = state.clone();
+    upgrade
+        .on_upgrade(move |mut socket| async move {
+            let Some(Ok(InternalMessage::Text(create))) = socket.next().await else {
+                return;
+            };
+            capture.frames.lock().await.push(create.to_string());
+            capture.create_seen.notify_one();
+            match capture.event {
+                HoldingProviderEvent::None => {}
+                HoldingProviderEvent::Immediate => {}
+                HoldingProviderEvent::AfterRelease => capture.release_event.notified().await,
+            }
+            if !matches!(capture.event, HoldingProviderEvent::None) {
+                let event = serde_json::json!({
+                    "type":"response.created",
+                    "response":{"id":"resp_holding"}
+                });
+                if socket
+                    .send(InternalMessage::Text(event.to_string().into()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            while let Some(Ok(InternalMessage::Text(frame))) = socket.next().await {
+                capture.frames.lock().await.push(frame.to_string());
+            }
+        })
+        .into_response()
 }
 
 async fn oauth_upstream(

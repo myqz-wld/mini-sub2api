@@ -28,6 +28,7 @@ use axum::http::{HeaderMap, HeaderValue, Response, StatusCode};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use mini_sub2api_protocol_v1::CORE_TTFB_HEADER;
+use mini_sub2api_protocol_v1::FailurePhase;
 use mini_sub2api_protocol_v1::REQUEST_ID_HEADER;
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -275,7 +276,9 @@ pub(crate) async fn relay(
                         .await;
                         match prepared {
                             Err(ClientPrepareError::StateUnavailable) => {
-                                return RelayExit::StateUnavailable;
+                                return RelayExit::StateUnavailable(
+                                    delivery.failure_for_phase(FailurePhase::Internal),
+                                );
                             }
                             Err(ClientPrepareError::Protocol) => {
                                 upstream_close(UpstreamCloseCode::Protocol)
@@ -303,7 +306,9 @@ pub(crate) async fn relay(
                                             && let Some(state) = client_response_state.as_ref()
                                             && state.update_identity(identity.as_ref()).is_err()
                                         {
-                                            return RelayExit::StateUnavailable;
+                                            return RelayExit::StateUnavailable(
+                                                delivery.failure_for_phase(FailurePhase::Internal),
+                                            );
                                         }
                                         create_attempt = is_create;
                                         UpstreamMessage::Text(prepared.into())
@@ -365,6 +370,7 @@ pub(crate) async fn relay(
                         if disposition == EventDisposition::ConsumeHiddenSetup {
                             continue;
                         }
+                        delivery.mark_response_observed();
                         let text = match response_state.as_ref() {
                             Some(state) => match state
                                 .translate_text(upstream_text.clone(), MAX_WEBSOCKET_MESSAGE_BYTES)
@@ -375,7 +381,6 @@ pub(crate) async fn relay(
                             },
                             None => upstream_text.clone(),
                         };
-                        delivery.mark_response_observed();
                         let terminal = is_terminal_response_event(&upstream_text);
                         (InternalMessage::Text(text.into()), terminal)
                     }
@@ -436,11 +441,9 @@ pub(crate) async fn relay(
                 .send(upstream_close(UpstreamCloseCode::Restart))
                 .await;
         }
-        RelayExit::StateUnavailable => {
+        RelayExit::StateUnavailable(metadata) => {
             continuation_guard(&continuation).reset();
-            let _ = internal_write
-                .send(failure_close(CoreFailure::StateUnavailable.failure()))
-                .await;
+            let _ = internal_write.send(failure_close(metadata)).await;
             let _ = upstream_write
                 .send(upstream_close(UpstreamCloseCode::Restart))
                 .await;
@@ -467,7 +470,7 @@ enum RelayExit {
     Complete,
     StaleFingerprint,
     Failure(mini_sub2api_protocol_v1::FailureMetadata),
-    StateUnavailable,
+    StateUnavailable(mini_sub2api_protocol_v1::FailureMetadata),
     Policy,
     TooLarge,
 }
