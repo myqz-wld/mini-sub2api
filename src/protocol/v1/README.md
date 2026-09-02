@@ -343,7 +343,8 @@ Codex `0.149.0` remote compaction v2 uses this same ordinary Responses path. Its
 subscription normalization, pseudonymization, and device convergence; no additional public or internal route is
 required. Compaction retry markers include the projected thread plus a stable operation carrier
 where one exists, so retries are idempotent while later or cross-thread compactions advance
-independently.
+independently. Accessing an existing marker refreshes its retention timestamp and protects it from
+pruning or capacity eviction during that edit.
 
 Successful internal upgrades may expose only `openai-model`, `x-codex-turn-state`,
 `x-models-etag`, `x-reasoning-included`, `x-request-id`, and the core TTFB header to the
@@ -393,7 +394,9 @@ The core records the real transport boundary. An HTTP connect failure is safe; f
 send attempt but before response headers is ambiguous; an upstream response or later stream
 failure proves delivery. For WebSocket, a `response.create` becomes ambiguous immediately before
 the provider write, becomes delivered after the first provider application event, and returns to
-idle after a terminal event. A deferred OAuth handshake failure occurs before inference delivery.
+idle after a terminal event. State-store failures retain that active delivery state instead of
+resetting it to safe; an upstream response or application event is recorded before fallible response
+ID translation. A deferred OAuth handshake failure occurs before inference delivery.
 
 The coordinator parses this metadata from pre-response JSON, HTTP trailers, and WebSocket `4500`
 reasons. If an upgraded core socket fails without valid metadata, its own operation tracker falls

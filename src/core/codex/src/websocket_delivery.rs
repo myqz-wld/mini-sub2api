@@ -38,22 +38,18 @@ impl WebSocketDeliveryTracker {
     }
 
     pub(crate) fn failure(&self) -> FailureMetadata {
+        self.failure_for_phase(FailurePhase::WebSocketRelay)
+    }
+
+    pub(crate) fn failure_for_phase(&self, phase: FailurePhase) -> FailureMetadata {
         match self.state.load(Ordering::Acquire) {
             DELIVERY_ATTEMPTED => failure(
                 RetryAdvice::Ambiguous,
-                FailurePhase::WebSocketRelay,
+                phase,
                 DeliveryState::PossiblyDelivered,
             ),
-            DELIVERY_OBSERVED => failure(
-                RetryAdvice::Never,
-                FailurePhase::WebSocketRelay,
-                DeliveryState::Delivered,
-            ),
-            _ => failure(
-                RetryAdvice::Safe,
-                FailurePhase::WebSocketRelay,
-                DeliveryState::NotDelivered,
-            ),
+            DELIVERY_OBSERVED => failure(RetryAdvice::Never, phase, DeliveryState::Delivered),
+            _ => failure(RetryAdvice::Safe, phase, DeliveryState::NotDelivered),
         }
     }
 }
@@ -130,6 +126,14 @@ mod tests {
         assert_eq!(tracker.failure().retry_advice, RetryAdvice::Ambiguous);
         tracker.mark_response_observed();
         assert_eq!(tracker.failure().delivery_state, DeliveryState::Delivered);
+        assert_eq!(
+            tracker.failure_for_phase(FailurePhase::Internal),
+            failure(
+                RetryAdvice::Never,
+                FailurePhase::Internal,
+                DeliveryState::Delivered,
+            )
+        );
         tracker.mark_terminal();
         assert_eq!(
             tracker.failure().delivery_state,

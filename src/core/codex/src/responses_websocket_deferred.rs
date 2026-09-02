@@ -95,7 +95,9 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
             return;
         }
         Err(StatefulPrepareError::StateUnavailable) => {
-            let _ = internal.send(internal_close(1011)).await;
+            let _ = internal
+                .send(failure_close(CoreFailure::StateUnavailable.failure()))
+                .await;
             return;
         }
     };

@@ -296,10 +296,11 @@ Operational boundaries:
   transparent reversal—never request/response bodies, content, workspace values, credentials,
   opaque values, or tool arguments. Completed turn/item/compaction/wire detail becomes eligible for
   LRU pruning after 30 days; conversation identity is capacity-LRU only, and ancestor eviction
-  removes or retains a complete relationship graph rather than leaving dangling lineage. Corrupt or
-  unsupported state is preserved and the affected account returns retryable `state_unavailable`
-  before upstream delivery. Credential deletion remains available: non-final owners preserve corrupt
-  evidence and the final owner removes it.
+  removes or retains a complete relationship graph rather than leaving dangling lineage. A retried
+  compaction refreshes and protects its idempotency marker in the current edit. Corrupt or unsupported
+  state is preserved and the affected account returns retryable `state_unavailable` before upstream
+  delivery. Credential deletion remains available: non-final owners preserve corrupt evidence and
+  the final owner removes it.
 - SQLite stores credential metadata, downstream-key hashes, timing, status, and token counts. It
   does not store prompts, request bodies, response bodies, tool arguments, or generated content.
 - Every WebSocket `response.create` rechecks key and credential eligibility. Revoking a key or
@@ -307,7 +308,10 @@ Operational boundaries:
 - Inference is not replayed after transport errors, `429`, or `5xx`. OAuth may refresh once and
   replay once after a pre-response upstream `401`. Gateway errors expose `retryAdvice`, `phase`,
   and `deliveryState`; mid-stream HTTP failures use trailers and upgraded WebSockets use close code
-  `4500` with the same JSON tuple. Treat `ambiguous` as possibly delivered and never auto-retry it.
+  `4500` with the same JSON tuple. WebSocket state failures preserve the active create's attempted or
+  observed delivery state, and an upstream HTTP response or WebSocket application event proves
+  delivery before fallible ID translation. Treat `ambiguous` as possibly delivered and never
+  auto-retry it.
 
 Connection pools are credential-isolated. Every provider HTTP client explicitly selects
 reqwest/native-tls so its ClientHello follows the deployment runtime; provider WebSockets retain the

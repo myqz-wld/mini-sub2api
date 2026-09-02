@@ -22,7 +22,6 @@ struct TranslationState {
     upstream: UpstreamByteStream,
     context: ResponseStateContext,
     buffer: Vec<u8>,
-    delivered: bool,
     finished: bool,
     maximum: usize,
 }
@@ -37,7 +36,6 @@ pub(crate) fn translated_sse_frames(
             upstream,
             context,
             buffer: Vec::new(),
-            delivered: false,
             finished: false,
             maximum,
         },
@@ -70,29 +68,21 @@ pub(crate) fn translated_sse_frames(
 }
 
 async fn finish_event(
-    mut state: TranslationState,
+    state: TranslationState,
     event: Vec<u8>,
 ) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
     match translate_event(&state.context, event, state.maximum).await {
-        Ok(bytes) => {
-            state.delivered = true;
-            (Ok(Frame::data(bytes)), state)
-        }
+        Ok(bytes) => (Ok(Frame::data(bytes)), state),
         Err(()) => fail(state),
     }
 }
 
 fn fail(mut state: TranslationState) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
     state.finished = true;
-    let delivery_state = if state.delivered {
-        DeliveryState::Delivered
-    } else {
-        DeliveryState::NotDelivered
-    };
     let metadata = failure(
         RetryAdvice::Never,
         FailurePhase::UpstreamStream,
-        delivery_state,
+        DeliveryState::Delivered,
     );
     let mut trailers = HeaderMap::new();
     trailers.insert(
@@ -339,5 +329,58 @@ mod tests {
         assert_eq!(restored["previous_response_id"], "resp_upstream");
         assert_eq!(restored["input"][0]["id"], "item_provider");
         assert_eq!(restored["input"][0]["call_id"], "call_provider");
+    }
+
+    #[tokio::test]
+    async fn first_translation_failure_reports_upstream_response_as_delivered() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = crate::request_state_store::RequestStateStore::new(temp.path().to_path_buf());
+        store
+            .edit(
+                "namespace-sse-failure",
+                "acct_sse_failure",
+                "scope-sse-failure",
+                |editor| {
+                    editor.bind_wire_pair(
+                        WireIdDomain::Response,
+                        "resp_downstream_seed",
+                        "resp_upstream_seed",
+                    )?;
+                    Ok(())
+                },
+            )
+            .await
+            .expect("seed request state");
+        std::fs::write(
+            store.state_path_for_test("namespace-sse-failure"),
+            b"{corrupt",
+        )
+        .expect("corrupt request state");
+        let context = ResponseStateContext::new(
+            "acct_sse_failure",
+            "namespace-sse-failure",
+            "scope-sse-failure",
+            &store,
+            None,
+        );
+        let upstream: UpstreamByteStream = Box::pin(futures_util::stream::iter(vec![Ok(
+            Bytes::from_static(
+                b"event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_provider\"}}\n\n",
+            ),
+        )]));
+        let frames = translated_sse_frames(upstream, context, 1024 * 1024)
+            .collect::<Vec<_>>()
+            .await;
+        assert_eq!(frames.len(), 1);
+        let trailers = frames
+            .into_iter()
+            .next()
+            .expect("failure frame")
+            .expect("infallible")
+            .into_trailers()
+            .expect("failure trailers");
+        assert_eq!(trailers[FAILURE_PHASE_TRAILER], "upstream_stream");
+        assert_eq!(trailers[DELIVERY_STATE_TRAILER], "delivered");
+        assert_eq!(trailers[RETRY_ADVICE_TRAILER], "never");
     }
 }

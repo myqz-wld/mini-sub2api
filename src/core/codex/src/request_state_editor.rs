@@ -418,7 +418,23 @@ impl<'a> RequestStateEditor<'a> {
                 existing.thread_id == thread_id,
                 "compaction relationship changed"
             );
-            return Ok(existing.window_number);
+            let window_number = existing.window_number;
+            let day = self.day;
+            let scope_key = self.scope_key.clone();
+            let touched = touch_day(
+                &mut self
+                    .scope_mut()
+                    .compaction_markers
+                    .get_mut(key)
+                    .expect("existing compaction marker")
+                    .last_seen_day,
+                day,
+            );
+            self.changed |= touched;
+            self.protected
+                .compaction_markers
+                .insert((scope_key, key.to_string()));
+            return Ok(window_number);
         }
         let window = self
             .window_number(thread_id)

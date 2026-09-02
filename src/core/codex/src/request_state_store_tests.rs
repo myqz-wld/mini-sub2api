@@ -153,6 +153,67 @@ async fn device_converges_across_scopes_while_off_stays_scoped() {
 }
 
 #[tokio::test]
+async fn late_compaction_retry_refreshes_and_protects_its_marker() {
+    let (_temp, store) = store();
+    let conversation_key = keys(SCOPE).identity("conversation", "compaction-session");
+    let marker_key = keys(SCOPE).identity("compaction", "compaction-operation");
+    let first_window = store
+        .edit_at(NAMESPACE, OWNER, SCOPE, DAY_MS, {
+            let conversation_key = conversation_key.clone();
+            let marker_key = marker_key.clone();
+            move |editor| {
+                let conversation = editor.conversation(&conversation_key)?;
+                editor.apply_compaction(&marker_key, &conversation.id)
+            }
+        })
+        .await
+        .expect("first compaction");
+    assert_eq!(first_window, 1);
+
+    let late_day = 32 * DAY_MS;
+    let late_retry = store
+        .edit_at(NAMESPACE, OWNER, SCOPE, late_day, {
+            let conversation_key = conversation_key.clone();
+            let marker_key = marker_key.clone();
+            move |editor| {
+                let conversation = editor.conversation(&conversation_key)?;
+                editor.apply_compaction(&marker_key, &conversation.id)
+            }
+        })
+        .await
+        .expect("late compaction retry");
+    assert_eq!(late_retry, first_window);
+
+    let state = persisted(&store);
+    let scope = state.scopes.values().next().expect("persisted scope");
+    assert_eq!(
+        scope
+            .compaction_markers
+            .get(&marker_key)
+            .expect("retained marker")
+            .last_seen_day,
+        32
+    );
+
+    let immediate_retry = store
+        .edit_at(NAMESPACE, OWNER, SCOPE, late_day, move |editor| {
+            let conversation = editor.conversation(&conversation_key)?;
+            editor.apply_compaction(&marker_key, &conversation.id)
+        })
+        .await
+        .expect("immediate compaction retry");
+    assert_eq!(immediate_retry, first_window);
+    let state = persisted(&store);
+    let scope = state.scopes.values().next().expect("persisted scope");
+    assert_eq!(scope.conversations.len(), 1);
+    assert_eq!(
+        scope.conversations.values().next().unwrap().window_number,
+        1
+    );
+    assert_eq!(scope.compaction_markers.len(), 1);
+}
+
+#[tokio::test]
 async fn wire_pairs_translate_transparently_in_both_directions() {
     let (_temp, store) = store();
     let upstream_alias = store
