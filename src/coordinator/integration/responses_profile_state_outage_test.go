@@ -16,6 +16,54 @@ import (
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
+func TestCodexProfilesFailSafeWhenRequiredReferenceMappingIsMissing(t *testing.T) {
+	profiles := []struct {
+		name         string
+		subscription bool
+	}{
+		{name: "codex_api_key"},
+		{name: "codex_subscription", subscription: true},
+	}
+	for _, profile := range profiles {
+		t.Run(profile.name, func(t *testing.T) {
+			fixture := newResponsesProfileHTTPFixture(t)
+			secret, keyID := fixture.apiKey, fixture.apiKeyID
+			headers := http.Header{"Originator": []string{"codex_exec"}}
+			if profile.subscription {
+				secret, keyID = fixture.subscriptionKey, fixture.subscriptionKeyID
+				headers = nil
+			}
+			status, publicBody, publicHeaders := publicRequestWithHeaders(
+				t, fixture.public, secret,
+				`{"model":"gpt-5.4","previous_response_id":"resp_missing","input":"hello"}`,
+				headers,
+			)
+			if status != http.StatusServiceUnavailable {
+				t.Fatalf("missing reference response = %d %s", status, publicBody)
+			}
+			envelope := decodeRequestObject(t, []byte(publicBody))
+			errorObject, _ := envelope["error"].(map[string]any)
+			if errorObject["code"] != "state_unavailable" ||
+				errorObject["retryAdvice"] != "safe" || errorObject["phase"] != "internal" ||
+				errorObject["deliveryState"] != "not_delivered" {
+				t.Fatalf("missing reference failure = %#v", errorObject)
+			}
+			select {
+			case capture := <-fixture.captures:
+				t.Fatalf("missing reference reached upstream: %#v", capture)
+			case <-time.After(200 * time.Millisecond):
+			}
+			record := waitForProfileRequestRecord(
+				t, fixture.store, keyID, publicHeaders.Get("X-Mini-Sub2Api-Request-Id"),
+			)
+			if record.ProviderRequestID != nil || record.Status != storage.RequestUpstreamErr {
+				t.Fatalf("missing reference history = %#v", record)
+			}
+			assertProfileStateFileCount(t, fixture.coreStateDir, 0)
+		})
+	}
+}
+
 func TestCodexProfilesFailSafeBeforeUpstreamWhenRequestStateIsCorrupt(t *testing.T) {
 	profiles := []struct {
 		name         string
@@ -96,7 +144,7 @@ func TestCodexProfilesCloseFirstWebSocketCreateSafelyWhenRequestStateIsCorrupt(t
 			}
 			status, _, _ := publicRequestWithHeaders(
 				t, fixture.public, secret,
-				`{"model":"gpt-5.4","input":[],"conversation":"ws-state-seed","stream":false}`,
+				`{"model":"gpt-5.4","input":[],"stream":false,"client_metadata":{"session_id":"ws-state-seed"}}`,
 				headers,
 			)
 			if status != http.StatusOK {
@@ -117,7 +165,7 @@ func TestCodexProfilesCloseFirstWebSocketCreateSafelyWhenRequestStateIsCorrupt(t
 			defer connection.CloseNow()
 			writeE2EWebSocketText(
 				t, connection,
-				`{"type":"response.create","model":"gpt-5.4","conversation":"ws-state-failed","input":[]}`,
+				`{"type":"response.create","model":"gpt-5.4","generate":true,"input":[],"client_metadata":{"session_id":"ws-state-failed"}}`,
 			)
 			readContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			_, _, readErr := connection.Read(readContext)

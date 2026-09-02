@@ -1,6 +1,7 @@
 use super::*;
 use crate::fingerprint::FingerprintMode;
 use crate::request_state_store::RequestStateStore;
+use crate::request_state_types::WireIdDomain;
 use crate::response_translation::ResponseStateContext;
 use http::HeaderValue;
 use serde_json::Value;
@@ -64,6 +65,20 @@ async fn prepare_profile(
 
 fn value(prepared: &PreparedEmulatedRequest) -> Value {
     serde_json::from_slice(&prepared.body).expect("prepared JSON")
+}
+
+async fn seed_upstream_wire(
+    store: &RequestStateStore,
+    domain: WireIdDomain,
+    upstream_id: &str,
+) -> String {
+    let upstream_id = upstream_id.to_string();
+    store
+        .edit(NAMESPACE, ACCOUNT_REF, SCOPE, move |editor| {
+            editor.wire_from_upstream(domain, &upstream_id)
+        })
+        .await
+        .expect("seed upstream wire mapping")
 }
 
 fn turn_metadata(value: &Value) -> Value {
@@ -316,9 +331,11 @@ async fn missing_turn_reuses_for_tool_roundtrip_and_changes_for_new_user() {
     let first_create_time =
         first_user["internal_chat_message_metadata_passthrough"]["create_time"].clone();
 
+    let call = seed_upstream_wire(&store, WireIdDomain::Call, "call_provider").await;
+
     let tool_input = serde_json::json!([
         {"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
-        {"type":"function_call_output","call_id":"call_downstream","output":"done"}
+        {"type":"function_call_output","call_id":call,"output":"done"}
     ]);
     let tool = value(&prepare(&store, &headers, request(tool_input)).await);
     assert_eq!(tool["client_metadata"]["turn_id"], first_turn);
@@ -334,13 +351,15 @@ async fn missing_turn_reuses_for_tool_roundtrip_and_changes_for_new_user() {
         first_create_time
     );
 
+    let minimal_call =
+        seed_upstream_wire(&store, WireIdDomain::Call, "call_provider_minimal").await;
     let minimal_tool = value(
         &prepare(
             &store,
             &headers,
             request(serde_json::json!([{
                 "type":"function_call_output",
-                "call_id":"call_downstream_minimal",
+                "call_id":minimal_call,
                 "output":"done"
             }])),
         )
@@ -350,7 +369,7 @@ async fn missing_turn_reuses_for_tool_roundtrip_and_changes_for_new_user() {
 
     let next_input = serde_json::json!([
         {"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
-        {"type":"function_call_output","call_id":"call_downstream","output":"done"},
+        {"type":"function_call_output","call_id":call,"output":"done"},
         {"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}
     ]);
     let next = value(&prepare(&store, &headers, request(next_input)).await);
@@ -413,6 +432,10 @@ async fn oversized_schema_id_is_an_invalid_request_not_a_state_outage() {
 #[tokio::test]
 async fn responses_conversation_anchors_fallback_but_carrier_free_calls_stay_distinct() {
     let (_temp, store) = store();
+    let conversation_a =
+        seed_upstream_wire(&store, WireIdDomain::Conversation, "conv-provider-a").await;
+    let conversation_b =
+        seed_upstream_wire(&store, WireIdDomain::Conversation, "conv-provider-b").await;
     let request = |conversation: Option<&str>, text: &str| {
         let mut value = serde_json::json!({
             "model":"gpt-5.4",
@@ -430,7 +453,7 @@ async fn responses_conversation_anchors_fallback_but_carrier_free_calls_stay_dis
         &prepare(
             &store,
             &HeaderMap::new(),
-            request(Some("conv-downstream-a"), "same"),
+            request(Some(&conversation_a), "same"),
         )
         .await,
     );
@@ -438,7 +461,7 @@ async fn responses_conversation_anchors_fallback_but_carrier_free_calls_stay_dis
         &prepare(
             &store,
             &HeaderMap::new(),
-            request(Some("conv-downstream-b"), "same"),
+            request(Some(&conversation_b), "same"),
         )
         .await,
     );
@@ -446,7 +469,7 @@ async fn responses_conversation_anchors_fallback_but_carrier_free_calls_stay_dis
         &prepare(
             &store,
             &HeaderMap::new(),
-            request(Some("conv-downstream-a"), "different"),
+            request(Some(&conversation_a), "different"),
         )
         .await,
     );
@@ -562,13 +585,14 @@ async fn equal_user_content_uses_item_identity_and_tool_history_reuses_active_tu
         retry["client_metadata"]["turn_id"]
     );
 
+    let call = seed_upstream_wire(&store, WireIdDomain::Call, "call_provider_equal").await;
     let tool = value(
         &prepare(
             &store,
             &HeaderMap::new(),
             request(serde_json::json!([
                 {"type":"message","id":"msg_equal_2","role":"user","content":"repeat"},
-                {"type":"function_call_output","call_id":"call_equal","output":"done"}
+                {"type":"function_call_output","call_id":call,"output":"done"}
             ])),
         )
         .await,
@@ -759,3 +783,6 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
             .is_some_and(|window| window.ends_with(":1"))
     );
 }
+
+#[path = "request_normalizer_reference_tests.rs"]
+mod reference_tests;

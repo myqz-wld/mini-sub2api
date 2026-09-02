@@ -65,8 +65,9 @@ func TestCodexProfilesTranslateTerminalFailuresWithoutTraversingOpaqueErrors(t *
 				defer connection.CloseNow()
 				request := mustRequestJSON(t, map[string]any{
 					"type": "response.create", "model": eventType,
-					"conversation": "terminal-" + profile.name + "-" + eventType,
-					"input":        []any{},
+					"input": []any{}, "client_metadata": map[string]any{
+						"session_id": "terminal-" + profile.name + "-" + eventType,
+					},
 				})
 				writeE2EWebSocketText(t, connection, string(request))
 				publicText := readE2EWebSocketText(t, connection)

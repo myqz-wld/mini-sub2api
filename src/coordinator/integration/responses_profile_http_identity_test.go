@@ -244,7 +244,9 @@ func TestCodexProfilesTranslateStreamingAndAggregatedTerminalFailures(t *testing
 				t.Run(profile.name+"_"+eventType+"_"+mode, func(t *testing.T) {
 					body := mustRequestJSON(t, map[string]any{
 						"model": eventType, "input": []any{}, "stream": stream,
-						"conversation": profile.name + "-" + eventType + "-" + mode,
+						"client_metadata": map[string]any{
+							"session_id": profile.name + "-" + eventType + "-" + mode,
+						},
 					})
 					status, publicBody, publicHeaders := publicRequestWithHeaders(
 						t, fixture.public, profile.secret, string(body), profile.headers,
@@ -332,7 +334,6 @@ func TestCodexProfilesRestoreResponseOwnershipAcrossCoreRestart(t *testing.T) {
 				"type": "message", "id": "msg-conflict-" + test.name,
 				"role": "user", "content": "first",
 			}},
-			"conversation":     "conversation-conflict-" + test.name,
 			"prompt_cache_key": "cache-conflict-" + test.name,
 			"client_metadata": map[string]any{
 				"session_id": "session-conflict-" + test.name,

@@ -55,7 +55,7 @@ func TestCodexProfilesPreserveActiveWebSocketDeliveryAcrossStateOutage(t *testin
 				defer connection.CloseNow()
 				writeE2EWebSocketText(
 					t, connection,
-					`{"type":"response.create","model":"gpt-5.4","conversation":"active-state-outage","input":[]}`,
+					`{"type":"response.create","model":"gpt-5.4","generate":true,"input":[],"client_metadata":{"session_id":"active-state-outage"}}`,
 				)
 				createCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
 				responseID := "response-not-yet-observed"

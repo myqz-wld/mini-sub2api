@@ -9,6 +9,12 @@ use crate::request_state_types::WireIdOrigin;
 use crate::request_state_types::WireIdOwner;
 use crate::request_state_types::validate_wire_id;
 
+#[derive(Debug, thiserror::Error)]
+#[error("required {domain:?} wire reference is unavailable")]
+pub(crate) struct RequiredWireReferenceUnavailable {
+    pub(crate) domain: WireIdDomain,
+}
+
 impl RequestStateEditor<'_> {
     pub(crate) fn existing_wire_from_downstream(
         &mut self,
@@ -27,6 +33,29 @@ impl RequestStateEditor<'_> {
         let upstream_id = entry.upstream_id.clone();
         self.touch_wire(&downstream_lookup)?;
         Ok(Some(upstream_id))
+    }
+
+    pub(crate) fn required_wire_from_downstream(
+        &mut self,
+        domain: WireIdDomain,
+        downstream_id: &str,
+        provider_owned: bool,
+    ) -> Result<String> {
+        validate_wire_id(downstream_id)?;
+        let downstream_lookup = self.keys.wire_downstream(domain, downstream_id);
+        let Some(entry) = self.scope().wire_ids.get(&downstream_lookup) else {
+            return Err(RequiredWireReferenceUnavailable { domain }.into());
+        };
+        anyhow::ensure!(
+            entry.domain == domain && entry.downstream_id == downstream_id,
+            "wire ID downstream collision"
+        );
+        if provider_owned && entry.origin != WireIdOrigin::Upstream {
+            return Err(RequiredWireReferenceUnavailable { domain }.into());
+        }
+        let upstream_id = entry.upstream_id.clone();
+        self.touch_wire(&downstream_lookup)?;
+        Ok(upstream_id)
     }
 
     pub(crate) fn bind_wire_pair(
@@ -135,26 +164,28 @@ impl RequestStateEditor<'_> {
         Ok(downstream_id)
     }
 
-    pub(crate) fn response_owner_from_downstream(
+    pub(crate) fn required_response_owner_from_downstream(
         &mut self,
         downstream_id: &str,
-    ) -> Result<Option<WireIdOwner>> {
+    ) -> Result<WireIdOwner> {
         validate_wire_id(downstream_id)?;
-        let downstream_lookup = self
-            .keys
-            .wire_downstream(WireIdDomain::Response, downstream_id);
+        let domain = WireIdDomain::Response;
+        let downstream_lookup = self.keys.wire_downstream(domain, downstream_id);
         let Some(entry) = self.scope().wire_ids.get(&downstream_lookup) else {
-            return Ok(None);
+            return Err(RequiredWireReferenceUnavailable { domain }.into());
         };
         anyhow::ensure!(
-            entry.domain == WireIdDomain::Response && entry.downstream_id == downstream_id,
+            entry.domain == domain && entry.downstream_id == downstream_id,
             "response wire ID downstream collision"
         );
-        let owner = entry.owner.clone();
-        self.touch_wire(&downstream_lookup)?;
-        if let Some(owner) = &owner {
-            self.protect_owner(owner)?;
+        if entry.origin != WireIdOrigin::Upstream {
+            return Err(RequiredWireReferenceUnavailable { domain }.into());
         }
+        let Some(owner) = entry.owner.clone() else {
+            return Err(RequiredWireReferenceUnavailable { domain }.into());
+        };
+        self.touch_wire(&downstream_lookup)?;
+        self.protect_owner(&owner)?;
         Ok(owner)
     }
 

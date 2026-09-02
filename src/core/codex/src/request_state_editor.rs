@@ -20,6 +20,7 @@ mod compaction;
 mod existing;
 #[path = "request_state_editor_wire.rs"]
 mod wire;
+pub(crate) use wire::RequiredWireReferenceUnavailable;
 
 #[derive(Default)]
 pub(crate) struct ProtectedStateKeys {

@@ -63,6 +63,14 @@ pub(crate) enum CarrierAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RequestWireMapping {
+    Allocate,
+    RequireExisting,
+    RequireProviderExisting,
+    Contextual,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RelationshipCarrier {
     Installation,
     Session,
@@ -81,12 +89,15 @@ pub(crate) enum RelationshipCarrier {
     ClientRequest,
 }
 
-const ALLOW_EMPTY: u8 = 1 << 0;
-const SKIP_AFTER_HEADER_PROJECTION: u8 = 1 << 1;
-const HEADER_VISIBLE: u8 = 1 << 2;
-const NORMAL_REQUIRED: u8 = 1 << 3;
-const PREWARM_REQUIRED_STRING: u8 = 1 << 4;
-const PREWARM_REQUIRED_BOOL: u8 = 1 << 5;
+const ALLOW_EMPTY: u16 = 1 << 0;
+const SKIP_AFTER_HEADER_PROJECTION: u16 = 1 << 1;
+const HEADER_VISIBLE: u16 = 1 << 2;
+const NORMAL_REQUIRED: u16 = 1 << 3;
+const PREWARM_REQUIRED_STRING: u16 = 1 << 4;
+const PREWARM_REQUIRED_BOOL: u16 = 1 << 5;
+const REQUIRE_EXISTING_WIRE: u16 = 1 << 6;
+const REQUIRE_PROVIDER_EXISTING_WIRE: u16 = 1 << 7;
+const CONTEXTUAL_WIRE: u16 = 1 << 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CarrierRule {
@@ -99,7 +110,7 @@ pub(crate) struct CarrierRule {
     pub(crate) relationship: Option<RelationshipCarrier>,
     pub(crate) action: CarrierAction,
     pub(crate) priority: u8,
-    flags: u8,
+    flags: u16,
 }
 
 impl CarrierRule {
@@ -126,6 +137,18 @@ impl CarrierRule {
     pub(crate) const fn prewarm_required_bool(self) -> bool {
         self.flags & PREWARM_REQUIRED_BOOL != 0
     }
+
+    pub(crate) const fn request_wire_mapping(self) -> RequestWireMapping {
+        if self.flags & CONTEXTUAL_WIRE != 0 {
+            RequestWireMapping::Contextual
+        } else if self.flags & REQUIRE_PROVIDER_EXISTING_WIRE != 0 {
+            RequestWireMapping::RequireProviderExisting
+        } else if self.flags & REQUIRE_EXISTING_WIRE != 0 {
+            RequestWireMapping::RequireExisting
+        } else {
+            RequestWireMapping::Allocate
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -139,7 +162,7 @@ const fn rule(
     relationship: Option<RelationshipCarrier>,
     action: CarrierAction,
     priority: u8,
-    flags: u8,
+    flags: u16,
 ) -> CarrierRule {
     CarrierRule {
         direction,
@@ -176,13 +199,73 @@ const fn wire(
     )
 }
 
+const fn wire_reference(
+    container: CarrierContainer,
+    name: &'static str,
+    shape: CarrierShape,
+    domain: Option<WireIdDomain>,
+) -> CarrierRule {
+    rule(
+        CarrierDirection::Request,
+        CarrierUse::Wire,
+        container,
+        name,
+        shape,
+        domain,
+        None,
+        CarrierAction::ReversibleWireId,
+        0,
+        REQUIRE_EXISTING_WIRE,
+    )
+}
+
+const fn wire_provider_reference(
+    container: CarrierContainer,
+    name: &'static str,
+    shape: CarrierShape,
+    domain: Option<WireIdDomain>,
+) -> CarrierRule {
+    rule(
+        CarrierDirection::Request,
+        CarrierUse::Wire,
+        container,
+        name,
+        shape,
+        domain,
+        None,
+        CarrierAction::ReversibleWireId,
+        0,
+        REQUIRE_PROVIDER_EXISTING_WIRE,
+    )
+}
+
+const fn wire_contextual(
+    container: CarrierContainer,
+    name: &'static str,
+    shape: CarrierShape,
+    domain: Option<WireIdDomain>,
+) -> CarrierRule {
+    rule(
+        CarrierDirection::Request,
+        CarrierUse::Wire,
+        container,
+        name,
+        shape,
+        domain,
+        None,
+        CarrierAction::ReversibleWireId,
+        0,
+        CONTEXTUAL_WIRE,
+    )
+}
+
 const fn evidence(
     container: CarrierContainer,
     name: &'static str,
     shape: CarrierShape,
     relationship: RelationshipCarrier,
     priority: u8,
-    flags: u8,
+    flags: u16,
 ) -> CarrierRule {
     rule(
         CarrierDirection::Request,
@@ -222,7 +305,7 @@ const fn metadata(
     name: &'static str,
     relationship: Option<RelationshipCarrier>,
     action: CarrierAction,
-    flags: u8,
+    flags: u16,
 ) -> CarrierRule {
     rule(
         CarrierDirection::Request,
@@ -311,6 +394,18 @@ pub(crate) fn wire_rules(
     container: CarrierContainer,
 ) -> impl Iterator<Item = &'static CarrierRule> {
     rules_for(direction, CarrierUse::Wire, container)
+}
+
+pub(crate) fn request_wire_mapping(
+    rule: &CarrierRule,
+    item_type: Option<&str>,
+) -> RequestWireMapping {
+    match rule.request_wire_mapping() {
+        RequestWireMapping::Contextual => {
+            request_wire_rule_data::contextual_mapping(rule.name, item_type)
+        }
+        mapping => mapping,
+    }
 }
 
 pub(crate) fn evidence_rules(

@@ -66,6 +66,7 @@ pub(crate) fn resolve_and_project(
             }
             None => match evidence.responses_conversation.as_deref() {
                 Some(raw) => {
+                    editor.required_wire_from_downstream(WireIdDomain::Conversation, raw, true)?;
                     let key = editor.lookup("responses-conversation", raw);
                     editor.conversation(&key)?
                 }
@@ -418,7 +419,9 @@ fn previous_response_owner(
     else {
         return Ok(None);
     };
-    editor.response_owner_from_downstream(previous)
+    editor
+        .required_response_owner_from_downstream(previous)
+        .map(Some)
 }
 
 fn turn_anchor(object: &Map<String, Value>, evidence: &RequestIdentityEvidence) -> Vec<u8> {
