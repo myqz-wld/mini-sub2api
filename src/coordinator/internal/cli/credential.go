@@ -314,12 +314,18 @@ func credentialRevoke(
 	if err := waitForNoInFlight(ctx, store, id); err != nil {
 		return err
 	}
-	if _, err := runCoreCredential(ctx, options, []string{
-		"revoke", "--state-dir", coreStateDirectory(options), credential.AccountRef,
-	}, nil, environment.Stderr); err != nil {
-		return fmt.Errorf("upstream revoke failed; the disabled service-side credential was retained: %w", err)
-	}
-	if err := store.DeleteCredentialMetadata(ctx, id); err != nil {
+	err = store.RemoveCredentialWithMutationFence(ctx, id, func(accountRef string) error {
+		if _, mutationErr := runCoreCredential(ctx, options, []string{
+			"revoke", "--state-dir", coreStateDirectory(options), accountRef,
+		}, nil, environment.Stderr); mutationErr != nil {
+			return fmt.Errorf(
+				"upstream revoke failed; the disabled service-side credential was retained: %w",
+				mutationErr,
+			)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	return writeResult(environment.Stdout, options.json, map[string]any{
@@ -386,10 +392,10 @@ func credentialRemove(
 	if err := waitForNoInFlight(ctx, store, id); err != nil {
 		return err
 	}
-	if err := removeCoreCredential(ctx, options, credential.AccountRef, environment.Stderr); err != nil {
-		return err
-	}
-	if err := store.DeleteCredentialMetadata(ctx, id); err != nil {
+	err = store.RemoveCredentialWithMutationFence(ctx, id, func(accountRef string) error {
+		return removeCoreCredential(ctx, options, accountRef, environment.Stderr)
+	})
+	if err != nil {
 		return err
 	}
 	return writeResult(environment.Stdout, options.json, map[string]any{

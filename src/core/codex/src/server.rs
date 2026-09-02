@@ -149,7 +149,6 @@ async fn responses_inner(
     let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
         .await
         .map_err(|_| CoreFailure::InvalidRequest)?;
-    let downstream_expects_sse = request_expects_sse(&body);
     let account_lock = account_lock(state, &account_ref).await;
 
     let _guard = account_lock.lock().await;
@@ -164,6 +163,7 @@ async fn responses_inner(
     } else {
         body
     };
+    let downstream_expects_sse = request_expects_sse(&body);
     let (forward_headers, body, resolved_identity, pending_compaction) = if profile.emulates_codex()
     {
         let prepared = prepare_stateful_codex_request(

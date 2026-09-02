@@ -3,6 +3,8 @@ package integration
 import (
 	"net/http"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
@@ -87,6 +89,66 @@ func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
 				assertResponsesProfileHTTPBody(t, capture.Body, test.lite, turn == 1, test.subscription)
 			}
 		})
+	}
+}
+
+func TestCodexProfilesPreserveDownstreamZstdStreamPreference(t *testing.T) {
+	fixture := newResponsesProfileHTTPFixture(t)
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer encoder.Close()
+	profiles := []struct {
+		name    string
+		secret  string
+		headers http.Header
+	}{
+		{
+			name: "codex_api_key", secret: fixture.apiKey,
+			headers: http.Header{"Originator": []string{"codex_exec"}},
+		},
+		{name: "codex_subscription", secret: fixture.subscriptionKey},
+	}
+	for _, profile := range profiles {
+		for _, stream := range []bool{false, true} {
+			mode := "aggregated"
+			if stream {
+				mode = "streaming"
+			}
+			t.Run(profile.name+"_"+mode, func(t *testing.T) {
+				body := mustRequestJSON(t, map[string]any{
+					"model": "gpt-5.4", "input": []any{}, "stream": stream,
+					"conversation": profile.name + "-zstd-" + mode,
+				})
+				compressed := encoder.EncodeAll(body, nil)
+				headers := profile.headers.Clone()
+				if headers == nil {
+					headers = make(http.Header)
+				}
+				headers.Set("Content-Encoding", "zstd")
+				status, publicBody, publicHeaders := publicRequestWithHeaders(
+					t, fixture.public, profile.secret, string(compressed), headers,
+				)
+				if status != http.StatusOK {
+					t.Fatalf("zstd response = %d %s", status, publicBody)
+				}
+				capture := waitForRoutingCapture(t, fixture.captures)
+				if decodeRequestObject(t, capture.Body)["stream"] != true {
+					t.Fatalf("upstream stream flag = %s", capture.Body)
+				}
+				wantContentType := "application/json"
+				if stream {
+					wantContentType = "text/event-stream"
+					_ = terminalHTTPResponse(t, publicBody, true, "response.completed")
+				} else {
+					_ = decodeRequestObject(t, []byte(publicBody))
+				}
+				if got := publicHeaders.Get("Content-Type"); got != wantContentType {
+					t.Fatalf("Content-Type = %q, want %q", got, wantContentType)
+				}
+			})
+		}
 	}
 }
 

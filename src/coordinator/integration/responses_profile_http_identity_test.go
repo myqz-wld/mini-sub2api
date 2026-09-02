@@ -256,6 +256,9 @@ func TestCodexProfilesTranslateStreamingAndAggregatedTerminalFailures(t *testing
 					assertProfileHTTPResponsePrivacy(
 						t, fixture.store, profile.keyID, publicHeaders, capture.ProviderRequestID,
 					)
+					if publicHeaders.Get(protocolv1.ResponseTerminalHeader) != "" {
+						t.Fatalf("private terminal header crossed: %#v", publicHeaders)
+					}
 					response := terminalHTTPResponse(t, publicBody, stream, eventType)
 					if response["id"] == capture.ResponseID || response["id"] == "" {
 						t.Fatalf("terminal provider response ID crossed: %#v", response)
@@ -264,6 +267,13 @@ func TestCodexProfilesTranslateStreamingAndAggregatedTerminalFailures(t *testing
 					if errorObject["message"] != "opaque resp_raw conversation_raw" ||
 						errorObject["id"] != "opaque_nested_id" {
 						t.Fatalf("opaque HTTP terminal error changed: %#v", errorObject)
+					}
+					record := waitForProfileRequestRecord(
+						t, fixture.store, profile.keyID,
+						publicHeaders.Get("X-Mini-Sub2Api-Request-Id"),
+					)
+					if record.Status != storage.RequestUpstreamErr {
+						t.Fatalf("terminal history = %#v", record)
 					}
 				})
 			}

@@ -44,6 +44,30 @@ func TestFinalSSEEventWithoutBlankLineIsObservedAtEOF(t *testing.T) {
 	if got == nil || got.TotalTokens != 2 {
 		t.Fatalf("usage = %#v", got)
 	}
+	if observer.TerminalStatus() != TerminalCompleted {
+		t.Fatalf("terminal = %v", observer.TerminalStatus())
+	}
+}
+
+func TestTerminalFailuresAreObservedForSSEAndJSON(t *testing.T) {
+	for _, body := range []string{
+		`data: {"type":"response.failed","response":{"usage":{"total_tokens":2}}}` + "\n\n",
+		`data: {"type":"response.incomplete","response":{}}`,
+		`data: {"type":"error","error":{"message":"opaque"}}` + "\n\n",
+	} {
+		observer := NewObserver("text/event-stream")
+		observer.Observe([]byte(body))
+		if observer.TerminalStatus() != TerminalUpstreamError {
+			t.Fatalf("SSE terminal for %q = %v", body, observer.TerminalStatus())
+		}
+	}
+	for _, status := range []string{"failed", "incomplete"} {
+		observer := NewObserver("application/json")
+		observer.Observe([]byte(`{"status":"` + status + `"}`))
+		if observer.TerminalStatus() != TerminalUpstreamError {
+			t.Fatalf("JSON terminal %s = %v", status, observer.TerminalStatus())
+		}
+	}
 }
 
 func TestSSEUsageIsDetectedWhenUpstreamOmitsContentType(t *testing.T) {

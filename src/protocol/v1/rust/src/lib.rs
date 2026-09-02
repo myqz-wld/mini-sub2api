@@ -9,6 +9,10 @@ pub const REQUEST_ID_HEADER: &str = "X-Mini-Sub2Api-Request-Id";
 pub const CORE_TTFB_HEADER: &str = "X-Mini-Sub2Api-Core-TTFB-Ms";
 pub const PROVIDER_REQUEST_ID_HEADER: &str = "X-Mini-Sub2Api-Provider-Request-Id";
 pub const PROVIDER_REQUEST_ID_EVENT_TYPE: &str = "mini_sub2api.provider_request_id";
+pub const RESPONSE_TERMINAL_HEADER: &str = "X-Mini-Sub2Api-Response-Terminal";
+pub const RESPONSE_TERMINAL_COMPLETED: &str = "completed";
+pub const RESPONSE_TERMINAL_FAILED: &str = "failed";
+pub const RESPONSE_TERMINAL_INCOMPLETE: &str = "incomplete";
 pub const FAILURE_PHASE_TRAILER: &str = "X-Mini-Sub2Api-Failure-Phase";
 pub const DELIVERY_STATE_TRAILER: &str = "X-Mini-Sub2Api-Delivery-State";
 pub const RETRY_ADVICE_TRAILER: &str = "X-Mini-Sub2Api-Retry-Advice";
@@ -211,5 +215,13 @@ mod tests {
             serde_json::to_string(&control).expect("control JSON"),
             r#"{"type":"mini_sub2api.provider_request_id","providerRequestId":"provider-visible-ascii"}"#
         );
+    }
+
+    #[test]
+    fn response_terminal_header_contract_is_stable() {
+        assert_eq!(RESPONSE_TERMINAL_HEADER, "X-Mini-Sub2Api-Response-Terminal");
+        assert_eq!(RESPONSE_TERMINAL_COMPLETED, "completed");
+        assert_eq!(RESPONSE_TERMINAL_FAILED, "failed");
+        assert_eq!(RESPONSE_TERMINAL_INCOMPLETE, "incomplete");
     }
 }

@@ -131,7 +131,8 @@ never changes authentication or credential visibility.
   request fields, and model defaults. Unknown structured members are removed; documented
   schemas and free-form payloads stay opaque.
 - Emulated HTTP always uses `store:false`, `stream:true`, and SSE upstream. A non-streaming caller
-  receives the terminal Responses object, bounded to 64 MiB.
+  receives the terminal Responses object, bounded to 64 MiB. Supported downstream zstd is decoded
+  before the caller's original streaming preference is evaluated.
 - Both Codex profiles persist a UUIDv4 installation identity plus UUIDv7 conversation, thread, and
   turn identities, and translate schema-recognized lifecycle IDs in both directions. API-key state
   is isolated by local credential; duplicate OAuth credentials share their ChatGPT-account state.
@@ -150,6 +151,8 @@ never changes authentication or credential visibility.
 - Inference is never replayed after ordinary transport, `429`, or `5xx` failures. OAuth may refresh
   and replay once after a pre-response upstream `401`. Delivery failures expose
   `retryAdvice`, `phase`, and `deliveryState`; `ambiguous` must not be retried automatically.
+- HTTP `response.failed`, `response.incomplete`, and `error` terminals remain valid Responses
+  output but are recorded as upstream errors in request history and daily statistics.
 
 See [the v1 protocol reference](src/protocol/v1/README.md) for the complete HTTP, SSE, WebSocket,
 identity, and failure contracts.
@@ -214,7 +217,19 @@ Operational boundaries:
 - Provider HTTP clients refuse redirects. Plain HTTP test overrides are accepted only for literal
   loopback IPs.
 - Credential deletion remains available when request state is corrupt; the final owner removes the
-  shared state file.
+  shared state file. Remove/revoke rechecks disabled, key, and in-flight state under one mutation
+  fence before core material is irreversibly removed.
+
+## Validation
+
+```bash
+mise exec -- go test ./src/coordinator/...
+bash scripts/test.sh
+bash scripts/build.sh
+```
+
+The direct Go integration suite builds the current debug core when no explicit test binary is set;
+it never silently skips cross-language coverage.
 
 ## Disclaimer
 

@@ -14,6 +14,7 @@ import (
 
 	"mini-sub2api/src/coordinator/internal/adapter"
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 const maxRequestBytes = 16 * 1024 * 1024
@@ -119,15 +120,17 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	body = nil
 	if err != nil {
 		status := http.StatusBadGateway
+		code := "upstream_unavailable"
 		terminal := storage.RequestUpstreamErr
 		if errors.Is(err, adapter.ErrUnavailable) {
 			status = http.StatusServiceUnavailable
+			code = "adapter_unavailable"
 		}
 		if request.Context().Err() != nil {
 			terminal = storage.RequestDisconnected
 		}
 		h.finish(requestID, started, terminal, status, nil, nil, nil, nil)
-		writeOpenAIError(writer, status, "upstream_unavailable", "The upstream service is unavailable.", requestID)
+		writeOpenAIError(writer, status, code, "The upstream service is unavailable.", requestID)
 		return
 	}
 	defer response.Body.Close()
@@ -149,18 +152,30 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	declareFailureTrailers(writer.Header())
 	writer.WriteHeader(response.StatusCode)
 	usage, streamResult := streamBody(writer, response.Body, response.Header.Get("Content-Type"), request.Context())
+	if streamResult == streamComplete && responseTerminalFailed(response.Header) {
+		streamResult = streamResponseFailed
+	}
 	if failure, ok := failureFromTrailers(response.Trailer); ok {
 		publishFailureTrailers(writer.Header(), failure)
 		streamResult = streamUpstreamError
 	}
 	terminal := storage.RequestCompleted
-	if response.StatusCode >= 400 || streamResult == streamUpstreamError {
+	if response.StatusCode >= 400 || streamResult == streamResponseFailed || streamResult == streamUpstreamError {
 		terminal = storage.RequestUpstreamErr
 	}
 	if streamResult == streamClientDisconnected {
 		terminal = storage.RequestDisconnected
 	}
 	h.finish(requestID, started, terminal, response.StatusCode, ttfb, usage, nil, providerRequestID)
+}
+
+func responseTerminalFailed(header http.Header) bool {
+	switch header.Get(protocolv1.ResponseTerminalHeader) {
+	case protocolv1.ResponseTerminalFailed, protocolv1.ResponseTerminalIncomplete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handler) finish(
