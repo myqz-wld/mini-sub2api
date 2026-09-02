@@ -331,3 +331,7 @@ mod instructions_tests;
 #[cfg(test)]
 #[path = "request_normalizer_state_tests.rs"]
 mod state_tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_history_tests.rs"]
+mod history_tests;

@@ -143,6 +143,11 @@ reasoning summaries are enabled. Both Codex-emulated profiles remove caller `met
 `prompt_cache_retention`, `safety_identifier`, and `truncation`; the pinned Codex request type has
 no caller-facing carrier for these values. Codex routing and identity metadata use
 `client_metadata`. `BareOpenAi` remains byte-transparent and does not apply this filter.
+Responses Lite always emits `parallel_tool_calls: false`, including when the caller supplied `true`
+or `null`. Before either stateful Codex profile sends a `store: false` request, ordinary top-level
+`input` item IDs are removed after local turn/lineage resolution. `call_id`, explicit
+`item_reference.id`, other schema-defined reference carriers, and IDs inside opaque payloads are not
+removed; retained lifecycle references still require an existing reversible mapping.
 
 For HTTP, both Codex-emulated profiles override caller transport controls with `store: false` and
 `stream: true`, and send `Accept: text/event-stream`. The core records the caller's original stream

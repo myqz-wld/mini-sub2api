@@ -276,7 +276,7 @@ fn volatile_metadata_stream_options_and_synthesized_wire_ids_do_not_block_reuse(
 }
 
 #[test]
-fn explicit_input_or_output_item_id_changes_force_full_fallback() {
+fn inline_input_or_output_item_id_changes_do_not_block_incremental_reuse() {
     for (name, next_user_id, next_output_id) in [
         ("input", "user-changed", "assistant-stable"),
         ("output", "user-stable", "assistant-changed"),
@@ -297,7 +297,7 @@ fn explicit_input_or_output_item_id_changes_force_full_fallback() {
         ]);
         assert_eq!(
             state.plan_public_create(&next).mode,
-            PublicCreateMode::Full,
+            PublicCreateMode::Incremental,
             "{name}"
         );
     }

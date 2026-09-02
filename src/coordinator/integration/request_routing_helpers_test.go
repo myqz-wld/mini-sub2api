@@ -391,12 +391,12 @@ func assertNormalizedMessages(t *testing.T, got, want []any) {
 	assertMessageSemantics(t, got, want)
 	for index := range want {
 		gotMessage := got[index].(map[string]any)
-		id, _ := gotMessage["id"].(string)
+		_, hasID := gotMessage["id"]
 		metadata, _ := gotMessage["internal_chat_message_metadata_passthrough"].(map[string]any)
 		role, _ := gotMessage["role"].(string)
 		wantCreateTime := role == "user" || role == "system" || role == "developer"
 		hasCreateTime := metadata["create_time"] != nil
-		if id == "" || metadata["turn_id"] == "" || hasCreateTime != wantCreateTime {
+		if hasID || metadata["turn_id"] == "" || hasCreateTime != wantCreateTime {
 			t.Fatalf("normalized message %d identity = %#v", index, gotMessage)
 		}
 	}
