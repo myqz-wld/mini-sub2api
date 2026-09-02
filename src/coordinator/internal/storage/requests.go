@@ -15,6 +15,9 @@ func (s *Store) FinalizeRequest(
 	if !validTerminalStatus(result.Status) {
 		return fmt.Errorf("invalid terminal request status %q", result.Status)
 	}
+	if result.ProviderRequestID != nil && !validProviderRequestID(*result.ProviderRequestID) {
+		return fmt.Errorf("invalid provider request ID")
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin request completion: %w", err)
@@ -68,11 +71,11 @@ func completeRequestTx(
             completed_at = ?, terminal_status = ?, http_status = ?, ttfb_ms = ?,
             duration_ms = ?, input_tokens = ?, cached_input_tokens = ?,
             cache_write_input_tokens = ?, output_tokens = ?, reasoning_output_tokens = ?,
-            total_tokens = ?, aggregated = 1
+            total_tokens = ?, provider_request_id = ?, aggregated = 1
         WHERE request_id = ? AND terminal_status = 'in_progress'`,
 		timestamp(result.CompletedAt), result.Status, result.HTTPStatus,
 		nullableMilliseconds(result.TTFB), result.Duration.Milliseconds(), input, cached,
-		cacheWrite, output, reasoning, total, requestID,
+		cacheWrite, output, reasoning, total, result.ProviderRequestID, requestID,
 	)
 	if err != nil {
 		return fmt.Errorf("complete request history: %w", err)
@@ -143,6 +146,18 @@ func nullableUsage(usage *TokenUsage) (any, any, any, any, any, any) {
 
 func validTerminalStatus(status string) bool {
 	return status == RequestCompleted || status == RequestUpstreamErr || status == RequestDisconnected
+}
+
+func validProviderRequestID(value string) bool {
+	if len(value) == 0 || len(value) > 512 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x21 || value[index] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) RecoverInFlight(ctx context.Context) (int, error) {

@@ -1,11 +1,11 @@
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
 use crate::fingerprint_projection::project_websocket_device;
+use crate::request_compaction::PendingCompaction;
 use crate::request_identity_projection::ResolvedRequestIdentity;
+use crate::request_normalizer::CodexStateContext;
 use crate::request_normalizer::EmulationTransport;
-use crate::request_normalizer::SubscriptionStateContext;
-use crate::request_normalizer::prepare_emulated_request;
-use crate::request_normalizer::prepare_stateful_subscription_request;
+use crate::request_normalizer::prepare_stateful_codex_request;
 use crate::request_profile::UpstreamProfile;
 use crate::request_state_store::RequestStateStore;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
@@ -41,6 +41,7 @@ pub(crate) struct PreparedClientText {
     pub(crate) text: String,
     pub(crate) create_value: Option<Value>,
     pub(crate) synthesized_item_ids: Vec<String>,
+    pub(crate) pending_compaction: Option<PendingCompaction>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -48,14 +49,14 @@ pub(crate) async fn prepare_client_text(
     text: String,
     headers: &mut HeaderMap,
     account_ref: &str,
-    account_namespace: Option<&str>,
+    state_namespace: Option<&str>,
     profile: UpstreamProfile,
     pseudonym_scope: &str,
     fingerprint: &FingerprintSnapshot,
     state_store: &RequestStateStore,
     identity_binding: &mut Option<ResolvedRequestIdentity>,
 ) -> Result<PreparedClientText, ClientPrepareError> {
-    let text = if profile.uses_codex_subscription() {
+    let text = if profile.uses_identity_state() {
         seed_socket_identity(text, identity_binding.as_ref())?
     } else {
         text
@@ -68,8 +69,8 @@ pub(crate) async fn prepare_client_text(
         .filter(|message_type| !message_type.is_empty())
         .ok_or(())?;
     if message_type == "response.inject" {
-        if profile.uses_codex_subscription() {
-            let account_namespace = account_namespace.ok_or(())?;
+        if profile.uses_identity_state() {
+            let state_namespace = state_namespace.ok_or(())?;
             let filtered = responses_websocket_inject::prepare_without_identity(
                 text,
                 value,
@@ -79,7 +80,7 @@ pub(crate) async fn prepare_client_text(
             let mut filtered = serde_json::from_str::<Value>(&filtered).map_err(|_| ())?;
             let filtered = state_store
                 .edit(
-                    account_namespace,
+                    state_namespace,
                     account_ref,
                     pseudonym_scope,
                     move |editor| {
@@ -104,6 +105,7 @@ pub(crate) async fn prepare_client_text(
                 text,
                 create_value: None,
                 synthesized_item_ids: Vec::new(),
+                pending_compaction: None,
             });
         }
         let text =
@@ -112,15 +114,16 @@ pub(crate) async fn prepare_client_text(
             text,
             create_value: None,
             synthesized_item_ids: Vec::new(),
+            pending_compaction: None,
         });
     }
     if message_type != "response.create" {
-        if profile.uses_codex_subscription() {
-            let account_namespace = account_namespace.ok_or(())?;
+        if profile.uses_identity_state() {
+            let state_namespace = state_namespace.ok_or(())?;
             let original = value.clone();
             let translated = state_store
                 .edit(
-                    account_namespace,
+                    state_namespace,
                     account_ref,
                     pseudonym_scope,
                     move |editor| {
@@ -150,12 +153,14 @@ pub(crate) async fn prepare_client_text(
                 text,
                 create_value: None,
                 synthesized_item_ids: Vec::new(),
+                pending_compaction: None,
             });
         }
         return Ok(PreparedClientText {
             text,
             create_value: None,
             synthesized_item_ids: Vec::new(),
+            pending_compaction: None,
         });
     }
     if profile == UpstreamProfile::BareOpenAi {
@@ -163,19 +168,21 @@ pub(crate) async fn prepare_client_text(
             text,
             create_value: Some(value),
             synthesized_item_ids: Vec::new(),
+            pending_compaction: None,
         });
     }
-    let (prepared, synthesized_item_ids) = {
-        let prepared = if profile.uses_codex_subscription() {
-            let account_namespace = account_namespace.ok_or(())?;
-            prepare_stateful_subscription_request(
+    let (prepared, synthesized_item_ids, pending_compaction) = {
+        let prepared = if profile.uses_identity_state() {
+            let state_namespace = state_namespace.ok_or(())?;
+            prepare_stateful_codex_request(
+                profile,
                 EmulationTransport::WebSocket,
                 headers,
                 Bytes::from(text),
                 MAX_WEBSOCKET_MESSAGE_BYTES,
-                SubscriptionStateContext {
+                CodexStateContext {
                     account_ref,
-                    account_namespace,
+                    state_namespace,
                     downstream_scope: pseudonym_scope,
                     fingerprint_mode: fingerprint.mode(),
                     store: state_store,
@@ -192,16 +199,10 @@ pub(crate) async fn prepare_client_text(
                 }
             })?
         } else {
-            prepare_emulated_request(
-                profile,
-                EmulationTransport::WebSocket,
-                headers,
-                Bytes::from(text),
-                MAX_WEBSOCKET_MESSAGE_BYTES,
-                None,
-            )?
+            return Err(ClientPrepareError::Protocol);
         };
         let synthesized_item_ids = prepared.synthesized_item_ids;
+        let pending_compaction = prepared.pending_compaction;
         *headers = prepared.headers;
         if prepared.resolved_identity.is_some() {
             identity_binding.clone_from(&prepared.resolved_identity);
@@ -209,29 +210,31 @@ pub(crate) async fn prepare_client_text(
         (
             String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?,
             synthesized_item_ids,
+            pending_compaction,
         )
     };
-    let prepared =
-        if fingerprint.mode() == FingerprintMode::Device && profile.uses_codex_subscription() {
-            let installation_id = identity_binding
-                .as_ref()
-                .map(|identity| identity.installation_id.as_str())
-                .ok_or(())?;
-            project_websocket_device(
-                prepared,
-                fingerprint,
-                installation_id,
-                MAX_WEBSOCKET_MESSAGE_BYTES,
-            )
-            .map_err(|_| ())
-        } else {
-            Ok(prepared)
-        }?;
+    let prepared = if fingerprint.mode() == FingerprintMode::Device && profile.uses_identity_state()
+    {
+        let installation_id = identity_binding
+            .as_ref()
+            .map(|identity| identity.installation_id.as_str())
+            .ok_or(())?;
+        project_websocket_device(
+            prepared,
+            fingerprint,
+            installation_id,
+            MAX_WEBSOCKET_MESSAGE_BYTES,
+        )
+        .map_err(|_| ())
+    } else {
+        Ok(prepared)
+    }?;
     let value = serde_json::from_str::<Value>(&prepared).map_err(|_| ())?;
     Ok(PreparedClientText {
         text: prepared,
         create_value: Some(value),
         synthesized_item_ids,
+        pending_compaction,
     })
 }
 
@@ -313,13 +316,26 @@ pub(crate) fn plan_public_text(
     plan_public_text_with_synthesized_ids(continuation, value, &[], maximum)
 }
 
+#[cfg(test)]
 pub(crate) fn plan_public_text_with_synthesized_ids(
     continuation: &mut ResponsesWebSocketState,
     value: &Value,
     synthesized_item_ids: &[String],
     maximum: usize,
 ) -> Result<String, ()> {
-    let plan = continuation.plan_public_create_with_synthesized_ids(value, synthesized_item_ids);
+    plan_public_text_with_state(continuation, value, synthesized_item_ids, None, maximum)
+}
+
+pub(crate) fn plan_public_text_with_state(
+    continuation: &mut ResponsesWebSocketState,
+    value: &Value,
+    synthesized_item_ids: &[String],
+    pending_compaction: Option<PendingCompaction>,
+    maximum: usize,
+) -> Result<String, ()> {
+    let retry_compaction = pending_compaction.clone();
+    let plan =
+        continuation.plan_public_create_with_state(value, synthesized_item_ids, pending_compaction);
     debug_assert_ne!(plan.mode, PublicCreateMode::Passthrough);
     let encoded = encode_frame_bounded(&plan.frame, maximum);
     if encoded.is_ok() || plan.mode != PublicCreateMode::Incremental {
@@ -327,7 +343,7 @@ pub(crate) fn plan_public_text_with_synthesized_ids(
     }
     continuation.fail_public_create();
     let fallback =
-        continuation.plan_public_create_with_synthesized_ids(value, synthesized_item_ids);
+        continuation.plan_public_create_with_state(value, synthesized_item_ids, retry_compaction);
     debug_assert_eq!(fallback.mode, PublicCreateMode::Full);
     encode_frame_bounded(&fallback.frame, maximum)
 }

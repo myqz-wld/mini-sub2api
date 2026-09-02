@@ -28,7 +28,7 @@ async fn bare_inject_is_byte_exact_but_emulated_inject_is_schema_filtered() {
     assert_eq!(got.text, original);
 
     for (profile, account_namespace) in [
-        (UpstreamProfile::CodexOpenAi149, None),
+        (UpstreamProfile::CodexOpenAi149, Some(super::ACCOUNT_REF)),
         (
             UpstreamProfile::CodexSubscription149,
             Some(ACCOUNT_NAMESPACE),
@@ -51,7 +51,7 @@ async fn bare_inject_is_byte_exact_but_emulated_inject_is_schema_filtered() {
         .expect("emulated inject");
         let value: Value = serde_json::from_str(&got.text).expect("filtered inject JSON");
         assert_eq!(value["type"], "response.inject");
-        if profile.uses_codex_subscription() {
+        if profile.uses_identity_state() {
             assert_ne!(value["response_id"], "resp_1");
             assert_ne!(value["input"][0]["id"], "fco_caller");
             assert_ne!(value["input"][0]["call_id"], "call_1");

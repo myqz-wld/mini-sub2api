@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 var migrations = []string{`
 CREATE TABLE schema_meta (
@@ -90,6 +90,11 @@ ALTER TABLE requests ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'
     CHECK (transport IN ('http', 'websocket'));
 ALTER TABLE requests ADD COLUMN operation_kind TEXT NOT NULL DEFAULT 'inference'
     CHECK (operation_kind IN ('inference', 'websocket_prewarm'));
+`, `
+ALTER TABLE requests ADD COLUMN provider_request_id TEXT
+    CHECK (provider_request_id IS NULL OR
+        (length(provider_request_id) BETWEEN 1 AND 512 AND
+         provider_request_id NOT GLOB '*[^!-~]*'));
 `}
 
 func (s *Store) migrate(ctx context.Context) error {

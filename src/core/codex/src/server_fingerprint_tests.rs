@@ -54,6 +54,14 @@ async fn api_key_routes_preserve_identity_and_body_bytes_in_every_fingerprint_mo
         call_core_with_headers(&state, &account_ref, original.clone(), headers)
             .await
             .expect("core response");
+        assert!(
+            !state
+                .vault
+                .request_state()
+                .state_path_for_test(&account_ref)
+                .exists(),
+            "BareOpenAi created request state in {mode:?} mode"
+        );
         assert_eq!(capture.bodies.lock().await[0], original);
         let captured = capture.headers.lock().await;
         assert_eq!(
@@ -87,6 +95,13 @@ async fn api_key_device_mode_does_not_parse_or_recompress_caller_payloads() {
     call_core_with_headers(&state, &account_ref, opaque.clone(), headers)
         .await
         .expect("core response");
+    assert!(
+        !state
+            .vault
+            .request_state()
+            .state_path_for_test(&account_ref)
+            .exists()
+    );
     assert_eq!(capture.bodies.lock().await[0], opaque);
     assert_eq!(
         capture.headers.lock().await[0]

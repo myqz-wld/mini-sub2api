@@ -153,7 +153,7 @@ async fn device_converges_across_scopes_while_off_stays_scoped() {
 }
 
 #[tokio::test]
-async fn late_compaction_retry_refreshes_and_protects_its_marker() {
+async fn late_pending_compaction_retry_refreshes_without_advancing_its_window() {
     let (_temp, store) = store();
     let conversation_key = keys(SCOPE).identity("conversation", "compaction-session");
     let marker_key = keys(SCOPE).identity("compaction", "compaction-operation");
@@ -163,7 +163,7 @@ async fn late_compaction_retry_refreshes_and_protects_its_marker() {
             let marker_key = marker_key.clone();
             move |editor| {
                 let conversation = editor.conversation(&conversation_key)?;
-                editor.apply_compaction(&marker_key, &conversation.id)
+                editor.begin_compaction(&marker_key, &conversation.id)
             }
         })
         .await
@@ -177,7 +177,7 @@ async fn late_compaction_retry_refreshes_and_protects_its_marker() {
             let marker_key = marker_key.clone();
             move |editor| {
                 let conversation = editor.conversation(&conversation_key)?;
-                editor.apply_compaction(&marker_key, &conversation.id)
+                editor.begin_compaction(&marker_key, &conversation.id)
             }
         })
         .await
@@ -198,7 +198,7 @@ async fn late_compaction_retry_refreshes_and_protects_its_marker() {
     let immediate_retry = store
         .edit_at(NAMESPACE, OWNER, SCOPE, late_day, move |editor| {
             let conversation = editor.conversation(&conversation_key)?;
-            editor.apply_compaction(&marker_key, &conversation.id)
+            editor.begin_compaction(&marker_key, &conversation.id)
         })
         .await
         .expect("immediate compaction retry");
@@ -208,9 +208,83 @@ async fn late_compaction_retry_refreshes_and_protects_its_marker() {
     assert_eq!(scope.conversations.len(), 1);
     assert_eq!(
         scope.conversations.values().next().unwrap().window_number,
-        1
+        0
     );
     assert_eq!(scope.compaction_markers.len(), 1);
+}
+
+#[tokio::test]
+async fn same_base_compactions_commit_once_and_later_compaction_advances_sequentially() {
+    let (temp, store) = store();
+    let conversation_key = keys(SCOPE).identity("conversation", "two-phase-session");
+    let first_marker = keys(SCOPE).identity("compaction", "first-operation");
+    let overlapping_marker = keys(SCOPE).identity("compaction", "overlapping-operation");
+    let (thread_id, first_target, overlapping_target) = store
+        .edit_at(NAMESPACE, OWNER, SCOPE, DAY_MS, {
+            let conversation_key = conversation_key.clone();
+            let first_marker = first_marker.clone();
+            let overlapping_marker = overlapping_marker.clone();
+            move |editor| {
+                let conversation = editor.conversation(&conversation_key)?;
+                let first = editor.begin_compaction(&first_marker, &conversation.id)?;
+                let overlapping = editor.begin_compaction(&overlapping_marker, &conversation.id)?;
+                Ok((conversation.id, first, overlapping))
+            }
+        })
+        .await
+        .expect("begin same-base compactions");
+    assert_eq!(first_target, 1);
+    assert_eq!(overlapping_target, 1);
+    assert_eq!(
+        persisted(&store)
+            .scopes
+            .values()
+            .next()
+            .unwrap()
+            .conversations[&conversation_key]
+            .window_number,
+        0
+    );
+
+    let reopened = RequestStateStore::new(temp.path().join("accounts"));
+    let committed = reopened
+        .edit_at(NAMESPACE, OWNER, SCOPE, 2 * DAY_MS, {
+            let first_marker = first_marker.clone();
+            let thread_id = thread_id.clone();
+            move |editor| editor.commit_compaction(&first_marker, &thread_id, first_target)
+        })
+        .await
+        .expect("commit first marker after reopen");
+    assert_eq!(committed, 1);
+    let converged = reopened
+        .edit_at(NAMESPACE, OWNER, SCOPE, 2 * DAY_MS, {
+            let overlapping_marker = overlapping_marker.clone();
+            let thread_id = thread_id.clone();
+            move |editor| {
+                editor.commit_compaction(&overlapping_marker, &thread_id, overlapping_target)
+            }
+        })
+        .await
+        .expect("commit overlapping marker");
+    assert_eq!(converged, 1);
+
+    let later_marker = keys(SCOPE).identity("compaction", "later-operation");
+    let later_target = reopened
+        .edit_at(NAMESPACE, OWNER, SCOPE, 2 * DAY_MS, {
+            let later_marker = later_marker.clone();
+            let thread_id = thread_id.clone();
+            move |editor| editor.begin_compaction(&later_marker, &thread_id)
+        })
+        .await
+        .expect("begin later compaction");
+    assert_eq!(later_target, 2);
+    let later_committed = reopened
+        .edit_at(NAMESPACE, OWNER, SCOPE, 2 * DAY_MS, move |editor| {
+            editor.commit_compaction(&later_marker, &thread_id, later_target)
+        })
+        .await
+        .expect("commit later compaction");
+    assert_eq!(later_committed, 2);
 }
 
 #[tokio::test]
@@ -535,6 +609,150 @@ async fn duplicate_credentials_share_state_until_the_last_owner_is_removed() {
         .await
         .expect("remove last owner");
     assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn duplicate_api_keys_use_isolated_account_ref_namespaces_and_remove_independently() {
+    let temp = TempDir::new().expect("temp dir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let first = vault
+        .create_api_key(
+            "same-secret".to_string(),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("first API key credential");
+    let second = vault
+        .create_api_key(
+            "same-secret".to_string(),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("second API key credential");
+    let logical_key = LookupKeyFactory::new(&first.account_ref, SCOPE)
+        .identity("conversation", "same-downstream-session");
+    let first_id = vault
+        .request_state()
+        .edit_at(&first.account_ref, &first.account_ref, SCOPE, DAY_MS, {
+            let logical_key = logical_key.clone();
+            move |editor| editor.conversation(&logical_key).map(|entry| entry.id)
+        })
+        .await
+        .expect("first API key state");
+    let second_id = vault
+        .request_state()
+        .edit_at(
+            &second.account_ref,
+            &second.account_ref,
+            SCOPE,
+            DAY_MS,
+            move |editor| editor.conversation(&logical_key).map(|entry| entry.id),
+        )
+        .await
+        .expect("second API key state");
+    assert_ne!(first_id, second_id);
+
+    let first_path = vault
+        .request_state()
+        .state_path_for_test(&first.account_ref);
+    let second_path = vault
+        .request_state()
+        .state_path_for_test(&second.account_ref);
+    assert_ne!(first_path, second_path);
+    assert!(first_path.is_file());
+    assert!(second_path.is_file());
+
+    Vault::open(temp.path().to_path_buf()).expect("active API key state survives startup cleanup");
+    assert!(first_path.is_file());
+    assert!(second_path.is_file());
+
+    vault
+        .remove(&first.account_ref, RemovalKind::ServiceOnly)
+        .await
+        .expect("remove first API key state owner");
+    assert!(!first_path.exists());
+    assert!(second_path.is_file());
+    vault
+        .remove(&second.account_ref, RemovalKind::ServiceOnly)
+        .await
+        .expect("remove second API key state owner");
+    assert!(!second_path.exists());
+}
+
+#[tokio::test]
+async fn corrupt_api_key_state_does_not_block_final_credential_removal() {
+    let temp = TempDir::new().expect("temp dir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let credential = vault
+        .create_api_key(
+            "api-key-secret".to_string(),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("API key credential");
+    vault
+        .request_state()
+        .edit_at(
+            &credential.account_ref,
+            &credential.account_ref,
+            SCOPE,
+            DAY_MS,
+            |editor| editor.installation_id(FingerprintMode::Device, None),
+        )
+        .await
+        .expect("API key state");
+    let state_path = vault
+        .request_state()
+        .state_path_for_test(&credential.account_ref);
+    fs::write(&state_path, b"{corrupt-api-key-state").expect("corrupt API key state");
+
+    vault
+        .remove(&credential.account_ref, RemovalKind::ServiceOnly)
+        .await
+        .expect("remove credential despite corrupt state");
+    assert!(!state_path.exists());
+    assert!(vault.lock_record(&credential.account_ref).await.is_err());
+}
+
+#[tokio::test]
+async fn startup_removes_api_key_state_after_its_credential_record_is_orphaned() {
+    let temp = TempDir::new().expect("temp dir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let credential = vault
+        .create_api_key(
+            "orphan-secret".to_string(),
+            "http://127.0.0.1:1/responses".to_string(),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("API key credential");
+    vault
+        .request_state()
+        .edit_at(
+            &credential.account_ref,
+            &credential.account_ref,
+            SCOPE,
+            DAY_MS,
+            |editor| editor.installation_id(FingerprintMode::Device, None),
+        )
+        .await
+        .expect("API key state");
+    let state_path = vault
+        .request_state()
+        .state_path_for_test(&credential.account_ref);
+    assert!(state_path.is_file());
+    fs::remove_file(
+        temp.path()
+            .join("accounts")
+            .join(format!("{}.json", credential.account_ref)),
+    )
+    .expect("simulate orphaned credential record");
+
+    Vault::open(temp.path().to_path_buf()).expect("startup cleanup");
+    assert!(!state_path.exists());
 }
 
 #[tokio::test]

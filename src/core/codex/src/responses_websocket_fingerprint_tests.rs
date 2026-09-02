@@ -43,7 +43,7 @@ impl Drop for RunningInternalServer {
 }
 
 #[tokio::test]
-async fn api_key_device_preserves_handshake_and_all_application_frames() {
+async fn bare_api_key_device_preserves_handshake_and_all_application_frames() {
     let capture = FingerprintCapture::default();
     let upstream = spawn_loopback(
         Router::new()
@@ -116,7 +116,7 @@ async fn api_key_device_preserves_handshake_and_all_application_frames() {
 }
 
 #[tokio::test]
-async fn off_preserves_handshake_and_create_frame_identity() {
+async fn bare_api_key_off_preserves_handshake_and_create_frame_identity() {
     let capture = FingerprintCapture::default();
     let upstream = spawn_loopback(
         Router::new()
@@ -214,7 +214,7 @@ async fn stale_socket_forwards_zero_post_change_frames_and_reconnects() {
 }
 
 #[tokio::test]
-async fn api_key_device_preserves_malformed_identity_metadata_for_upstream() {
+async fn bare_api_key_device_preserves_malformed_identity_metadata_for_upstream() {
     let capture = FingerprintCapture::default();
     let upstream = spawn_loopback(
         Router::new()

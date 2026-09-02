@@ -132,13 +132,19 @@ never changes authentication or credential visibility.
   schemas and free-form payloads stay opaque.
 - Emulated HTTP always uses `store:false`, `stream:true`, and SSE upstream. A non-streaming caller
   receives the terminal Responses object, bounded to 64 MiB.
-- Subscription installation IDs are stable UUIDv4 values. Conversation, thread, and turn IDs are
-  persisted UUIDv7 values. Schema-recognized lifecycle IDs are translated in both directions before
-  crossing the subscription boundary.
-- One private, versioned request-state file is shared by duplicate credentials for the same ChatGPT
-  account. It is limited to 16 MiB; completed detail becomes pruneable after 30 days.
+- Both Codex profiles persist a UUIDv4 installation identity plus UUIDv7 conversation, thread, and
+  turn identities, and translate schema-recognized lifecycle IDs in both directions. API-key state
+  is isolated by local credential; duplicate OAuth credentials share their ChatGPT-account state.
+- Request state remains schema v1 with no historical compatibility branch. Each private file is
+  limited to 16 MiB; completed detail becomes pruneable after 30 days. Compaction advances its
+  window only after the matching `response.completed` is persisted.
 - Sandbox permission meaning is preserved, while `seatbelt`, `seccomp`, or
   `windows_sandbox` is derived from the gateway OS. Caller `workspaces` values remain unchanged.
+- Provider response headers are default-denied. Public provider request-ID headers contain only the
+  gateway `req_*` alias; one bounded raw provider ID may appear only in local request history and is
+  pruned with that detail. SQLite migrates schema 2 to 3 for this nullable field.
+- Stateful Codex non-2xx bodies are replaced with bounded gateway errors; `BareOpenAi` keeps its
+  reviewed response body bytes. Unknown body fields, content, tool arguments, and output stay opaque.
 - WebSocket turns are sequential. Each key may hold eight sockets; first-frame, idle, write, and
   message limits are 30 seconds, 5 minutes, 120 seconds, and 16 MiB respectively.
 - Inference is never replayed after ordinary transport, `429`, or `5xx` failures. OAuth may refresh
@@ -203,6 +209,8 @@ Operational boundaries:
 - Vault and identity files use private permissions but are not encrypted at rest.
 - Request/response bodies, content, tool arguments, workspaces, and credentials are not persisted in
   identity state. Only bounded schema-recognized ID pairs are retained for reversible translation.
+- Local request history may retain one visible-ASCII provider request ID for seven days by default;
+  it is never exposed through the public Responses API.
 - Provider HTTP clients refuse redirects. Plain HTTP test overrides are accepted only for literal
   loopback IPs.
 - Credential deletion remains available when request state is corrupt; the final owner removes the

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"mini-sub2api/src/coordinator/internal/storage"
 )
@@ -109,6 +110,55 @@ func TestJSONUsageCommandsAndHelpAreStable(t *testing.T) {
 		if !strings.Contains(help, command) {
 			t.Fatalf("root help missing %s: %q", command, help)
 		}
+	}
+}
+
+func TestUsageHistoryShowsProviderRequestIDOnlyInLocalCLIOutput(t *testing.T) {
+	stateDir := t.TempDir()
+	store, err := storage.Open(context.Background(), stateDir, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := store.CreateCredential(
+		context.Background(), "History", "codex", "openai_api_key", "acct_history_cli", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := store.CreateAPIKey(context.Background(), credential.ID, "History")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AuthenticateAndStart(context.Background(), key.Secret, "req_history_cli"); err != nil {
+		t.Fatal(err)
+	}
+	providerRequestID := "provider-cli-visible"
+	if err := store.FinalizeRequest(context.Background(), "req_history_cli", storage.RequestResult{
+		CompletedAt: time.Now().UTC(), Status: storage.RequestCompleted,
+		Duration: time.Second, ProviderRequestID: &providerRequestID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	plain := runCLI(t, nil,
+		"--state-dir", stateDir, "usage", "history", "--key", key.ID,
+	)
+	if !strings.Contains(plain, "provider_request_id="+providerRequestID) {
+		t.Fatalf("plain history = %q", plain)
+	}
+	jsonOutput := runCLI(t, nil,
+		"--state-dir", stateDir, "--json", "usage", "history", "--key", key.ID,
+	)
+	var records []storage.RequestRecord
+	if err := json.Unmarshal([]byte(jsonOutput), &records); err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].ProviderRequestID == nil ||
+		*records[0].ProviderRequestID != providerRequestID {
+		t.Fatalf("JSON history = %#v", records)
 	}
 }
 

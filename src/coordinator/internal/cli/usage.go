@@ -81,10 +81,14 @@ func usageHistory(
 		if record.DurationMilliseconds != nil {
 			duration = fmt.Sprintf("%dms", *record.DurationMilliseconds)
 		}
+		providerRequestID := "unknown"
+		if record.ProviderRequestID != nil {
+			providerRequestID = *record.ProviderRequestID
+		}
 		if _, err := fmt.Fprintf(
-			environment.Stdout, "%s\t%s\t%s\t%s\ttokens=%s\tduration=%s\n",
+			environment.Stdout, "%s\t%s\t%s\t%s\ttokens=%s\tduration=%s\tprovider_request_id=%s\n",
 			record.RequestID, record.APIKeyID, record.StartedAt.Format(time.RFC3339),
-			record.Status, tokens, duration,
+			record.Status, tokens, duration, providerRequestID,
 		); err != nil {
 			return err
 		}

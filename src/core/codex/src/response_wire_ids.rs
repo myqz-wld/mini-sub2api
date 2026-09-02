@@ -2,6 +2,11 @@ use anyhow::Result;
 use serde_json::Map;
 use serde_json::Value;
 
+use crate::lifecycle_carriers::CarrierContainer;
+use crate::lifecycle_carriers::CarrierDirection;
+use crate::lifecycle_carriers::CarrierRule;
+use crate::lifecycle_carriers::CarrierShape;
+use crate::lifecycle_carriers::wire_rules;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
 use crate::request_state_types::WireIdOwner;
@@ -18,126 +23,109 @@ pub(crate) fn translate_response_ids(
         .get("type")
         .and_then(Value::as_str)
         .map(str::to_string);
-    for (name, domain) in [
-        ("previous_response_id", WireIdDomain::Response),
-        ("item_id", WireIdDomain::Item),
-        ("output_item_id", WireIdDomain::Item),
-        ("call_id", WireIdDomain::Call),
-        ("approval_request_id", WireIdDomain::Approval),
-        ("approval_id", WireIdDomain::Approval),
-        ("stream_id", WireIdDomain::Stream),
-        ("installation_id", WireIdDomain::Installation),
-        ("session_id", WireIdDomain::Session),
-        ("thread_id", WireIdDomain::Thread),
-        ("parent_thread_id", WireIdDomain::Thread),
-        ("forked_from_thread_id", WireIdDomain::Thread),
-        ("turn_id", WireIdDomain::Turn),
-        ("root_turn_id", WireIdDomain::Turn),
-        ("parent_turn_id", WireIdDomain::Turn),
-    ] {
-        translate_field(editor, object, name, domain)?;
-    }
-    translate_response_field(editor, object, "response_id", owner)?;
-    translate_conversation(editor, object)?;
-
-    if let Some(response) = object.get_mut("response").and_then(Value::as_object_mut) {
-        translate_response_object(editor, response, owner)?;
-    }
-    if let Some(item) = object.get_mut("item").and_then(Value::as_object_mut) {
-        translate_item(editor, item, owner)?;
-    }
-    if let Some(items) = object.get_mut("output").and_then(Value::as_array_mut) {
-        translate_items(editor, items, owner)?;
-    }
-    if let Some(metadata) = object
-        .get_mut("client_metadata")
-        .and_then(Value::as_object_mut)
-    {
-        translate_identity_metadata(editor, metadata)?;
-    }
-
     let is_terminal_response = event_type.is_none()
         && (object.get("object").and_then(Value::as_str) == Some("response")
             || object.contains_key("output")
             || object.contains_key("usage"));
-    if is_terminal_response {
-        translate_response_field(editor, object, "id", owner)?;
-    }
-    Ok(())
-}
-
-fn translate_response_object(
-    editor: &mut RequestStateEditor<'_>,
-    response: &mut Map<String, Value>,
-    owner: Option<&WireIdOwner>,
-) -> Result<()> {
-    translate_response_field(editor, response, "id", owner)?;
-    translate_field(
+    translate_response_container(
         editor,
-        response,
-        "previous_response_id",
-        WireIdDomain::Response,
+        object,
+        CarrierContainer::TopLevel,
+        owner,
+        is_terminal_response,
     )?;
-    translate_field(editor, response, "stream_id", WireIdDomain::Stream)?;
-    translate_conversation(editor, response)?;
-    if let Some(items) = response.get_mut("output").and_then(Value::as_array_mut) {
-        translate_items(editor, items, owner)?;
-    }
-    if let Some(metadata) = response
-        .get_mut("client_metadata")
-        .and_then(Value::as_object_mut)
-    {
-        translate_identity_metadata(editor, metadata)?;
-    }
     Ok(())
 }
 
-fn translate_items(
+fn translate_response_container(
     editor: &mut RequestStateEditor<'_>,
-    items: &mut [Value],
+    object: &mut Map<String, Value>,
+    container: CarrierContainer,
     owner: Option<&WireIdOwner>,
+    terminal_response: bool,
 ) -> Result<()> {
-    for item in items {
-        if let Some(item) = item.as_object_mut() {
-            translate_item(editor, item, owner)?;
-        }
-    }
-    Ok(())
-}
-
-fn translate_item(
-    editor: &mut RequestStateEditor<'_>,
-    item: &mut Map<String, Value>,
-    owner: Option<&WireIdOwner>,
-) -> Result<()> {
-    for (name, domain) in [
-        ("id", WireIdDomain::Item),
-        ("item_id", WireIdDomain::Item),
-        ("output_item_id", WireIdDomain::Item),
-        ("call_id", WireIdDomain::Call),
-        ("approval_request_id", WireIdDomain::Approval),
-        ("approval_id", WireIdDomain::Approval),
-    ] {
-        translate_field(editor, item, name, domain)?;
-    }
-    translate_response_field(editor, item, "response_id", owner)?;
-    if let Some(caller) = item.get_mut("caller").and_then(Value::as_object_mut) {
-        translate_field(editor, caller, "caller_id", WireIdDomain::Item)?;
-    }
-    for name in ["pending_safety_checks", "acknowledged_safety_checks"] {
-        if let Some(checks) = item.get_mut(name).and_then(Value::as_array_mut) {
-            for check in checks {
-                if let Some(check) = check.as_object_mut() {
-                    translate_field(editor, check, "id", WireIdDomain::Approval)?;
+    for rule in wire_rules(CarrierDirection::Response, container) {
+        match rule.shape {
+            CarrierShape::Scalar | CarrierShape::TypedItemId => {
+                translate_field(editor, object, rule)?;
+            }
+            CarrierShape::OwnedResponseId => {
+                translate_response_field(editor, object, rule.name, owner)?;
+            }
+            CarrierShape::TerminalResponseId if terminal_response => {
+                translate_response_field(editor, object, rule.name, owner)?;
+            }
+            CarrierShape::TerminalResponseId => {}
+            CarrierShape::Conversation => translate_conversation(editor, object, rule)?,
+            CarrierShape::ResponseObject => {
+                if let Some(response) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_response_container(
+                        editor,
+                        response,
+                        CarrierContainer::ResponseObject,
+                        owner,
+                        false,
+                    )?;
                 }
             }
+            CarrierShape::ItemObject => {
+                if let Some(item) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_response_container(
+                        editor,
+                        item,
+                        CarrierContainer::Item,
+                        owner,
+                        false,
+                    )?;
+                }
+            }
+            CarrierShape::ItemArray => {
+                if let Some(items) = object.get_mut(rule.name).and_then(Value::as_array_mut) {
+                    for item in items.iter_mut().filter_map(Value::as_object_mut) {
+                        translate_response_container(
+                            editor,
+                            item,
+                            CarrierContainer::Item,
+                            owner,
+                            false,
+                        )?;
+                    }
+                }
+            }
+            CarrierShape::IdentityMetadataObject => {
+                if let Some(metadata) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_identity_metadata(editor, metadata)?;
+                }
+            }
+            CarrierShape::CallerObject => {
+                if let Some(caller) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_response_container(
+                        editor,
+                        caller,
+                        CarrierContainer::Caller,
+                        owner,
+                        false,
+                    )?;
+                }
+            }
+            CarrierShape::SafetyCheckArray => {
+                if let Some(checks) = object.get_mut(rule.name).and_then(Value::as_array_mut) {
+                    for check in checks.iter_mut().filter_map(Value::as_object_mut) {
+                        translate_response_container(
+                            editor,
+                            check,
+                            CarrierContainer::SafetyCheck,
+                            owner,
+                            false,
+                        )?;
+                    }
+                }
+            }
+            unsupported => anyhow::bail!(
+                "unsupported response carrier shape {unsupported:?} for {}",
+                rule.name
+            ),
         }
-    }
-    if let Some(metadata) = item
-        .get_mut("internal_chat_message_metadata_passthrough")
-        .and_then(Value::as_object_mut)
-    {
-        translate_identity_metadata(editor, metadata)?;
     }
     Ok(())
 }
@@ -165,38 +153,21 @@ fn translate_identity_metadata(
     editor: &mut RequestStateEditor<'_>,
     metadata: &mut Map<String, Value>,
 ) -> Result<()> {
-    for (name, domain) in [
-        ("x-codex-installation-id", WireIdDomain::Installation),
-        ("installation_id", WireIdDomain::Installation),
-        ("session_id", WireIdDomain::Session),
-        ("conversation_id", WireIdDomain::Session),
-        ("thread_id", WireIdDomain::Thread),
-        ("parent_thread_id", WireIdDomain::Thread),
-        ("forked_from_thread_id", WireIdDomain::Thread),
-        ("x-codex-parent-thread-id", WireIdDomain::Thread),
-        ("turn_id", WireIdDomain::Turn),
-        ("root_turn_id", WireIdDomain::Turn),
-        ("parent_turn_id", WireIdDomain::Turn),
-    ] {
-        translate_field(editor, metadata, name, domain)?;
-    }
-    for name in ["window_id", "x-codex-window-id"] {
-        translate_window(editor, metadata, name)?;
-    }
-    if let Some(raw) = metadata
-        .get("x-codex-turn-metadata")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-    {
-        let mut nested = serde_json::from_str::<Value>(&raw)?;
-        let nested = nested
-            .as_object_mut()
-            .ok_or_else(|| anyhow::anyhow!("turn metadata is not an object"))?;
-        translate_identity_metadata(editor, nested)?;
-        metadata.insert(
-            "x-codex-turn-metadata".to_string(),
-            Value::String(serde_json::to_string(nested)?),
-        );
+    for rule in wire_rules(
+        CarrierDirection::Response,
+        CarrierContainer::IdentityMetadata,
+    ) {
+        match rule.shape {
+            CarrierShape::Scalar => translate_field(editor, metadata, rule)?,
+            CarrierShape::Window => translate_window(editor, metadata, rule)?,
+            CarrierShape::SerializedTurnMetadata => {
+                translate_serialized_turn_metadata(editor, metadata, rule)?;
+            }
+            unsupported => anyhow::bail!(
+                "unsupported identity metadata shape {unsupported:?} for {}",
+                rule.name
+            ),
+        }
     }
     Ok(())
 }
@@ -204,9 +175,13 @@ fn translate_identity_metadata(
 fn translate_window(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,
-    name: &str,
+    rule: &CarrierRule,
 ) -> Result<()> {
-    let Some(raw) = object.get(name).and_then(Value::as_str).map(str::to_string) else {
+    let Some(raw) = object
+        .get(rule.name)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
         return Ok(());
     };
     let Some((thread, suffix)) = raw.rsplit_once(':') else {
@@ -217,8 +192,32 @@ fn translate_window(
     }
     let thread = editor.wire_from_upstream(WireIdDomain::Thread, thread)?;
     object.insert(
-        name.to_string(),
+        rule.name.to_string(),
         Value::String(format!("{thread}:{suffix}")),
+    );
+    Ok(())
+}
+
+fn translate_serialized_turn_metadata(
+    editor: &mut RequestStateEditor<'_>,
+    metadata: &mut Map<String, Value>,
+    rule: &CarrierRule,
+) -> Result<()> {
+    let Some(raw) = metadata
+        .get(rule.name)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
+    let mut nested = serde_json::from_str::<Value>(&raw)?;
+    let nested = nested
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("turn metadata is not an object"))?;
+    translate_identity_metadata(editor, nested)?;
+    metadata.insert(
+        rule.name.to_string(),
+        Value::String(serde_json::to_string(nested)?),
     );
     Ok(())
 }
@@ -226,16 +225,18 @@ fn translate_window(
 fn translate_conversation(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,
+    rule: &CarrierRule,
 ) -> Result<()> {
-    let Some(conversation) = object.get_mut("conversation") else {
+    let domain = required_domain(rule)?;
+    let Some(conversation) = object.get_mut(rule.name) else {
         return Ok(());
     };
     match conversation {
         Value::String(value) if !value.is_empty() => {
-            *value = editor.wire_from_upstream(WireIdDomain::Conversation, value)?;
+            *value = editor.wire_from_upstream(domain, value)?;
         }
         Value::Object(conversation) => {
-            translate_field(editor, conversation, "id", WireIdDomain::Conversation)?;
+            translate_named_field(editor, conversation, "id", domain)?;
         }
         _ => {}
     }
@@ -243,6 +244,14 @@ fn translate_conversation(
 }
 
 fn translate_field(
+    editor: &mut RequestStateEditor<'_>,
+    object: &mut Map<String, Value>,
+    rule: &CarrierRule,
+) -> Result<()> {
+    translate_named_field(editor, object, rule.name, required_domain(rule)?)
+}
+
+fn translate_named_field(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,
     name: &str,
@@ -259,6 +268,11 @@ fn translate_field(
         Value::String(editor.wire_from_upstream(domain, &raw)?),
     );
     Ok(())
+}
+
+fn required_domain(rule: &CarrierRule) -> Result<WireIdDomain> {
+    rule.domain
+        .ok_or_else(|| anyhow::anyhow!("carrier {} has no wire domain", rule.name))
 }
 
 #[cfg(test)]

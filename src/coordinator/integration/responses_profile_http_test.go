@@ -1,25 +1,9 @@
 package integration
 
 import (
-	"context"
 	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
-	"time"
-
-	"mini-sub2api/src/coordinator/internal/adapter"
-	"mini-sub2api/src/coordinator/internal/httpapi"
-	"mini-sub2api/src/coordinator/internal/storage"
 )
-
-type responsesProfileHTTPFixture struct {
-	apiKey          string
-	subscriptionKey string
-	public          *httptest.Server
-	captures        <-chan routingMatrixCapture
-}
 
 func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
 	fixture := newResponsesProfileHTTPFixture(t)
@@ -57,82 +41,52 @@ func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			for turn, body := range [][]byte{test.first, test.second} {
-				status, _, _ := publicRequestWithHeaders(t, fixture.public, test.secret, string(body), test.headers)
+			var firstPublicResponseID, firstProviderResponseID string
+			for turn, originalBody := range [][]byte{test.first, test.second} {
+				body := append([]byte(nil), originalBody...)
+				if turn == 1 {
+					request := decodeRequestObject(t, body)
+					request["previous_response_id"] = firstPublicResponseID
+					body = mustRequestJSON(t, request)
+				}
+				status, responseBody, responseHeaders := publicRequestWithHeaders(
+					t, fixture.public, test.secret, string(body), test.headers,
+				)
 				if status != http.StatusOK {
 					t.Fatalf("turn %d public response = %d", turn+1, status)
 				}
 				capture := waitForRoutingCapture(t, fixture.captures)
+				keyID := fixture.apiKeyID
+				if test.subscription {
+					keyID = fixture.subscriptionKeyID
+				}
+				assertProfileHTTPResponsePrivacy(
+					t, fixture.store, keyID, responseHeaders, capture.ProviderRequestID,
+				)
+				publicResponseID := responseIDFromPublicJSON(t, responseBody)
+				if test.emulates && publicResponseID == capture.ResponseID {
+					t.Fatal("stateful Codex response ID was not translated")
+				}
+				if !test.emulates && publicResponseID != capture.ResponseID {
+					t.Fatal("BareOpenAi response body was not byte-transparent")
+				}
+				if turn == 0 {
+					firstPublicResponseID = publicResponseID
+					firstProviderResponseID = capture.ResponseID
+				} else if decodeRequestObject(t, capture.Body)["previous_response_id"] != firstProviderResponseID {
+					t.Fatal("previous response alias was not restored before the second upstream turn")
+				}
 				assertHTTPProfileCredentialBoundary(t, capture, test.subscription)
 				if !test.emulates {
 					assertAPIKeyCapture(t, capture, body)
+					if turn == 1 {
+						assertProfileStateFileCount(t, fixture.coreStateDir, 0)
+					}
 					continue
 				}
 				assertResponsesProfileHTTPBody(t, capture.Body, test.lite, turn == 1, test.subscription)
 			}
 		})
-	}
-}
-
-func newResponsesProfileHTTPFixture(t *testing.T) responsesProfileHTTPFixture {
-	t.Helper()
-	t.Setenv("NO_PROXY", "127.0.0.1,::1")
-	t.Setenv("no_proxy", "127.0.0.1,::1")
-	coreBinary := findCoreBinary(t)
-	captures := make(chan routingMatrixCapture, 8)
-	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		body, err := readCapturedUpstreamBody(request)
-		if err != nil {
-			http.Error(writer, "capture body", http.StatusInternalServerError)
-			return
-		}
-		captures <- routingMatrixCapture{Headers: request.Header.Clone(), Body: body}
-		writeLoopbackResponsesResult(writer, body, "resp_profile")
-	}))
-	t.Cleanup(upstream.Close)
-	assertLoopbackURL(t, upstream.URL)
-
-	stateDir := t.TempDir()
-	coreStateDir := filepath.Join(stateDir, "core-codex")
-	apiMetadata := createCoreCredential(t, coreBinary, []string{
-		"credential", "add-api-key", "--state-dir", coreStateDir,
-		"--upstream-url", upstream.URL + "/responses", "--secret-stdin",
-	}, upstreamAPIKey+"\n")
-	accountID := "profile-loopback-account"
-	authFile := filepath.Join(stateDir, "codex-auth.json")
-	authJSON := mustRequestJSON(t, map[string]any{
-		"auth_mode": "chatgpt",
-		"tokens": map[string]string{
-			"id_token": testJWT(&accountID, 3600), "access_token": testJWT(nil, 3600),
-			"refresh_token": "not-imported-profile", "account_id": accountID,
-		},
-	})
-	if err := os.WriteFile(authFile, authJSON, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	oauthMetadata := createCoreCredential(t, coreBinary, []string{
-		"credential", "import-codex-auth", "--state-dir", coreStateDir,
-		"--auth-file", authFile, "--issuer", upstream.URL,
-		"--client-id", "profile-loopback-client", "--upstream-url", upstream.URL + "/responses",
-	}, "")
-	store, err := storage.Open(context.Background(), stateDir, time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	apiCredential := persistCredential(t, store, "Profile API key", apiMetadata)
-	subscriptionCredential := persistCredential(t, store, "Profile subscription", oauthMetadata)
-	apiKey := createDownstreamKey(t, store, apiCredential.ID, "Profile API client")
-	subscriptionKey := createDownstreamKey(t, store, subscriptionCredential.ID, "Profile subscription client")
-	supervisor, err := adapter.Start(context.Background(), adapter.Config{Binary: coreBinary, StateDir: coreStateDir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = supervisor.Close() })
-	public := httptest.NewServer(httpapi.NewHandler(store, supervisor, nil))
-	t.Cleanup(public.Close)
-	return responsesProfileHTTPFixture{
-		apiKey: apiKey.Secret, subscriptionKey: subscriptionKey.Secret, public: public, captures: captures,
 	}
 }
 
@@ -244,16 +198,11 @@ func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicit
 	value := decodeRequestObject(t, body)
 	assertResponsesProfileSurface(t, value, lite, false, subscription)
 	if hasExplicitPrevious {
-		if subscription {
-			previous, previousOK := value["previous_response_id"].(string)
-			conversation, conversationOK := value["conversation"].(string)
-			if !previousOK || !conversationOK || previous == "explicit-profile-previous" ||
-				conversation == "explicit-profile-conversation" {
-				t.Fatal("subscription HTTP continuation IDs were not pseudonymized")
-			}
-		} else if value["previous_response_id"] != "explicit-profile-previous" ||
-			value["conversation"] != "explicit-profile-conversation" {
-			t.Fatal("API-key HTTP continuation state was not preserved")
+		previous, previousOK := value["previous_response_id"].(string)
+		conversation, conversationOK := value["conversation"].(string)
+		if !previousOK || !conversationOK || previous == "explicit-profile-previous" ||
+			conversation == "explicit-profile-conversation" {
+			t.Fatal("stateful Codex HTTP continuation IDs were not pseudonymized")
 		}
 		if !containsResponseProfileItem(value["input"], "function_call") ||
 			!containsResponseProfileItem(value["input"], "function_call_output") ||

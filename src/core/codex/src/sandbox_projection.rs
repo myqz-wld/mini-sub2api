@@ -16,8 +16,6 @@ pub(crate) fn normalize(metadata: &mut Map<String, Value>) {
             event = "sandbox_metadata_rewrite_total",
             mismatch = (reason == RewriteReason::PlatformMismatch),
             reason = ?reason,
-            sandbox_mode = metadata.get("sandbox_mode").and_then(|value| value.as_str()),
-            sandbox = metadata.get("sandbox").and_then(|value| value.as_str()),
         );
     }
 }

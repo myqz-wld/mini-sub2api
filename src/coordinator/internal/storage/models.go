@@ -66,12 +66,13 @@ type TokenUsage struct {
 }
 
 type RequestResult struct {
-	CompletedAt time.Time
-	Status      string
-	HTTPStatus  *int
-	TTFB        *time.Duration
-	Duration    time.Duration
-	Usage       *TokenUsage
+	CompletedAt       time.Time
+	Status            string
+	HTTPStatus        *int
+	TTFB              *time.Duration
+	Duration          time.Duration
+	Usage             *TokenUsage
+	ProviderRequestID *string
 }
 
 type RequestRecord struct {
@@ -87,6 +88,7 @@ type RequestRecord struct {
 	TTFBMilliseconds     *int64      `json:"ttfbMs,omitempty"`
 	DurationMilliseconds *int64      `json:"durationMs,omitempty"`
 	Usage                *TokenUsage `json:"usage,omitempty"`
+	ProviderRequestID    *string     `json:"providerRequestId,omitempty"`
 }
 
 type DailyUsage struct {

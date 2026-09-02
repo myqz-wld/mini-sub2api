@@ -2,10 +2,13 @@ use http::HeaderMap;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::request_identity::SubscriptionTransport;
-
-const TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
-const WINDOW_HEADER: &str = "x-codex-window-id";
+use crate::lifecycle_carriers::CarrierContainer;
+use crate::lifecycle_carriers::CarrierRule;
+use crate::lifecycle_carriers::CarrierShape;
+use crate::lifecycle_carriers::RelationshipCarrier;
+use crate::lifecycle_carriers::TURN_METADATA_HEADER;
+use crate::lifecycle_carriers::evidence_rules;
+use crate::request_identity::CodexTransport;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RequestIdentityEvidence {
@@ -37,7 +40,7 @@ impl RequestIdentityEvidence {
     pub(crate) fn extract(
         object: &Map<String, Value>,
         headers: &HeaderMap,
-        transport: SubscriptionTransport,
+        transport: CodexTransport,
         ignore_headers: bool,
     ) -> Self {
         let flat = object.get("client_metadata").and_then(Value::as_object);
@@ -50,57 +53,27 @@ impl RequestIdentityEvidence {
             .flatten()
             .as_deref()
             .and_then(parse_object);
-        let header = |name| {
-            (!ignore_headers)
-                .then(|| header_text(headers, name))
-                .flatten()
-                .and_then(|value| nonempty(&value))
+        let sources = EvidenceSources {
+            object,
+            headers,
+            client_metadata: flat,
+            body_turn_metadata: body_turn.as_ref(),
+            header_turn_metadata: header_turn.as_ref(),
+            headers_already_projected: ignore_headers,
         };
-        let flat_text = |name| object_text(flat, name);
-        let body_turn_text = |name| object_text(body_turn.as_ref(), name);
-        let header_turn_text = |name| object_text(header_turn.as_ref(), name);
 
-        let thread = flat_text("thread_id")
-            .or_else(|| body_turn_text("thread_id"))
-            .or_else(|| header("thread-id"))
-            .or_else(|| header_turn_text("thread_id"));
-        let window = flat_text(WINDOW_HEADER)
-            .or_else(|| body_turn_text("window_id"))
-            .or_else(|| header(WINDOW_HEADER))
-            .or_else(|| header_turn_text("window_id"));
-        let conversation = flat_text("session_id")
-            .or_else(|| body_turn_text("session_id"))
-            .or_else(|| header("session-id"))
-            .or_else(|| header_turn_text("session_id"))
-            .or_else(|| flat_text("conversation_id"))
-            .or_else(|| header("conversation_id"))
-            .or_else(|| {
-                object
-                    .get("prompt_cache_key")
-                    .and_then(Value::as_str)
-                    .and_then(nonempty)
-            })
+        let thread = evidence_text(RelationshipCarrier::Thread, &sources);
+        let window = evidence_text(RelationshipCarrier::Window, &sources);
+        let conversation = evidence_text(RelationshipCarrier::Session, &sources)
             .or_else(|| thread.clone())
-            .or_else(|| header("x-client-request-id"))
+            .or_else(|| evidence_text(RelationshipCarrier::ClientRequest, &sources))
             .or_else(|| window.as_deref().and_then(window_thread));
-
-        let parent_thread = body_turn_text("parent_thread_id")
-            .or_else(|| body_turn_text("x-codex-parent-thread-id"))
-            .or_else(|| header_turn_text("parent_thread_id"))
-            .or_else(|| header("x-codex-parent-thread-id"))
-            .or_else(|| flat_text("parent_thread_id"));
-        let forked_from_thread = body_turn_text("forked_from_thread_id")
-            .or_else(|| header_turn_text("forked_from_thread_id"))
-            .or_else(|| flat_text("forked_from_thread_id"));
-        let subagent = header_text(headers, "x-openai-subagent")
-            .and_then(|value| nonempty(&value))
-            .or_else(|| flat_text("x-openai-subagent"))
-            .or_else(|| body_turn_text("subagent_kind"));
-
-        let request_kind = body_turn_text("request_kind")
-            .or_else(|| header_turn_text("request_kind"))
+        let parent_thread = evidence_text(RelationshipCarrier::ParentThread, &sources);
+        let forked_from_thread = evidence_text(RelationshipCarrier::ForkedFromThread, &sources);
+        let subagent = evidence_text(RelationshipCarrier::Subagent, &sources);
+        let request_kind = evidence_text(RelationshipCarrier::RequestKind, &sources)
             .unwrap_or_else(|| {
-                if transport == SubscriptionTransport::WebSocket
+                if transport == CodexTransport::WebSocket
                     && object.get("generate").and_then(Value::as_bool) == Some(false)
                 {
                     "prewarm".to_string()
@@ -108,23 +81,17 @@ impl RequestIdentityEvidence {
                     "turn".to_string()
                 }
             });
-        let turn = body_turn_text_allow_empty("turn_id", body_turn.as_ref())
-            .or_else(|| header_turn_text_allow_empty("turn_id", header_turn.as_ref()))
-            .or_else(|| flat_text_allow_empty("turn_id", flat));
-        let root_turn = body_turn_text("root_turn_id")
-            .or_else(|| header_turn_text("root_turn_id"))
-            .or_else(|| flat_text("root_turn_id"));
-        let parent_turn = body_turn_text("parent_turn_id")
-            .or_else(|| header_turn_text("parent_turn_id"))
-            .or_else(|| flat_text("parent_turn_id"));
+        let turn = evidence_text(RelationshipCarrier::Turn, &sources);
+        let root_turn = evidence_text(RelationshipCarrier::RootTurn, &sources);
+        let parent_turn = evidence_text(RelationshipCarrier::ParentTurn, &sources);
 
         Self {
-            installation: flat_text("x-codex-installation-id")
-                .or_else(|| body_turn_text("installation_id"))
-                .or_else(|| header("x-codex-installation-id"))
-                .or_else(|| header_turn_text("installation_id")),
+            installation: evidence_text(RelationshipCarrier::Installation, &sources),
             conversation,
-            responses_conversation: responses_conversation(object),
+            responses_conversation: evidence_text(
+                RelationshipCarrier::ResponsesConversation,
+                &sources,
+            ),
             thread,
             parent_thread,
             forked_from_thread,
@@ -155,27 +122,69 @@ impl RequestIdentityEvidence {
     }
 }
 
+struct EvidenceSources<'a> {
+    object: &'a Map<String, Value>,
+    headers: &'a HeaderMap,
+    client_metadata: Option<&'a Map<String, Value>>,
+    body_turn_metadata: Option<&'a Map<String, Value>>,
+    header_turn_metadata: Option<&'a Map<String, Value>>,
+    headers_already_projected: bool,
+}
+
+fn evidence_text(
+    relationship: RelationshipCarrier,
+    sources: &EvidenceSources<'_>,
+) -> Option<String> {
+    evidence_rules(relationship)
+        .filter_map(|rule| carrier_text(rule, sources).map(|value| (rule.priority, value)))
+        .min_by_key(|(priority, _)| *priority)
+        .map(|(_, value)| value)
+}
+
+fn carrier_text(rule: &CarrierRule, sources: &EvidenceSources<'_>) -> Option<String> {
+    if sources.headers_already_projected && rule.skip_after_header_projection() {
+        return None;
+    }
+    let value = match rule.container {
+        CarrierContainer::TopLevel => sources.object.get(rule.name)?,
+        CarrierContainer::ClientMetadata => sources.client_metadata?.get(rule.name)?,
+        CarrierContainer::TurnMetadata => sources.body_turn_metadata?.get(rule.name)?,
+        CarrierContainer::HeaderTurnMetadata => sources.header_turn_metadata?.get(rule.name)?,
+        CarrierContainer::Header => {
+            return header_text(sources.headers, rule.name)
+                .and_then(|value| normalize_text(value, rule.allow_empty()));
+        }
+        _ => return None,
+    };
+    if rule.shape == CarrierShape::Conversation {
+        return conversation_text(value);
+    }
+    value
+        .as_str()
+        .map(str::to_string)
+        .and_then(|value| normalize_text(value, rule.allow_empty()))
+}
+
+fn conversation_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => nonempty(value),
+        Value::Object(conversation) => conversation
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(nonempty),
+        _ => None,
+    }
+}
+
+fn normalize_text(value: String, allow_empty: bool) -> Option<String> {
+    (allow_empty || !value.trim().is_empty()).then_some(value)
+}
+
 fn parse_object(raw: &str) -> Option<Map<String, Value>> {
     serde_json::from_str::<Value>(raw)
         .ok()?
         .as_object()
         .cloned()
-}
-
-fn object_text(object: Option<&Map<String, Value>>, name: &str) -> Option<String> {
-    object?.get(name)?.as_str().and_then(nonempty)
-}
-
-fn flat_text_allow_empty(name: &str, object: Option<&Map<String, Value>>) -> Option<String> {
-    object?.get(name)?.as_str().map(str::to_string)
-}
-
-fn body_turn_text_allow_empty(name: &str, object: Option<&Map<String, Value>>) -> Option<String> {
-    flat_text_allow_empty(name, object)
-}
-
-fn header_turn_text_allow_empty(name: &str, object: Option<&Map<String, Value>>) -> Option<String> {
-    flat_text_allow_empty(name, object)
 }
 
 fn nonempty(value: &str) -> Option<String> {
@@ -206,10 +215,7 @@ fn item_evidence(object: &Map<String, Value>) -> Vec<ItemIdentityEvidence> {
                 .and_then(Value::as_object);
             ItemIdentityEvidence {
                 id: item.get("id").and_then(Value::as_str).and_then(nonempty),
-                turn_id: metadata
-                    .and_then(|metadata| metadata.get("turn_id"))
-                    .and_then(Value::as_str)
-                    .and_then(nonempty),
+                turn_id: item_turn_id(metadata),
                 had_create_time: metadata
                     .and_then(|metadata| metadata.get("create_time"))
                     .is_some_and(Value::is_number),
@@ -219,15 +225,16 @@ fn item_evidence(object: &Map<String, Value>) -> Vec<ItemIdentityEvidence> {
         .collect()
 }
 
-fn responses_conversation(object: &Map<String, Value>) -> Option<String> {
-    match object.get("conversation")? {
-        Value::String(value) => nonempty(value),
-        Value::Object(conversation) => conversation
-            .get("id")
-            .and_then(Value::as_str)
-            .and_then(nonempty),
-        _ => None,
-    }
+fn item_turn_id(metadata: Option<&Map<String, Value>>) -> Option<String> {
+    let metadata = metadata?;
+    evidence_rules(RelationshipCarrier::ItemTurn)
+        .filter(|rule| rule.container == CarrierContainer::ItemPassthroughMetadata)
+        .find_map(|rule| {
+            metadata
+                .get(rule.name)
+                .and_then(Value::as_str)
+                .and_then(nonempty)
+        })
 }
 
 fn new_user_submission(object: &Map<String, Value>) -> bool {
@@ -269,7 +276,7 @@ mod tests {
         let evidence = RequestIdentityEvidence::extract(
             object.as_object().expect("object"),
             &headers,
-            SubscriptionTransport::Http,
+            CodexTransport::Http,
             false,
         );
         assert_eq!(evidence.conversation.as_deref(), Some("body-session"));
@@ -289,7 +296,7 @@ mod tests {
         let evidence = RequestIdentityEvidence::extract(
             object.as_object().expect("object"),
             &HeaderMap::new(),
-            SubscriptionTransport::WebSocket,
+            CodexTransport::WebSocket,
             false,
         );
         assert!(evidence.explicit_thread_lineage);

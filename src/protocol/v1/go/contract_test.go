@@ -68,3 +68,16 @@ func TestRetryAdviceRequiresCoherentDeliveryState(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderRequestIDControlShape(t *testing.T) {
+	control := ProviderRequestIDControl{
+		Type: ProviderRequestIDEventType, ProviderRequestID: "provider-visible-ascii",
+	}
+	encoded, err := json.Marshal(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"type":"mini_sub2api.provider_request_id","providerRequestId":"provider-visible-ascii"}` {
+		t.Fatalf("control JSON = %s", encoded)
+	}
+}

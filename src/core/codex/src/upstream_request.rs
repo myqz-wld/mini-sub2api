@@ -212,7 +212,7 @@ pub(crate) fn build(
             HeaderValue::from_static("text/event-stream"),
         );
     }
-    if profile.uses_codex_subscription() {
+    if profile.uses_subscription_transport() {
         headers.insert(
             http::header::CONTENT_TYPE,
             HeaderValue::from_static("application/json"),
@@ -243,7 +243,7 @@ pub(crate) fn build_websocket(
     headers.remove(http::header::ACCEPT);
     headers.remove(http::header::CONTENT_ENCODING);
     headers.remove(http::header::CONTENT_TYPE);
-    if profile.uses_codex_subscription() {
+    if profile.uses_subscription_transport() {
         headers.remove("x-codex-turn-state");
         headers.remove("x-codex-inference-call-id");
         headers.remove("x-openai-internal-codex-responses-lite");
@@ -414,7 +414,7 @@ fn prepare_http_body(
     profile: UpstreamProfile,
     body: Bytes,
 ) -> Result<Bytes, CoreFailure> {
-    if !profile.uses_codex_subscription() {
+    if !profile.uses_http_zstd() {
         return Ok(body);
     }
     let encoding = headers

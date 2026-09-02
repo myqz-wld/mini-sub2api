@@ -263,6 +263,7 @@ mod tests {
             "scope-sse",
             &store,
             None,
+            None,
         );
         let event = concat!(
             "event: response.completed\n",
@@ -362,6 +363,7 @@ mod tests {
             "scope-sse-failure",
             &store,
             None,
+            None,
         );
         let upstream: UpstreamByteStream = Box::pin(futures_util::stream::iter(vec![Ok(
             Bytes::from_static(
@@ -382,5 +384,84 @@ mod tests {
         assert_eq!(trailers[FAILURE_PHASE_TRAILER], "upstream_stream");
         assert_eq!(trailers[DELIVERY_STATE_TRAILER], "delivered");
         assert_eq!(trailers[RETRY_ADVICE_TRAILER], "never");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn completed_compaction_write_failure_emits_delivered_and_keeps_window_pending() {
+        use crate::request_compaction::PendingCompaction;
+        use crate::request_state_types::PersistedRequestState;
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let store = crate::request_state_store::RequestStateStore::new(temp.path().to_path_buf());
+        let pending = store
+            .edit(
+                "namespace-compaction-write",
+                "acct_compaction_write",
+                "scope-compaction-write",
+                |editor| {
+                    let conversation_key = editor.lookup("conversation", "write-session");
+                    let marker_key = editor.lookup("compaction", "write-operation");
+                    let conversation = editor.conversation(&conversation_key)?;
+                    let target = editor.begin_compaction(&marker_key, &conversation.id)?;
+                    Ok(PendingCompaction {
+                        marker_key,
+                        thread_id: conversation.id,
+                        target_window: target,
+                    })
+                },
+            )
+            .await
+            .expect("pending compaction");
+        let context = ResponseStateContext::new(
+            "acct_compaction_write",
+            "namespace-compaction-write",
+            "scope-compaction-write",
+            &store,
+            None,
+            Some(&pending),
+        );
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o500))
+            .expect("make state directory read-only");
+        let upstream: UpstreamByteStream = Box::pin(futures_util::stream::iter(vec![Ok(
+            Bytes::from_static(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_write_failure\"}}\n\n",
+            ),
+        )]));
+        let frames = translated_sse_frames(upstream, context, 1024 * 1024)
+            .collect::<Vec<_>>()
+            .await;
+        std::fs::set_permissions(temp.path(), std::fs::Permissions::from_mode(0o700))
+            .expect("restore state directory permissions");
+        let trailers = frames
+            .into_iter()
+            .next()
+            .expect("failure frame")
+            .expect("infallible")
+            .into_trailers()
+            .expect("failure trailers");
+        assert_eq!(trailers[DELIVERY_STATE_TRAILER], "delivered");
+        assert_eq!(trailers[RETRY_ADVICE_TRAILER], "never");
+
+        let state: PersistedRequestState = serde_json::from_slice(
+            &std::fs::read(store.state_path_for_test("namespace-compaction-write"))
+                .expect("pending state"),
+        )
+        .expect("pending state JSON");
+        let scope = state.scopes.values().next().expect("scope");
+        assert_eq!(
+            scope.conversations.values().next().unwrap().window_number,
+            0
+        );
+        assert_eq!(
+            scope
+                .compaction_markers
+                .values()
+                .next()
+                .unwrap()
+                .window_number,
+            1
+        );
     }
 }

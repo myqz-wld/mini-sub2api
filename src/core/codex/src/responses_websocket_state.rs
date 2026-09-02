@@ -1,3 +1,4 @@
+use crate::request_compaction::PendingCompaction;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
 use crate::responses_websocket_projection::encoded_len_within;
@@ -62,9 +63,15 @@ pub(crate) enum EventDisposition {
     ForwardPublic,
 }
 
+pub(crate) struct ObservedServerEvent {
+    pub(crate) disposition: EventDisposition,
+    pub(crate) completed_compaction: Option<PendingCompaction>,
+}
+
 struct PlannedOperation {
     kind: OperationKind,
     request: Option<RequestSnapshot>,
+    pending_compaction: Option<PendingCompaction>,
 }
 
 struct ActiveOperation {
@@ -73,6 +80,7 @@ struct ActiveOperation {
     output: Vec<Value>,
     output_bytes: usize,
     reusable: bool,
+    pending_compaction: Option<PendingCompaction>,
 }
 
 /// Pure, socket-local continuation state. Values held here must never be logged or persisted.
@@ -176,6 +184,7 @@ impl ResponsesWebSocketState {
         self.planned = Some(PlannedOperation {
             kind: OperationKind::HiddenSetup,
             request: Some(request),
+            pending_compaction: None,
         });
         self.setup_phase = OperationPhase::Planned;
         Some(HiddenSetupPlan { frame })
@@ -189,6 +198,15 @@ impl ResponsesWebSocketState {
         &mut self,
         request: &Value,
         synthesized_item_ids: &[String],
+    ) -> PublicCreatePlan {
+        self.plan_public_create_with_state(request, synthesized_item_ids, None)
+    }
+
+    pub(crate) fn plan_public_create_with_state(
+        &mut self,
+        request: &Value,
+        synthesized_item_ids: &[String],
+        pending_compaction: Option<PendingCompaction>,
     ) -> PublicCreatePlan {
         self.abandon_pending_operation();
         let explicit_state = has_explicit_state_carrier(request);
@@ -233,6 +251,7 @@ impl ResponsesWebSocketState {
         self.planned = Some(PlannedOperation {
             kind: OperationKind::PublicCreate,
             request: request_snapshot,
+            pending_compaction,
         });
         self.public_phase = OperationPhase::Planned;
         PublicCreatePlan { frame, mode }
@@ -247,8 +266,18 @@ impl ResponsesWebSocketState {
     }
 
     pub(crate) fn observe_server_event(&mut self, event: &Value) -> EventDisposition {
+        self.observe_server_event_with_compaction(event).disposition
+    }
+
+    pub(crate) fn observe_server_event_with_compaction(
+        &mut self,
+        event: &Value,
+    ) -> ObservedServerEvent {
         let Some(kind) = self.active.as_ref().map(|active| active.kind) else {
-            return EventDisposition::Unassociated;
+            return ObservedServerEvent {
+                disposition: EventDisposition::Unassociated,
+                completed_compaction: None,
+            };
         };
         let disposition = match kind {
             OperationKind::HiddenSetup => EventDisposition::ConsumeHiddenSetup,
@@ -264,16 +293,23 @@ impl ResponsesWebSocketState {
             if let Some(active) = &mut self.active {
                 active.reusable = false;
             }
-            return disposition;
+            return ObservedServerEvent {
+                disposition,
+                completed_compaction: None,
+            };
         };
 
+        let mut completed_compaction = None;
         match event_type {
             "response.output_item.done" => self.observe_output_item(event),
-            "response.completed" => self.complete_active(event),
+            "response.completed" => completed_compaction = self.complete_active(event),
             "response.failed" | "response.incomplete" | "error" => self.fail_active(kind),
             _ => {}
         }
-        disposition
+        ObservedServerEvent {
+            disposition,
+            completed_compaction,
+        }
     }
 
     pub(crate) fn fail_hidden_setup(&mut self) {
@@ -297,7 +333,7 @@ impl ResponsesWebSocketState {
     }
 
     fn automatic_reuse_enabled(&self) -> bool {
-        self.caller == CallerKind::Bare && self.profile == UpstreamProfile::CodexSubscription149
+        self.caller == CallerKind::Bare && self.profile.uses_subscription_transport()
     }
 
     fn activate(&mut self, expected: OperationKind) -> bool {
@@ -314,6 +350,7 @@ impl ResponsesWebSocketState {
             output: Vec::new(),
             output_bytes: 0,
             reusable: true,
+            pending_compaction: planned.pending_compaction,
         });
         self.set_phase(expected, OperationPhase::Attempted);
         true
@@ -346,10 +383,8 @@ impl ResponsesWebSocketState {
         active.output_bytes = active.output_bytes.saturating_add(encoded);
     }
 
-    fn complete_active(&mut self, event: &Value) {
-        let Some(mut active) = self.active.take() else {
-            return;
-        };
+    fn complete_active(&mut self, event: &Value) -> Option<PendingCompaction> {
+        let mut active = self.active.take()?;
         let response = event
             .as_object()
             .and_then(|object| object.get("response"))
@@ -384,6 +419,7 @@ impl ResponsesWebSocketState {
             _ => None,
         };
         self.set_phase(active.kind, OperationPhase::Completed);
+        active.pending_compaction
     }
 
     fn fail_active(&mut self, kind: OperationKind) {

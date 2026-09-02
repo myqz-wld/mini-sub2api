@@ -24,14 +24,34 @@ async fn prepare(
     headers: &HeaderMap,
     body: Value,
 ) -> PreparedEmulatedRequest {
-    prepare_stateful_subscription_request(
+    prepare_profile(
+        store,
+        UpstreamProfile::CodexSubscription149,
+        ACCOUNT_REF,
+        NAMESPACE,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn prepare_profile(
+    store: &RequestStateStore,
+    profile: UpstreamProfile,
+    account_ref: &str,
+    state_namespace: &str,
+    headers: &HeaderMap,
+    body: Value,
+) -> PreparedEmulatedRequest {
+    prepare_stateful_codex_request(
+        profile,
         EmulationTransport::Http,
         headers,
         Bytes::from(serde_json::to_vec(&body).expect("body JSON")),
         1024 * 1024,
-        SubscriptionStateContext {
-            account_ref: ACCOUNT_REF,
-            account_namespace: NAMESPACE,
+        CodexStateContext {
+            account_ref,
+            state_namespace,
             downstream_scope: SCOPE,
             fingerprint_mode: FingerprintMode::Device,
             store,
@@ -146,6 +166,78 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
         !state.contains("hello"),
         "request content leaked into state"
     );
+}
+
+#[tokio::test]
+async fn both_codex_profiles_reuse_the_same_identity_contract_after_reopen() {
+    for (profile, account_ref, state_namespace) in [
+        (
+            UpstreamProfile::CodexOpenAi149,
+            "acct_openai_stateful",
+            "acct_openai_stateful",
+        ),
+        (
+            UpstreamProfile::CodexSubscription149,
+            "acct_subscription_stateful",
+            "chatgpt-subscription-stateful",
+        ),
+    ] {
+        let (temp, store) = store();
+        let body = serde_json::json!({
+            "model":"gpt-5.4",
+            "response_id":"resp_downstream",
+            "input":[{
+                "type":"message",
+                "id":"msg_downstream",
+                "role":"user",
+                "content":[{"type":"input_text","text":"hello"}]
+            }],
+            "client_metadata":{
+                "session_id":"session_downstream",
+                "thread_id":"thread_downstream",
+                "turn_id":"turn_downstream"
+            }
+        });
+        let first = value(
+            &prepare_profile(
+                &store,
+                profile,
+                account_ref,
+                state_namespace,
+                &HeaderMap::new(),
+                body.clone(),
+            )
+            .await,
+        );
+        let reopened = RequestStateStore::new(temp.path().join("accounts"));
+        let second = value(
+            &prepare_profile(
+                &reopened,
+                profile,
+                account_ref,
+                state_namespace,
+                &HeaderMap::new(),
+                body,
+            )
+            .await,
+        );
+
+        assert_eq!(first, second, "profile {profile:?} changed after reopen");
+        assert_uuid_version(
+            first["client_metadata"]["x-codex-installation-id"]
+                .as_str()
+                .expect("installation"),
+            4,
+        );
+        for field in ["session_id", "thread_id", "turn_id"] {
+            assert_uuid_version(
+                first["client_metadata"][field].as_str().expect("identity"),
+                7,
+            );
+        }
+        assert_ne!(first["response_id"], "resp_downstream");
+        assert_ne!(first["input"][0]["id"], "msg_downstream");
+    }
 }
 
 #[tokio::test]
@@ -297,14 +389,15 @@ async fn oversized_schema_id_is_an_invalid_request_not_a_state_outage() {
         "input":"hello",
         "client_metadata":{"session_id":"x".repeat(513)}
     });
-    let error = prepare_stateful_subscription_request(
+    let error = prepare_stateful_codex_request(
+        UpstreamProfile::CodexSubscription149,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).expect("body JSON")),
         1024 * 1024,
-        SubscriptionStateContext {
+        CodexStateContext {
             account_ref: ACCOUNT_REF,
-            account_namespace: NAMESPACE,
+            state_namespace: NAMESPACE,
             downstream_scope: SCOPE,
             fingerprint_mode: FingerprintMode::Device,
             store: &store,
@@ -388,8 +481,14 @@ async fn previous_response_alias_restores_its_conversation_and_thread_owner() {
     .await;
     let first_value = value(&first);
     let first_identity = first.resolved_identity.as_ref().expect("identity");
-    let response_state =
-        ResponseStateContext::new(ACCOUNT_REF, NAMESPACE, SCOPE, &store, Some(first_identity));
+    let response_state = ResponseStateContext::new(
+        ACCOUNT_REF,
+        NAMESPACE,
+        SCOPE,
+        &store,
+        Some(first_identity),
+        None,
+    );
     let translated = response_state
         .translate_value(serde_json::json!({
             "type":"response.completed",
@@ -481,7 +580,7 @@ async fn equal_user_content_uses_item_identity_and_tool_history_reuses_active_tu
 }
 
 #[tokio::test]
-async fn compaction_is_idempotent_per_turn_and_independent_across_turns_and_threads() {
+async fn compaction_commits_only_on_completed_and_same_base_operations_converge() {
     let (_temp, store) = store();
     let request = |session: &str, turn: &str| {
         let metadata = serde_json::json!({
@@ -506,29 +605,40 @@ async fn compaction_is_idempotent_per_turn_and_independent_across_turns_and_thre
             "client_metadata":{"x-codex-turn-metadata":metadata.to_string()}
         })
     };
-    let first = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request("compact-session-a", "compact-turn-a1"),
-        )
-        .await,
-    );
-    let retry = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request("compact-session-a", "compact-turn-a1"),
-        )
-        .await,
-    );
-    let second = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request("compact-session-a", "compact-turn-a2"),
-        )
-        .await,
+    let first = prepare(
+        &store,
+        &HeaderMap::new(),
+        request("compact-session-a", "compact-turn-a1"),
+    )
+    .await;
+    let first_value = value(&first);
+    let first_pending = first
+        .pending_compaction
+        .as_ref()
+        .expect("first pending compaction")
+        .clone();
+    let retry = prepare(
+        &store,
+        &HeaderMap::new(),
+        request("compact-session-a", "compact-turn-a1"),
+    )
+    .await;
+    let retry_value = value(&retry);
+    assert_eq!(retry.pending_compaction.as_ref(), Some(&first_pending));
+    let overlapping = prepare(
+        &store,
+        &HeaderMap::new(),
+        request("compact-session-a", "compact-turn-a2"),
+    )
+    .await;
+    let overlapping_value = value(&overlapping);
+    assert_eq!(
+        overlapping
+            .pending_compaction
+            .as_ref()
+            .expect("overlapping pending")
+            .target_window,
+        first_pending.target_window
     );
     let other = value(
         &prepare(
@@ -539,18 +649,18 @@ async fn compaction_is_idempotent_per_turn_and_independent_across_turns_and_thre
         .await,
     );
     assert_eq!(
-        first["client_metadata"]["x-codex-window-id"],
-        retry["client_metadata"]["x-codex-window-id"]
+        first_value["client_metadata"]["x-codex-window-id"],
+        retry_value["client_metadata"]["x-codex-window-id"]
     );
     assert!(
-        first["client_metadata"]["x-codex-window-id"]
+        first_value["client_metadata"]["x-codex-window-id"]
             .as_str()
             .is_some_and(|window| window.ends_with(":0"))
     );
     assert!(
-        second["client_metadata"]["x-codex-window-id"]
+        overlapping_value["client_metadata"]["x-codex-window-id"]
             .as_str()
-            .is_some_and(|window| window.ends_with(":1"))
+            .is_some_and(|window| window.ends_with(":0"))
     );
     assert!(
         other["client_metadata"]["x-codex-window-id"]
@@ -558,7 +668,94 @@ async fn compaction_is_idempotent_per_turn_and_independent_across_turns_and_thre
             .is_some_and(|window| window.ends_with(":0"))
     );
     assert_ne!(
-        first["client_metadata"]["session_id"],
+        first_value["client_metadata"]["session_id"],
         other["client_metadata"]["session_id"]
+    );
+
+    let failed = ResponseStateContext::new(
+        ACCOUNT_REF,
+        NAMESPACE,
+        SCOPE,
+        &store,
+        first.resolved_identity.as_ref(),
+        first.pending_compaction.as_ref(),
+    );
+    failed
+        .translate_value(serde_json::json!({
+            "type":"response.failed",
+            "response":{"id":"resp_failed"}
+        }))
+        .await
+        .expect("translate failed terminal");
+    let after_failure = prepare(
+        &store,
+        &HeaderMap::new(),
+        request("compact-session-a", "compact-turn-a1"),
+    )
+    .await;
+    assert!(
+        value(&after_failure)["client_metadata"]["x-codex-window-id"]
+            .as_str()
+            .is_some_and(|window| window.ends_with(":0"))
+    );
+
+    let completed = ResponseStateContext::new(
+        ACCOUNT_REF,
+        NAMESPACE,
+        SCOPE,
+        &store,
+        after_failure.resolved_identity.as_ref(),
+        after_failure.pending_compaction.as_ref(),
+    );
+    completed
+        .translate_value(serde_json::json!({
+            "type":"response.completed",
+            "response":{"id":"resp_completed"}
+        }))
+        .await
+        .expect("commit completed terminal");
+    let overlapping_completed = ResponseStateContext::new(
+        ACCOUNT_REF,
+        NAMESPACE,
+        SCOPE,
+        &store,
+        overlapping.resolved_identity.as_ref(),
+        overlapping.pending_compaction.as_ref(),
+    );
+    overlapping_completed
+        .translate_value(serde_json::json!({
+            "type":"response.completed",
+            "response":{"id":"resp_overlapping"}
+        }))
+        .await
+        .expect("converge overlapping completion");
+
+    let committed_retry = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request("compact-session-a", "compact-turn-a1"),
+        )
+        .await,
+    );
+    assert!(
+        committed_retry["client_metadata"]["x-codex-window-id"]
+            .as_str()
+            .is_some_and(|window| window.ends_with(":0")),
+        "a completed marker retry must reuse its original committed base"
+    );
+
+    let later = value(
+        &prepare(
+            &store,
+            &HeaderMap::new(),
+            request("compact-session-a", "compact-turn-a3"),
+        )
+        .await,
+    );
+    assert!(
+        later["client_metadata"]["x-codex-window-id"]
+            .as_str()
+            .is_some_and(|window| window.ends_with(":1"))
     );
 }

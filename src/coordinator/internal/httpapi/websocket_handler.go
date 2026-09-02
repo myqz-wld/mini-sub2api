@@ -71,7 +71,8 @@ func (h *Handler) serveWebSocket(
 		writeOpenAIError(writer, http.StatusBadGateway, "upstream_unavailable", "The upstream service is unavailable.", connectionID)
 		return
 	}
-	copyWebSocketUpgradeHeaders(writer.Header(), coreResponse.Header)
+	copyWebSocketUpgradeHeaders(writer.Header(), coreResponse.Header, connectionID)
+	providerRequestID := providerRequestIDFromHeaders(coreResponse.Header)
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", connectionID)
 	publicSocket, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionNoContextTakeover,
@@ -82,7 +83,7 @@ func (h *Handler) serveWebSocket(
 	defer publicSocket.CloseNow()
 	publicSocket.SetReadLimit(maxRequestBytes)
 
-	session := newWebSocketSession(h, route, publicSocket, coreSocket)
+	session := newWebSocketSession(h, route, publicSocket, coreSocket, providerRequestID)
 	if !h.websockets.register(session) {
 		session.stop()
 		return
@@ -100,6 +101,7 @@ func (h *Handler) writeWebSocketDialError(
 ) {
 	if response != nil && response.StatusCode != http.StatusSwitchingProtocols && response.Body != nil {
 		if coreError, ok := detectCoreError(response, connectionID); ok {
+			copyResponseHeaders(writer.Header(), response.Header, connectionID)
 			if coreError.Code == "credential_requires_login" {
 				_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
 			}

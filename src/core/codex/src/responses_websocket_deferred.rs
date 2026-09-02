@@ -3,19 +3,20 @@ use crate::fingerprint::FingerprintMode;
 use crate::fingerprint_projection::project_device_headers;
 use crate::fingerprint_projection::project_websocket_device;
 use crate::request_identity::apply_synthetic_prewarm;
+use crate::request_normalizer::CodexStateContext;
 use crate::request_normalizer::EmulationTransport;
 use crate::request_normalizer::StatefulPrepareError;
-use crate::request_normalizer::SubscriptionStateContext;
-use crate::request_normalizer::prepare_stateful_subscription_request;
+use crate::request_normalizer::prepare_stateful_codex_request;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
 use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket::RelayContext;
 use crate::responses_websocket::fingerprint_is_current;
 use crate::responses_websocket::relay;
-use crate::responses_websocket::send_handshake;
+#[path = "responses_websocket_deferred_connect.rs"]
+mod connect_support;
 use crate::responses_websocket_emulation::encode_frame_bounded;
-use crate::responses_websocket_emulation::plan_public_text_with_synthesized_ids;
+use crate::responses_websocket_emulation::plan_public_text_with_state;
 use crate::responses_websocket_prewarm::HIDDEN_SETUP_TIMEOUT;
 use crate::responses_websocket_prewarm::HiddenSetupOutcome;
 use crate::responses_websocket_prewarm::prewarm_mode;
@@ -23,10 +24,6 @@ use crate::responses_websocket_prewarm::run_hidden_setup;
 use crate::responses_websocket_state::ResponsesWebSocketState;
 use crate::server::AppState;
 use crate::server::ResolvedCredential;
-use crate::server::account_lock;
-use crate::server::resolve_auth;
-use crate::upstream_request::ResolvedAuth;
-use crate::websocket_connector::WebSocketHandshake;
 use crate::websocket_delivery::failure_before_websocket_delivery;
 use crate::websocket_delivery::failure_close;
 use crate::websocket_delivery::internal_close;
@@ -34,9 +31,10 @@ use crate::websocket_delivery::is_response_create;
 use axum::extract::ws::Message;
 use axum::extract::ws::WebSocket;
 use bytes::Bytes;
+use connect_support::connect;
+use connect_support::send_provider_request_id_control;
 use futures_util::StreamExt;
 use http::HeaderMap;
-use http::StatusCode;
 use std::collections::VecDeque;
 use std::future::Future;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
@@ -44,18 +42,18 @@ use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 const MAX_DEFERRED_PENDING_MESSAGES: usize = 1024;
 const DEFERRED_PENDING_MESSAGE_OVERHEAD: usize = 64;
 
-pub(crate) struct DeferredOAuthContext {
+pub(crate) struct DeferredCodexContext {
     pub(crate) state: AppState,
     pub(crate) headers: HeaderMap,
     pub(crate) account_ref: String,
-    pub(crate) account_namespace: String,
+    pub(crate) state_namespace: String,
     pub(crate) pseudonym_scope: String,
     pub(crate) caller: CallerKind,
     pub(crate) profile: UpstreamProfile,
     pub(crate) resolved: ResolvedCredential,
 }
 
-pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthContext) {
+pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexContext) {
     let first = match first_create(&mut internal).await {
         Ok(first) => first,
         Err(code) => {
@@ -73,14 +71,15 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         let _ = internal.send(internal_close(1012)).await;
         return;
     }
-    let prepared = match prepare_stateful_subscription_request(
+    let prepared = match prepare_stateful_codex_request(
+        context.profile,
         EmulationTransport::WebSocket,
         &context.headers,
         Bytes::from(first),
         MAX_WEBSOCKET_MESSAGE_BYTES,
-        SubscriptionStateContext {
+        CodexStateContext {
             account_ref: &context.account_ref,
-            account_namespace: &context.account_namespace,
+            state_namespace: &context.state_namespace,
             downstream_scope: &context.pseudonym_scope,
             fingerprint_mode: context.resolved.fingerprint.mode(),
             store: context.state.vault.request_state(),
@@ -102,6 +101,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         }
     };
     let synthesized_item_ids = prepared.synthesized_item_ids;
+    let pending_compaction = prepared.pending_compaction;
     let mut upstream_headers = prepared.headers;
     let Some(resolved_identity) = prepared.resolved_identity else {
         let _ = internal.send(internal_close(1011)).await;
@@ -174,14 +174,25 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
     else {
         return;
     };
-    let (mut upstream, mut turn_state) = match connected {
+    let (mut upstream, mut turn_state, provider_request_id) = match connected {
         Ok(connected) => connected,
-        Err(error) => {
-            let metadata = failure_before_websocket_delivery(&error);
+        Err(failure) => {
+            if !send_provider_request_id_control(
+                &mut internal,
+                failure.provider_request_id.as_deref(),
+            )
+            .await
+            {
+                return;
+            }
+            let metadata = failure_before_websocket_delivery(&failure.error);
             let _ = internal.send(failure_close(metadata)).await;
             return;
         }
     };
+    if !send_provider_request_id_control(&mut internal, provider_request_id.as_deref()).await {
+        return;
+    }
     if !fingerprint_is_current(
         &context.state.vault,
         &context.account_ref,
@@ -228,12 +239,28 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
                 return;
             };
             match reconnected {
-                Ok((replacement, replacement_turn_state)) => {
+                Ok((replacement, replacement_turn_state, replacement_request_id)) => {
                     upstream = replacement;
                     turn_state = replacement_turn_state;
+                    if !send_provider_request_id_control(
+                        &mut internal,
+                        replacement_request_id.as_deref(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
                 }
-                Err(error) => {
-                    let metadata = failure_before_websocket_delivery(&error);
+                Err(failure) => {
+                    if !send_provider_request_id_control(
+                        &mut internal,
+                        failure.provider_request_id.as_deref(),
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                    let metadata = failure_before_websocket_delivery(&failure.error);
                     let _ = internal.send(failure_close(metadata)).await;
                     return;
                 }
@@ -251,10 +278,11 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         }
     }
     debug_assert!(!continuation.public_create_attempted());
-    let text = match plan_public_text_with_synthesized_ids(
+    let text = match plan_public_text_with_state(
         &mut continuation,
         &value,
         &synthesized_item_ids,
+        pending_compaction,
         MAX_WEBSOCKET_MESSAGE_BYTES,
     ) {
         Ok(text) => text,
@@ -270,7 +298,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
     let relay_context = RelayContext {
         headers: relay_headers,
         account_ref: context.account_ref,
-        account_namespace: Some(context.account_namespace),
+        state_namespace: Some(context.state_namespace),
         pseudonym_scope: context.pseudonym_scope,
         profile: context.profile,
         continuation,
@@ -286,65 +314,6 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredOAuthConte
         Some(UpstreamMessage::Text(text.into())),
     )
     .await;
-}
-
-async fn connect(
-    context: &mut DeferredOAuthContext,
-    headers: &HeaderMap,
-) -> Result<
-    (
-        crate::websocket_connector::WebSocketConnection,
-        Option<http::HeaderValue>,
-    ),
-    CoreFailure,
-> {
-    let mut handshake = send_handshake(
-        &context.resolved.transport,
-        headers,
-        &context.resolved.upstream_url,
-        &context.resolved.auth,
-        context.profile,
-    )
-    .await?;
-    if handshake.status() == StatusCode::UNAUTHORIZED {
-        let failed_access_token = match &context.resolved.auth {
-            ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
-            ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
-        };
-        let lock = account_lock(&context.state, &context.account_ref).await;
-        let _guard = lock.lock().await;
-        let retry = resolve_auth(
-            &context.state,
-            &context.account_ref,
-            Some(&failed_access_token),
-        )
-        .await?;
-        drop(_guard);
-        handshake = send_handshake(
-            &retry.transport,
-            headers,
-            &retry.upstream_url,
-            &retry.auth,
-            context.profile,
-        )
-        .await?;
-        if handshake.status() == StatusCode::UNAUTHORIZED {
-            return Err(CoreFailure::UpstreamAuthFailed);
-        }
-        if handshake.status() == StatusCode::SWITCHING_PROTOCOLS {
-            context.resolved.upstream_url = retry.upstream_url;
-            context.resolved.auth = retry.auth;
-            context.resolved.transport = retry.transport;
-        }
-    }
-    if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
-        return Err(CoreFailure::UpstreamHandshakeRejected);
-    }
-    let turn_state = handshake.headers().get("x-codex-turn-state").cloned();
-    match handshake {
-        WebSocketHandshake::Connected { socket, .. } => Ok((*socket, turn_state)),
-        WebSocketHandshake::Rejected(_) => Err(CoreFailure::Internal),
-    }
 }
 
 async fn wait_deferred<T>(

@@ -1,16 +1,18 @@
 package protocolv1
 
 const (
-	VersionHeader        = "X-Mini-Sub2Api-Protocol-Version"
-	AccountRefHeader     = "X-Mini-Sub2Api-Account-Ref"
-	PseudonymScopeHeader = "X-Mini-Sub2Api-Pseudonym-Scope"
-	RequestIDHeader      = "X-Mini-Sub2Api-Request-Id"
-	CoreTTFBHeader       = "X-Mini-Sub2Api-Core-TTFB-Ms"
-	FailurePhaseTrailer  = "X-Mini-Sub2Api-Failure-Phase"
-	DeliveryStateTrailer = "X-Mini-Sub2Api-Delivery-State"
-	RetryAdviceTrailer   = "X-Mini-Sub2Api-Retry-Advice"
-	FailureCloseCode     = 4500
-	Version              = "1"
+	VersionHeader              = "X-Mini-Sub2Api-Protocol-Version"
+	AccountRefHeader           = "X-Mini-Sub2Api-Account-Ref"
+	PseudonymScopeHeader       = "X-Mini-Sub2Api-Pseudonym-Scope"
+	RequestIDHeader            = "X-Mini-Sub2Api-Request-Id"
+	CoreTTFBHeader             = "X-Mini-Sub2Api-Core-TTFB-Ms"
+	ProviderRequestIDHeader    = "X-Mini-Sub2Api-Provider-Request-Id"
+	ProviderRequestIDEventType = "mini_sub2api.provider_request_id"
+	FailurePhaseTrailer        = "X-Mini-Sub2Api-Failure-Phase"
+	DeliveryStateTrailer       = "X-Mini-Sub2Api-Delivery-State"
+	RetryAdviceTrailer         = "X-Mini-Sub2Api-Retry-Advice"
+	FailureCloseCode           = 4500
+	Version                    = "1"
 )
 
 type RetryAdvice string
@@ -104,4 +106,9 @@ type CoreError struct {
 	Message   string `json:"message"`
 	RequestID string `json:"requestId"`
 	FailureMetadata
+}
+
+type ProviderRequestIDControl struct {
+	Type              string `json:"type"`
+	ProviderRequestID string `json:"providerRequestId"`
 }

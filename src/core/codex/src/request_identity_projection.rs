@@ -5,11 +5,14 @@ use serde_json::Map;
 use serde_json::Value;
 
 use crate::ascii_json::to_ascii_json_string;
+use crate::lifecycle_carriers::CarrierAction;
+use crate::lifecycle_carriers::CarrierContainer;
+use crate::lifecycle_carriers::CarrierShape;
+use crate::lifecycle_carriers::RelationshipCarrier;
+use crate::lifecycle_carriers::TURN_METADATA_HEADER;
+use crate::lifecycle_carriers::projection_rules;
+use crate::lifecycle_carriers::turn_metadata_rules;
 use crate::request_identity::turn_metadata::bounded_turn_metadata;
-
-const INSTALLATION_HEADER: &str = "x-codex-installation-id";
-const TURN_METADATA_HEADER: &str = "x-codex-turn-metadata";
-const WINDOW_HEADER: &str = "x-codex-window-id";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ResolvedRequestIdentity {
@@ -45,20 +48,8 @@ pub(crate) fn apply(
     object: &mut Map<String, Value>,
     identity: &ResolvedRequestIdentity,
 ) -> Result<(), ()> {
-    object.insert(
-        "prompt_cache_key".to_string(),
-        Value::String(identity.session_id.clone()),
-    );
-    insert_header(headers, "session-id", &identity.session_id)?;
-    insert_header(headers, "thread-id", &identity.thread_id)?;
-    insert_header(headers, "x-client-request-id", &identity.thread_id)?;
-    insert_header(headers, WINDOW_HEADER, &identity.window_id())?;
-    match &identity.parent_thread_id {
-        Some(parent) => insert_header(headers, "x-codex-parent-thread-id", parent)?,
-        None => {
-            headers.remove("x-codex-parent-thread-id");
-        }
-    }
+    project_object(object, CarrierContainer::TopLevel, identity);
+    project_headers(headers, identity)?;
 
     let metadata = object
         .entry("client_metadata".to_string())
@@ -81,37 +72,7 @@ pub(crate) fn apply(
     let turn = canonical_turn_metadata(existing_turn, identity);
     let serialized = to_ascii_json_string(&Value::Object(turn)).map_err(|_| ())?;
 
-    put(metadata, "session_id", &identity.session_id);
-    put(metadata, "thread_id", &identity.thread_id);
-    put(metadata, INSTALLATION_HEADER, &identity.installation_id);
-    put(metadata, WINDOW_HEADER, &identity.window_id());
-    set_optional(
-        metadata,
-        "parent_thread_id",
-        identity.parent_thread_id.as_deref(),
-    );
-    set_optional(
-        metadata,
-        "forked_from_thread_id",
-        identity.forked_from_thread_id.as_deref(),
-    );
-    if identity.memory() {
-        for name in ["turn_id", "root_turn_id", "parent_turn_id"] {
-            metadata.remove(name);
-        }
-    } else if identity.prewarm() {
-        put(metadata, "turn_id", "");
-        metadata.remove("root_turn_id");
-        metadata.remove("parent_turn_id");
-    } else {
-        set_optional(metadata, "turn_id", identity.turn_id.as_deref());
-        set_optional(metadata, "root_turn_id", identity.root_turn_id.as_deref());
-        set_optional(
-            metadata,
-            "parent_turn_id",
-            identity.parent_turn_id.as_deref(),
-        );
-    }
+    project_object(metadata, CarrierContainer::ClientMetadata, identity);
     metadata.insert(
         TURN_METADATA_HEADER.to_string(),
         Value::String(serialized.clone()),
@@ -129,53 +90,111 @@ fn canonical_turn_metadata(
     if !identity.memory() {
         crate::sandbox_projection::normalize(&mut turn);
     }
-    put(&mut turn, "installation_id", &identity.installation_id);
-    put(&mut turn, "session_id", &identity.session_id);
-    put(&mut turn, "thread_id", &identity.thread_id);
-    put(&mut turn, "window_id", &identity.window_id());
-    put(&mut turn, "request_kind", &identity.request_kind);
-    set_optional(
-        &mut turn,
-        "parent_thread_id",
-        identity.parent_thread_id.as_deref(),
-    );
-    set_optional(
-        &mut turn,
-        "forked_from_thread_id",
-        identity.forked_from_thread_id.as_deref(),
-    );
-    if identity.memory() {
-        for name in [
-            "turn_id",
-            "root_turn_id",
-            "parent_turn_id",
-            "turn_started_at_unix_ms",
-        ] {
-            turn.remove(name);
-        }
-    } else if identity.prewarm() {
-        put(&mut turn, "turn_id", "");
-        for name in ["root_turn_id", "parent_turn_id", "turn_started_at_unix_ms"] {
-            turn.remove(name);
-        }
-    } else {
-        set_optional(&mut turn, "turn_id", identity.turn_id.as_deref());
-        set_optional(&mut turn, "root_turn_id", identity.root_turn_id.as_deref());
-        set_optional(
-            &mut turn,
-            "parent_turn_id",
-            identity.parent_turn_id.as_deref(),
-        );
-        match identity.turn_started_at_unix_ms {
-            Some(started) => {
-                turn.insert("turn_started_at_unix_ms".to_string(), started.into());
+    for rule in
+        turn_metadata_rules().filter(|rule| rule.action == CarrierAction::RelationshipProjection)
+    {
+        match projection_decision(identity, rule.relationship) {
+            ProjectionDecision::Set(value) => {
+                turn.insert(rule.name.to_string(), value);
             }
-            None => {
-                turn.remove("turn_started_at_unix_ms");
+            ProjectionDecision::Remove => {
+                turn.remove(rule.name);
             }
+            ProjectionDecision::Preserve => {}
         }
     }
     turn
+}
+
+enum ProjectionDecision {
+    Set(Value),
+    Remove,
+    Preserve,
+}
+
+fn project_object(
+    object: &mut Map<String, Value>,
+    container: CarrierContainer,
+    identity: &ResolvedRequestIdentity,
+) {
+    for rule in projection_rules(container) {
+        if rule.shape == CarrierShape::SerializedTurnMetadata {
+            continue;
+        }
+        match projection_decision(identity, rule.relationship) {
+            ProjectionDecision::Set(value) => {
+                object.insert(rule.name.to_string(), value);
+            }
+            ProjectionDecision::Remove => {
+                object.remove(rule.name);
+            }
+            ProjectionDecision::Preserve => {}
+        }
+    }
+}
+
+fn project_headers(headers: &mut HeaderMap, identity: &ResolvedRequestIdentity) -> Result<(), ()> {
+    for rule in projection_rules(CarrierContainer::Header) {
+        if rule.shape == CarrierShape::SerializedTurnMetadata {
+            continue;
+        }
+        match projection_decision(identity, rule.relationship) {
+            ProjectionDecision::Set(Value::String(value)) => {
+                insert_header(headers, rule.name, &value)?;
+            }
+            ProjectionDecision::Set(_) => return Err(()),
+            ProjectionDecision::Remove | ProjectionDecision::Preserve => {
+                headers.remove(rule.name);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn projection_decision(
+    identity: &ResolvedRequestIdentity,
+    relationship: Option<RelationshipCarrier>,
+) -> ProjectionDecision {
+    let string = |value: &str| ProjectionDecision::Set(Value::String(value.to_string()));
+    match relationship {
+        Some(RelationshipCarrier::Installation) => string(&identity.installation_id),
+        Some(RelationshipCarrier::Session) => string(&identity.session_id),
+        Some(RelationshipCarrier::Thread) => string(&identity.thread_id),
+        Some(RelationshipCarrier::Window) => string(&identity.window_id()),
+        Some(RelationshipCarrier::RequestKind) => string(&identity.request_kind),
+        Some(RelationshipCarrier::ParentThread) => optional_string(&identity.parent_thread_id),
+        Some(RelationshipCarrier::ForkedFromThread) => {
+            optional_string(&identity.forked_from_thread_id)
+        }
+        Some(RelationshipCarrier::Turn) if identity.memory() => ProjectionDecision::Remove,
+        Some(RelationshipCarrier::Turn) if identity.prewarm() => string(""),
+        Some(RelationshipCarrier::Turn) => optional_string(&identity.turn_id),
+        Some(RelationshipCarrier::RootTurn | RelationshipCarrier::ParentTurn)
+            if identity.memory() || identity.prewarm() =>
+        {
+            ProjectionDecision::Remove
+        }
+        Some(RelationshipCarrier::RootTurn) => optional_string(&identity.root_turn_id),
+        Some(RelationshipCarrier::ParentTurn) => optional_string(&identity.parent_turn_id),
+        Some(RelationshipCarrier::TurnStartedAt) if identity.memory() || identity.prewarm() => {
+            ProjectionDecision::Remove
+        }
+        Some(RelationshipCarrier::TurnStartedAt) => identity
+            .turn_started_at_unix_ms
+            .map_or(ProjectionDecision::Remove, |value| {
+                ProjectionDecision::Set(Value::from(value))
+            }),
+        Some(RelationshipCarrier::Subagent) => ProjectionDecision::Preserve,
+        _ => ProjectionDecision::Preserve,
+    }
+}
+
+fn optional_string(value: &Option<String>) -> ProjectionDecision {
+    value
+        .as_deref()
+        .map_or(ProjectionDecision::Remove, |value| {
+            ProjectionDecision::Set(Value::String(value.to_string()))
+        })
 }
 
 fn parse_object(raw: &str) -> Option<Map<String, Value>> {
@@ -183,19 +202,6 @@ fn parse_object(raw: &str) -> Option<Map<String, Value>> {
         .ok()?
         .as_object()
         .cloned()
-}
-
-fn put(object: &mut Map<String, Value>, name: &str, value: &str) {
-    object.insert(name.to_string(), Value::String(value.to_string()));
-}
-
-fn set_optional(object: &mut Map<String, Value>, name: &str, value: Option<&str>) {
-    match value {
-        Some(value) => put(object, name, value),
-        None => {
-            object.remove(name);
-        }
-    }
 }
 
 fn insert_header(headers: &mut HeaderMap, name: &'static str, value: &str) -> Result<(), ()> {

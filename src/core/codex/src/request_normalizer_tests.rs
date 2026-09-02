@@ -3,8 +3,8 @@ use pretty_assertions::assert_eq;
 
 const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-#[test]
-fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
+#[tokio::test]
+async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     let mut headers = HeaderMap::new();
     headers.insert("session-id", "session-test".parse().expect("header"));
     headers.insert("thread-id", "thread-test".parse().expect("header"));
@@ -35,15 +35,20 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     }))
     .expect("request");
 
-    let prepared = prepare_subscription_request(
-        &headers,
-        Bytes::from(body),
-        1024 * 1024,
-        "acct_test",
-        PSEUDONYM_SCOPE,
-        "req_test",
-    )
-    .expect("normalized request");
+    let harness = CodexStateTestHarness::new();
+    let prepared = harness
+        .prepare(
+            UpstreamProfile::CodexSubscription149,
+            EmulationTransport::Http,
+            &headers,
+            Bytes::from(body),
+            1024 * 1024,
+            "acct_normalizer_lite",
+            "chatgpt-normalizer-lite",
+            PSEUDONYM_SCOPE,
+        )
+        .await
+        .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
     let ordered_fields = value
         .as_object()
@@ -99,7 +104,7 @@ fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
         uuid::Uuid::parse_str(turn_id)
             .expect("pseudonym UUID")
             .get_version_num(),
-        8
+        7
     );
     for index in [3, 4] {
         assert!(
@@ -190,13 +195,12 @@ fn normalizes_non_lite_with_current_model_defaults() {
         "x-openai-internal-codex-responses-lite",
         "true".parse().expect("header"),
     );
-    let prepared = prepare_subscription_request(
+    let prepared = prepare_codex_overlay_for_test(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::Http,
         &headers,
         body,
         1024 * 1024,
-        "acct_test",
-        PSEUDONYM_SCOPE,
-        "req_test",
     )
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
@@ -266,13 +270,12 @@ fn strips_subscription_incompatible_and_codex_unemitted_fields() {
         }))
         .expect("request"),
     );
-    let prepared = prepare_subscription_request(
+    let prepared = prepare_codex_overlay_for_test(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::Http,
         &HeaderMap::new(),
         body,
         1024 * 1024,
-        "acct_test",
-        PSEUDONYM_SCOPE,
-        "req_test",
     )
     .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
@@ -299,20 +302,25 @@ fn strips_subscription_incompatible_and_codex_unemitted_fields() {
     assert_eq!(value["reasoning"]["effort"], "medium");
 }
 
-#[test]
-fn filters_unsupported_fields_from_already_subscription_shaped_json() {
+#[tokio::test]
+async fn filters_unsupported_fields_from_already_subscription_shaped_json() {
     let body = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true,"max_output_tokens":64,"prompt_cache_key":"session-test"}"#,
     );
-    let prepared = prepare_subscription_request(
-        &HeaderMap::new(),
-        body,
-        64 * 1024,
-        "acct_test",
-        PSEUDONYM_SCOPE,
-        "req_test",
-    )
-    .expect("normalized request");
+    let harness = CodexStateTestHarness::new();
+    let prepared = harness
+        .prepare(
+            UpstreamProfile::CodexSubscription149,
+            EmulationTransport::Http,
+            &HeaderMap::new(),
+            body,
+            64 * 1024,
+            "acct_normalizer_filtered",
+            "chatgpt-normalizer-filtered",
+            PSEUDONYM_SCOPE,
+        )
+        .await
+        .expect("normalized request");
     let value: Value = serde_json::from_slice(&prepared.body).expect("filtered JSON");
 
     assert!(value.get("max_output_tokens").is_none());
@@ -322,7 +330,7 @@ fn filters_unsupported_fields_from_already_subscription_shaped_json() {
         uuid::Uuid::parse_str(cache_key)
             .expect("pseudonym UUID")
             .get_version_num(),
-        8
+        7
     );
     assert_eq!(value["input"][0]["type"], "additional_tools");
     assert_eq!(
@@ -336,13 +344,12 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
     let native = Bytes::from_static(
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true}"#,
     );
-    let native_prepared = prepare_subscription_request(
+    let native_prepared = prepare_codex_overlay_for_test(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::Http,
         &HeaderMap::new(),
         native.clone(),
         64 * 1024,
-        "acct_test",
-        PSEUDONYM_SCOPE,
-        "req_test",
     )
     .expect("normalized request");
     assert_ne!(native_prepared.body, native);
@@ -384,19 +391,18 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
         "zstd".parse().expect("encoding"),
     );
     let encoded = Bytes::from_static(b"compressed bytes");
-    let prepared = prepare_subscription_request(
+    let prepared = prepare_codex_overlay_for_test(
+        UpstreamProfile::CodexSubscription149,
+        EmulationTransport::Http,
         &encoded_headers,
         encoded,
         1024,
-        "acct_test",
-        PSEUDONYM_SCOPE,
-        "req_test",
     );
     assert!(prepared.is_err());
 }
 
-#[test]
-fn complete_codex_request_pseudonymizes_identity_deterministically() {
+#[tokio::test]
+async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     let turn_metadata = r#"{\"installation_id\":\"11111111-1111-4111-8111-111111111111\",\"session_id\":\"session-test\",\"thread_id\":\"thread-test\",\"agent_name\":\"/root\",\"turn_id\":\"turn-test\",\"window_id\":\"thread-test:0\",\"request_kind\":\"turn\",\"root_turn_id\":\"turn-test\",\"auto_review_enabled\":false,\"node_repl_auto_review_required\":false,\"node_repl_disabled\":false,\"turn_started_at_unix_ms\":1700000000000}"#;
     let body = Bytes::from(format!(
         r#"{{"model":"gpt-5.4","input":[{{"type":"message","id":"msg_11111111-1111-7111-8111-111111111111","role":"user","content":[{{"type":"input_text","text":"hello"}}],"internal_chat_message_metadata_passthrough":{{"turn_id":"turn-test","create_time":1700000000.0}}}}],"tools":[],"tool_choice":"auto","parallel_tool_calls":true,"reasoning":{{"effort":"medium"}},"store":false,"stream":true,"include":["reasoning.encrypted_content"],"prompt_cache_key":"session-test","text":{{"verbosity":"low"}},"client_metadata":{{"session_id":"session-test","thread_id":"thread-test","turn_id":"turn-test","x-codex-installation-id":"11111111-1111-4111-8111-111111111111","x-codex-turn-metadata":"{turn_metadata}","x-codex-window-id":"thread-test:0","root_turn_id":"turn-test"}}}}"#
@@ -410,37 +416,40 @@ fn complete_codex_request_pseudonymizes_identity_deterministically() {
     ] {
         headers.insert(name, value.parse().expect("header"));
     }
-    let prepared = prepare_subscription_request(
-        &headers,
-        body.clone(),
-        16 * 1024,
-        "11111111-1111-4111-8111-111111111111",
-        PSEUDONYM_SCOPE,
-        "request-test",
-    )
-    .expect("normalized request");
+    let harness = CodexStateTestHarness::new();
+    let prepared = harness
+        .prepare(
+            UpstreamProfile::CodexSubscription149,
+            EmulationTransport::Http,
+            &headers,
+            body.clone(),
+            16 * 1024,
+            "acct_normalizer_complete",
+            "chatgpt-normalizer-complete",
+            PSEUDONYM_SCOPE,
+        )
+        .await
+        .expect("normalized request");
     assert_ne!(prepared.body, body);
-    let repeated = prepare_subscription_request(
-        &headers,
-        body,
-        16 * 1024,
-        "11111111-1111-4111-8111-111111111111",
-        PSEUDONYM_SCOPE,
-        "request-test",
-    )
-    .expect("normalized request");
+    let repeated = harness
+        .prepare(
+            UpstreamProfile::CodexSubscription149,
+            EmulationTransport::Http,
+            &headers,
+            body,
+            16 * 1024,
+            "acct_normalizer_complete",
+            "chatgpt-normalizer-complete",
+            PSEUDONYM_SCOPE,
+        )
+        .await
+        .expect("normalized request");
     assert_eq!(prepared.body, repeated.body);
     assert_eq!(prepared.headers, repeated.headers);
     let projected_thread = header_text(&prepared.headers, "thread-id").expect("thread id");
     let projected_client =
         header_text(&prepared.headers, "x-client-request-id").expect("client request id");
-    assert_ne!(projected_client, projected_thread);
-    assert_eq!(
-        uuid::Uuid::parse_str(&projected_client)
-            .expect("client request UUID")
-            .get_version_num(),
-        8
-    );
+    assert_eq!(projected_client, projected_thread);
     let value: Value = serde_json::from_slice(&prepared.body).expect("normalized JSON");
     for (name, raw) in [
         ("session_id", "session-test"),
@@ -453,11 +462,16 @@ fn complete_codex_request_pseudonymizes_identity_deterministically() {
     ] {
         let pseudonym = value["client_metadata"][name].as_str().expect("pseudonym");
         assert_ne!(pseudonym, raw);
+        let expected_version = if name == "x-codex-installation-id" {
+            4
+        } else {
+            7
+        };
         assert_eq!(
             uuid::Uuid::parse_str(pseudonym)
                 .expect("pseudonym UUID")
                 .get_version_num(),
-            8
+            expected_version
         );
     }
     assert_eq!(

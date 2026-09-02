@@ -3,8 +3,6 @@ use crate::request_profile::UpstreamProfile;
 use serde_json::Value;
 use serde_json::json;
 
-const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
 #[test]
 fn transport_allowlists_and_routing_hint_are_profile_specific() {
     let caller = json!({
@@ -293,19 +291,12 @@ fn prepare_value(
     transport: EmulationTransport,
     caller: Value,
 ) -> PreparedValue {
-    let identity = profile
-        .uses_codex_subscription()
-        .then_some(SubscriptionIdentity {
-            account_namespace: "account-test",
-            downstream_scope: PSEUDONYM_SCOPE,
-        });
-    let prepared = prepare_emulated_request(
+    let prepared = prepare_codex_overlay_for_test(
         profile,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&caller).expect("caller JSON")),
         1024 * 1024,
-        identity,
     )
     .expect("emulated request");
     PreparedValue {

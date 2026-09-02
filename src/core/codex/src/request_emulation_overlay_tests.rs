@@ -2,8 +2,6 @@ use super::*;
 use crate::request_profile::UpstreamProfile;
 use pretty_assertions::assert_eq;
 
-const PSEUDONYM_SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-
 #[test]
 fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped() {
     let caller = serde_json::json!({
@@ -345,30 +343,33 @@ fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque()
 }
 
 #[test]
-fn bare_profile_and_mismatched_subscription_identity_fail_closed() {
+fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
     let body = Bytes::from_static(br#"{"model":"gpt-5.4","input":[]}"#);
     assert!(
-        prepare_emulated_request(
+        prepare_codex_overlay_for_test(
             UpstreamProfile::BareOpenAi,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body.clone(),
             16 * 1024,
-            None,
         )
         .is_err()
     );
-    assert!(
-        prepare_emulated_request(
-            UpstreamProfile::CodexSubscription149,
-            EmulationTransport::Http,
-            &HeaderMap::new(),
-            body,
-            16 * 1024,
-            None,
-        )
-        .is_err()
-    );
+    for profile in [
+        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::CodexSubscription149,
+    ] {
+        assert!(
+            prepare_codex_overlay_for_test(
+                profile,
+                EmulationTransport::Http,
+                &HeaderMap::new(),
+                body.clone(),
+                16 * 1024,
+            )
+            .is_ok()
+        );
+    }
 }
 
 #[test]
@@ -444,37 +445,18 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
 }
 
 fn prepare_openai(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(UpstreamProfile::CodexOpenAi149, caller, transport, None)
+    prepare(UpstreamProfile::CodexOpenAi149, caller, transport)
 }
 
 fn prepare_subscription(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(
-        UpstreamProfile::CodexSubscription149,
-        caller,
-        transport,
-        Some(SubscriptionIdentity {
-            account_namespace: "account-test",
-            downstream_scope: PSEUDONYM_SCOPE,
-        }),
-    )
+    prepare(UpstreamProfile::CodexSubscription149, caller, transport)
 }
 
-fn prepare(
-    profile: UpstreamProfile,
-    caller: Value,
-    transport: EmulationTransport,
-    identity: Option<SubscriptionIdentity<'_>>,
-) -> Value {
+fn prepare(profile: UpstreamProfile, caller: Value, transport: EmulationTransport) -> Value {
     let body = Bytes::from(serde_json::to_vec(&caller).expect("caller JSON"));
-    let prepared = prepare_emulated_request(
-        profile,
-        transport,
-        &HeaderMap::new(),
-        body,
-        1024 * 1024,
-        identity,
-    )
-    .expect("emulated request");
+    let prepared =
+        prepare_codex_overlay_for_test(profile, transport, &HeaderMap::new(), body, 1024 * 1024)
+            .expect("emulated request");
     serde_json::from_slice(&prepared.body).expect("emulated JSON")
 }
 

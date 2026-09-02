@@ -22,7 +22,7 @@ func (s *Store) History(
                started_at, completed_at,
                terminal_status, http_status, ttfb_ms, duration_ms, input_tokens,
                cached_input_tokens, cache_write_input_tokens, output_tokens,
-               reasoning_output_tokens, total_tokens
+               reasoning_output_tokens, total_tokens, provider_request_id
         FROM requests WHERE 1 = 1`
 	var arguments []any
 	if apiKeyID != "" {
@@ -107,12 +107,14 @@ func scanRequestRecord(row rowScanner) (RequestRecord, error) {
 	var completedAt sql.NullString
 	var httpStatus, ttfb, duration sql.NullInt64
 	var usageFields [6]sql.NullInt64
+	var providerRequestID sql.NullString
 	err := row.Scan(
 		&record.RequestID, &record.APIKeyID, &record.CredentialID,
 		&record.Transport, &record.OperationKind, &startedAt,
 		&completedAt, &record.Status, &httpStatus, &ttfb, &duration,
 		&usageFields[0], &usageFields[1], &usageFields[2], &usageFields[3],
 		&usageFields[4], &usageFields[5],
+		&providerRequestID,
 	)
 	if err != nil {
 		return RequestRecord{}, err
@@ -134,6 +136,9 @@ func scanRequestRecord(row rowScanner) (RequestRecord, error) {
 			CacheWriteInputTokens: usageFields[2].Int64, OutputTokens: usageFields[3].Int64,
 			ReasoningOutputTokens: usageFields[4].Int64, TotalTokens: usageFields[5].Int64,
 		}
+	}
+	if providerRequestID.Valid {
+		record.ProviderRequestID = &providerRequestID.String
 	}
 	return record, nil
 }

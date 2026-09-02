@@ -16,8 +16,10 @@ import (
 )
 
 type routingMatrixCapture struct {
-	Headers http.Header
-	Body    []byte
+	Headers           http.Header
+	Body              []byte
+	ResponseID        string
+	ProviderRequestID string
 }
 
 func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
@@ -32,8 +34,11 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			http.Error(writer, "capture body", http.StatusInternalServerError)
 			return
 		}
-		captures <- routingMatrixCapture{Headers: request.Header.Clone(), Body: body}
-		writeLoopbackResponsesResult(writer, body, "resp_matrix")
+		responseID, providerRequestID := writeLoopbackResponsesResult(writer, body, "resp_matrix")
+		captures <- routingMatrixCapture{
+			Headers: request.Header.Clone(), Body: body,
+			ResponseID: responseID, ProviderRequestID: providerRequestID,
+		}
 	}))
 	defer upstream.Close()
 	assertLoopbackURL(t, upstream.URL)
@@ -220,7 +225,9 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				input := value["input"].([]any)
 				assertDeveloperMessageText(t, input[0], "Use the available tools only when needed.")
 				assertNormalizedMessages(t, input[1:], messages)
-				if capture.Headers.Get("Session-Id") != "api-key-session" ||
+				if !isUUIDVersion(capture.Headers.Get("Session-Id"), '7') ||
+					!isUUIDVersion(capture.Headers.Get("Thread-Id"), '7') ||
+					!isUUIDVersion(capture.Headers.Get("X-Codex-Installation-Id"), '4') ||
 					capture.Headers.Get("Version") != "0.149.0" ||
 					capture.Headers.Get("X-Openai-Subagent") != "review" {
 					t.Fatalf("Codex API headers = %#v", capture.Headers)

@@ -1,28 +1,23 @@
 use crate::websocket_connector::WebSocketHandshake;
 use axum::body::Body;
 use axum::http::HeaderMap;
-use axum::http::HeaderName;
 use axum::http::Response;
 use bytes::Bytes;
 
+use crate::response_headers::filtered_provider_headers;
+
 const MAX_HANDSHAKE_REJECTION_BYTES: usize = 64 * 1024;
 
-const SAFE_UPGRADE_RESPONSE_HEADERS: &[&str] = &[
-    "openai-model",
-    "x-codex-turn-state",
-    "x-models-etag",
-    "x-reasoning-included",
-    "x-request-id",
-];
-
-const SAFE_REJECTION_RESPONSE_HEADERS: &[&str] = &["content-type", "retry-after", "x-request-id"];
-
-pub(crate) async fn rejection_response(handshake: WebSocketHandshake) -> Response<Body> {
+pub(crate) async fn rejection_response(
+    handshake: WebSocketHandshake,
+    gateway_request_id: &str,
+) -> Response<Body> {
     let WebSocketHandshake::Rejected(upstream) = handshake else {
         return Response::new(Body::empty());
     };
     let status = upstream.status();
-    let headers = filtered_headers(upstream.headers(), SAFE_REJECTION_RESPONSE_HEADERS);
+    let headers = filtered_provider_headers(upstream.headers(), gateway_request_id)
+        .unwrap_or_else(|_| HeaderMap::new());
     let preserve_body = headers
         .get(http::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -47,19 +42,11 @@ pub(crate) async fn rejection_response(handshake: WebSocketHandshake) -> Respons
     response
 }
 
-pub(crate) fn filtered_upgrade_headers(source: &HeaderMap) -> HeaderMap {
-    filtered_headers(source, SAFE_UPGRADE_RESPONSE_HEADERS)
-}
-
-fn filtered_headers(source: &HeaderMap, allowed: &[&'static str]) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    for name in allowed {
-        let name = HeaderName::from_static(name);
-        for value in source.get_all(&name) {
-            headers.append(name.clone(), value.clone());
-        }
-    }
-    headers
+pub(crate) fn filtered_upgrade_headers(
+    source: &HeaderMap,
+    gateway_request_id: &str,
+) -> Result<HeaderMap, ()> {
+    filtered_provider_headers(source, gateway_request_id)
 }
 
 pub(crate) fn copy_headers(destination: &mut HeaderMap, source: &HeaderMap) {

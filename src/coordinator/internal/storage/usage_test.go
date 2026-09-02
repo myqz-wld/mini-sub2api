@@ -105,6 +105,61 @@ func TestRecoverInFlightCreatesErrorAggregate(t *testing.T) {
 	if len(stats) != 1 || stats[0].ErrorCount != 1 || stats[0].Usage != nil {
 		t.Fatalf("recovered aggregate = %#v", stats)
 	}
+	history, err := store.History(context.Background(), key.ID, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].ProviderRequestID != nil {
+		t.Fatalf("recovered request detail = %#v", history)
+	}
+}
+
+func TestProviderRequestIDIsValidatedStoredAndPrunedWithRequestDetail(t *testing.T) {
+	clock := &testClock{now: time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)}
+	store, _ := openTestStore(t, clock)
+	credential := createTestCredential(t, store, "provider-request-id")
+	key, err := store.CreateAPIKey(context.Background(), credential.ID, "Provider request ID")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AuthenticateAndStart(context.Background(), key.Secret, "req_provider_id"); err != nil {
+		t.Fatal(err)
+	}
+	invalid := "contains space"
+	if err := store.FinalizeRequest(context.Background(), "req_provider_id", RequestResult{
+		CompletedAt: clock.Time(), Status: RequestCompleted, ProviderRequestID: &invalid,
+	}); err == nil {
+		t.Fatal("invalid provider request ID was accepted")
+	}
+	if _, err := store.db.Exec(`UPDATE requests SET provider_request_id = 'contains space'
+		WHERE request_id = 'req_provider_id'`); err == nil {
+		t.Fatal("SQLite provider request ID constraint was bypassed")
+	}
+	providerRequestID := "provider-visible-ascii"
+	if err := store.FinalizeRequest(context.Background(), "req_provider_id", RequestResult{
+		CompletedAt: clock.Time(), Status: RequestCompleted, ProviderRequestID: &providerRequestID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	history, err := store.History(context.Background(), key.ID, nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].ProviderRequestID == nil ||
+		*history[0].ProviderRequestID != providerRequestID {
+		t.Fatalf("provider request ID history = %#v", history)
+	}
+	clock.Set(time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC))
+	deleted, err := store.PruneDetailsBefore(
+		context.Background(), time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC),
+	)
+	if err != nil || deleted != 1 {
+		t.Fatalf("pruned request details = %d, %v", deleted, err)
+	}
+	history, err = store.History(context.Background(), key.ID, nil, 10)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("history after provider request ID prune = %#v, %v", history, err)
+	}
 }
 
 func TestPruneBoundaryUsesChronologicalFixedWidthTimestamps(t *testing.T) {

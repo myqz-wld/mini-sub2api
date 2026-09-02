@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
@@ -48,6 +47,30 @@ var allowedHeaders = map[string]bool{
 	"Conversation_id":                        true,
 }
 
+var publicResponseHeaders = map[string]bool{
+	"Content-Type":                   true,
+	"Content-Encoding":               true,
+	"Cache-Control":                  true,
+	"Retry-After":                    true,
+	"Retry-After-Ms":                 true,
+	"Server-Timing":                  true,
+	"Openai-Model":                   true,
+	"Openai-Processing-Ms":           true,
+	"Openai-Version":                 true,
+	"X-Models-Etag":                  true,
+	"X-Reasoning-Included":           true,
+	"X-Codex-Turn-State":             true,
+	"X-Ratelimit-Limit-Requests":     true,
+	"X-Ratelimit-Remaining-Requests": true,
+	"X-Ratelimit-Reset-Requests":     true,
+	"X-Ratelimit-Limit-Tokens":       true,
+	"X-Ratelimit-Remaining-Tokens":   true,
+	"X-Ratelimit-Reset-Tokens":       true,
+	"X-Request-Id":                   true,
+	"Openai-Request-Id":              true,
+	"Request-Id":                     true,
+}
+
 func allowedRequestHeaders(source http.Header) http.Header {
 	result := make(http.Header)
 	for name, values := range source {
@@ -62,17 +85,50 @@ func allowedRequestHeaders(source http.Header) http.Header {
 	return result
 }
 
-func copyResponseHeaders(destination, source http.Header) *time.Duration {
-	connectionHeaders := nominatedConnectionHeaders(source)
+func copyResponseHeaders(destination, source http.Header, gatewayRequestID string) *time.Duration {
 	for name, values := range source {
-		if !safeResponseHeader(name) || connectionHeaders[strings.ToLower(name)] {
+		canonical := http.CanonicalHeaderKey(name)
+		if !publicResponseHeaders[canonical] {
+			continue
+		}
+		if isProviderRequestIDHeader(canonical) {
+			if gatewayRequestID == "" {
+				continue
+			}
+			for range values {
+				destination.Add(canonical, gatewayRequestID)
+			}
 			continue
 		}
 		for _, value := range values {
-			destination.Add(name, value)
+			destination.Add(canonical, value)
 		}
 	}
 	return mergeCoreTTFB(destination, source)
+}
+
+func isProviderRequestIDHeader(name string) bool {
+	return name == "X-Request-Id" || name == "Openai-Request-Id" || name == "Request-Id"
+}
+
+func providerRequestIDFromHeaders(source http.Header) *string {
+	value := source.Get(protocolv1.ProviderRequestIDHeader)
+	if !validProviderRequestID(value) {
+		return nil
+	}
+	return &value
+}
+
+func validProviderRequestID(value string) bool {
+	if len(value) == 0 || len(value) > 512 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if value[index] < 0x21 || value[index] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 func mergeCoreTTFB(destination, source http.Header) *time.Duration {
@@ -89,31 +145,4 @@ func mergeCoreTTFB(destination, source http.Header) *time.Duration {
 	}
 	value := time.Duration(milliseconds) * time.Millisecond
 	return &value
-}
-
-func nominatedConnectionHeaders(source http.Header) map[string]bool {
-	result := make(map[string]bool)
-	for _, value := range source.Values("Connection") {
-		for _, name := range strings.Split(value, ",") {
-			name = strings.ToLower(strings.TrimSpace(name))
-			if name != "" {
-				result[name] = true
-			}
-		}
-	}
-	return result
-}
-
-func safeResponseHeader(name string) bool {
-	canonical := http.CanonicalHeaderKey(name)
-	if strings.HasPrefix(strings.ToLower(canonical), "x-mini-sub2api-") {
-		return false
-	}
-	switch canonical {
-	case "Connection", "Content-Length", "Keep-Alive", "Proxy-Authenticate",
-		"Proxy-Authorization", "Set-Cookie", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
-		return false
-	default:
-		return true
-	}
 }

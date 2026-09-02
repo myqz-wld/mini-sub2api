@@ -102,13 +102,18 @@ func (*rejectingWebSocketCore) Forward(
 }
 
 func (*rejectingWebSocketCore) DialWebSocket(
-	context.Context, string, string, string, http.Header,
+	_ context.Context, _, _, connectionID string, _ http.Header,
 ) (*websocket.Conn, *http.Response, error) {
 	return nil, &http.Response{
 		StatusCode: http.StatusUpgradeRequired,
 		Header: http.Header{
-			"Content-Type": []string{"application/json"},
-			"Set-Cookie":   []string{"must-not-cross=1"},
+			"Content-Type":                      []string{"application/json"},
+			"Retry-After":                       []string{"5"},
+			"X-Request-Id":                      []string{connectionID},
+			protocolv1.ProviderRequestIDHeader:  []string{"provider-rejection-private"},
+			"X-Codex-Installation-Id":           []string{"must-not-cross"},
+			"X-Unrecognized-Provider-Extension": []string{"must-not-cross"},
+			"Set-Cookie":                        []string{"must-not-cross=1"},
 		},
 		Body: io.NopCloser(strings.NewReader(`{"error":{"code":"websocket_required"}}`)),
 	}, errors.New("upstream rejected handshake")
@@ -124,7 +129,14 @@ func TestWebSocketUpstreamRejectionRemainsHTTP(t *testing.T) {
 	if response == nil || response.StatusCode != http.StatusUpgradeRequired {
 		t.Fatalf("response = %#v, %v", response, err)
 	}
+	requestID := response.Header.Get("X-Mini-Sub2Api-Request-Id")
+	if response.Header.Get("X-Request-Id") != requestID || response.Header.Get("Retry-After") != "5" {
+		t.Fatalf("safe rejection headers = %#v", response.Header)
+	}
 	if response.Header.Get("Set-Cookie") != "" ||
+		response.Header.Get(protocolv1.ProviderRequestIDHeader) != "" ||
+		response.Header.Get("X-Codex-Installation-Id") != "" ||
+		response.Header.Get("X-Unrecognized-Provider-Extension") != "" ||
 		responseBody(t, response) != `{"error":{"code":"websocket_required"}}` {
 		t.Fatalf("rejection = %#v", response)
 	}
