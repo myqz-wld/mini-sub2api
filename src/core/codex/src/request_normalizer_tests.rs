@@ -85,17 +85,13 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     assert!(value["input"][1].get("id").is_none());
     assert_eq!(value["input"][2]["role"], "developer");
     assert!(value["input"][2].get("id").is_none());
+    assert_eq!(value["input"][1]["content"][0]["text"], "Be concise");
     assert_eq!(
-        value["input"][1]["content"][0]["text"],
-        crate::codex_instructions::for_model("gpt-5.6-sol")
-    );
-    assert_eq!(value["input"][2]["content"][0]["text"], "Be concise");
-    assert_eq!(value["input"][3]["role"], "developer");
-    assert_eq!(
-        value["input"][3]["content"],
+        value["input"][2]["content"],
         serde_json::json!([{"type":"input_text","text":"Follow system rules"}])
     );
-    assert_eq!(value["input"][4]["role"], "user");
+    assert_eq!(value["input"][3]["role"], "user");
+    assert_eq!(value["input"].as_array().expect("input").len(), 4);
     let turn_id = value["client_metadata"]["turn_id"]
         .as_str()
         .expect("turn id");
@@ -106,7 +102,7 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
             .get_version_num(),
         7
     );
-    for index in [3, 4] {
+    for index in [2, 3] {
         assert!(value["input"][index].get("id").is_none());
         assert_eq!(
             value["input"][index]["internal_chat_message_metadata_passthrough"]["turn_id"],
@@ -205,15 +201,15 @@ fn normalizes_non_lite_with_current_model_defaults() {
     assert_eq!(value["tools"][0]["description"], "");
     assert_eq!(value["tools"][0]["strict"], false);
     assert_eq!(value["tools"][0]["parameters"], serde_json::json!({}));
-    assert_eq!(
-        value["instructions"],
-        crate::codex_instructions::for_model("gpt-5.4")
-    );
+    assert_eq!(value["instructions"], "Be concise");
     assert_eq!(value["input"][0]["role"], "developer");
-    assert_eq!(value["input"][0]["content"][0]["text"], "Be concise");
-    assert_eq!(value["input"][1]["role"], "developer");
-    assert_eq!(value["input"][2]["role"], "user");
-    assert_eq!(value["input"][2]["type"], "message");
+    assert_eq!(
+        value["input"][0]["content"][0]["text"],
+        "Follow system rules"
+    );
+    assert_eq!(value["input"][1]["role"], "user");
+    assert_eq!(value["input"][1]["type"], "message");
+    assert_eq!(value["input"].as_array().expect("input").len(), 2);
     assert_eq!(value["parallel_tool_calls"], true);
     assert_eq!(value["reasoning"]["effort"], "medium");
     assert!(value["reasoning"].get("context").is_none());
@@ -329,10 +325,7 @@ async fn filters_unsupported_fields_from_already_subscription_shaped_json() {
         7
     );
     assert_eq!(value["input"][0]["type"], "additional_tools");
-    assert_eq!(
-        value["input"][1]["content"][0]["text"],
-        crate::codex_instructions::for_model("gpt-5.6-sol")
-    );
+    assert_eq!(value["input"].as_array().expect("input").len(), 1);
 }
 
 #[test]

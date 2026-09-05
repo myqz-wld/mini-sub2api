@@ -290,26 +290,19 @@ func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any
 	t.Helper()
 	value := decodeRequestObject(t, body)
 	input, ok := value["input"].([]any)
-	if !ok || len(input) != len(messages)+3 {
-		t.Fatalf("lite input count = %d, want %d", len(input), len(messages)+3)
+	if !ok || len(input) != len(messages)+2 {
+		t.Fatalf("lite input count = %d, want %d", len(input), len(messages)+2)
 	}
 	additional, ok := input[0].(map[string]any)
 	if !ok || additional["type"] != "additional_tools" ||
 		!jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
 		t.Fatalf("lite additional tools = %#v", input[0])
 	}
-	assertCodexBaseDeveloperMessage(t, input, "gpt-5.6-sol")
-	baseText, baseOK := developerMessageText(input[1])
-	if !baseOK {
-		t.Fatal("Lite canonical base is not the first developer message after tools")
-	}
-	assertCodexBaseInstructions(t, baseText, "gpt-5.6-sol")
-	assertDeveloperMessageText(t, input[2], "Answer both user messages.")
-	assertNormalizedMessages(t, input[3:], messages)
+	assertDeveloperMessageText(t, input[1], "Answer both user messages.")
+	assertNormalizedMessages(t, input[2:], messages)
 	base := input[1].(map[string]any)
-	custom := input[2].(map[string]any)
-	if additional["id"] != nil || base["id"] != nil || custom["id"] != nil {
-		t.Fatal("synthetic Lite tools/base/custom items received ids")
+	if additional["id"] != nil || base["id"] != nil {
+		t.Fatal("synthetic Lite tools/base items received ids")
 	}
 	if value["tools"] != nil || value["instructions"] != nil || value["store"] != false ||
 		value["stream"] != true || value["parallel_tool_calls"] != false {
@@ -324,15 +317,16 @@ func assertNonLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []
 	if !ok {
 		t.Fatalf("non-lite input = %#v", value["input"])
 	}
-	if len(input) != len(messages)+1 {
-		t.Fatalf("non-lite input count = %d, want %d", len(input), len(messages)+1)
+	if len(input) != len(messages) {
+		t.Fatalf("non-lite input count = %d, want %d", len(input), len(messages))
 	}
-	assertDeveloperMessageText(t, input[0], "Look up the requested order.")
-	assertNormalizedMessages(t, input[1:], messages)
+	assertNormalizedMessages(t, input, messages)
 	if !jsonEqual(value["tools"], canonicalExpectedTools(tools)) {
 		t.Fatalf("non-lite messages/tools = %#v", value)
 	}
-	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4-mini")
+	if value["instructions"] != "Look up the requested order." {
+		t.Fatal("non-lite caller base instructions changed")
+	}
 	if value["store"] != false ||
 		value["stream"] != true || value["parallel_tool_calls"] != true ||
 		value["tool_choice"] != "auto" {
@@ -350,12 +344,13 @@ func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	if !ok {
 		t.Fatalf("native subscription input = %#v", value["input"])
 	}
-	if len(input) != len(messages)+1 {
-		t.Fatalf("native subscription input count = %d, want %d", len(input), len(messages)+1)
+	if len(input) != len(messages) {
+		t.Fatalf("native subscription input count = %d, want %d", len(input), len(messages))
 	}
-	assertDeveloperMessageText(t, input[0], "Continue the existing turn.")
-	assertMessageSemantics(t, input[1:], messages)
-	assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4")
+	assertMessageSemantics(t, input, messages)
+	if value["instructions"] != "Continue the existing turn." {
+		t.Fatal("native subscription caller base instructions changed")
+	}
 	if value["model"] != "gpt-5.4" ||
 		value["store"] != false || value["stream"] != true || value["tool_choice"] != "auto" ||
 		value["parallel_tool_calls"] != true || !isUUIDVersion(value["prompt_cache_key"], '7') {

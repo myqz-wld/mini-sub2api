@@ -97,7 +97,7 @@ pub(super) fn apply(
     } else {
         normalize_input(object)
     };
-    codex_instructions::apply(object, model_profile.responses_lite, lite_incremental)?;
+    codex_instructions::apply(object, model_profile.responses_lite, already_lite)?;
     if model_profile.responses_lite {
         if !already_lite {
             relocate_lite_tools(object);
@@ -311,7 +311,7 @@ fn rewrite_subscription_system_roles(object: &mut Map<String, Value>) {
 fn lite_incremental(object: &Map<String, Value>, transport: EmulationTransport) -> bool {
     transport == EmulationTransport::WebSocket
         && object.get("tools").is_none()
-        && object.get("instructions").is_none()
+        && !codex_instructions::has_valid_instructions(object)
         && object.contains_key("previous_response_id")
 }
 

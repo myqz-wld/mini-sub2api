@@ -221,10 +221,11 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 				assertCodexOpenAIProfileCapture(t, capture)
 				assertSharedRuntimeUserAgent(t, capture)
 				value := decodeRequestObject(t, capture.Body)
-				assertCodexBaseInstructions(t, value["instructions"], "gpt-5.4")
+				if value["instructions"] != "Use the available tools only when needed." {
+					t.Fatal("caller base instructions changed")
+				}
 				input := value["input"].([]any)
-				assertDeveloperMessageText(t, input[0], "Use the available tools only when needed.")
-				assertNormalizedMessages(t, input[1:], messages)
+				assertNormalizedMessages(t, input, messages)
 				if !isUUIDVersion(capture.Headers.Get("Session-Id"), '7') ||
 					!isUUIDVersion(capture.Headers.Get("Thread-Id"), '7') ||
 					!isUUIDVersion(capture.Headers.Get("X-Codex-Installation-Id"), '4') ||

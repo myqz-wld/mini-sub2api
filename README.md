@@ -127,7 +127,7 @@ never changes authentication or credential visibility.
 
 ### Compatibility and state
 
-- Codex profiles pin the 0.149.0 user agent, `originator`, `version`, base prompt, supported
+- Codex profiles pin the 0.149.0 user agent, `originator`, `version`, fallback base prompts, supported
   request fields, and model defaults. Unknown structured members are removed; documented
   schemas and free-form payloads stay opaque. Responses Lite always forces
   `parallel_tool_calls:false`.
@@ -163,6 +163,31 @@ never changes authentication or credential visibility.
 
 See [the v1 protocol reference](src/protocol/v1/README.md) for the complete HTTP, SSE, WebSocket,
 identity, and failure contracts.
+
+### Base and developer instructions
+
+Both Codex profiles prefer caller-supplied base instructions. A valid top-level `instructions`
+value is a string containing non-whitespace text; its exact text, including surrounding whitespace,
+personality variants, template-like content, and custom suffixes, is preserved. Missing, `null`,
+empty, whitespace-only, and non-string values use the model's pinned Codex `0.149.0` default.
+
+| Request shape | Base instruction placement |
+|---|---|
+| Normal Responses | Keep the selected base in top-level `instructions`. |
+| Normal Responses converted to Lite | Emit `additional_tools`, one selected-base `developer` message, then original input; remove top-level `instructions`. |
+| Native Lite, recognized by a leading `additional_tools` item | Preserve input instructions; only an explicit valid top-level base is inserted after tools. Remove top-level `instructions`, with no implicit fallback. |
+| Lite WebSocket delta with `previous_response_id`, no top-level `tools`, and no valid top-level base | Preserve the delta without repeating a base instruction. |
+
+Existing developer messages retain their text and relative order. Subscription messages with the
+`system` role become `developer` at the same position; their content is preserved. Multi-turn
+messages, tool calls, and results retain their relative order. The core does not split known prompt
+prefixes, merge messages, or deduplicate caller content, even when the caller repeats a base prompt.
+
+The fallback snapshots cover all eight catalog models plus the generic and experimental fallbacks.
+Only bundled defaults are rendered ahead of time; caller text is never rendered by the core.
+The [snapshot generator and checks](src/core/codex/prompts/codex-0.149.0/README.md) protect against
+unresolved template placeholders. Ordinary callers using API keys keep the byte-transparent
+`BareOpenAi` path.
 
 ## Administration
 

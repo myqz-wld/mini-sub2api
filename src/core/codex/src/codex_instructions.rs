@@ -30,27 +30,53 @@ pub(crate) fn for_model(model: &str) -> &'static str {
         .unwrap_or(FALLBACK_INSTRUCTIONS)
 }
 
-/// Replaces the caller-owned base prompt with the Codex 0.149.0 model prompt and preserves a
-/// non-Codex caller prompt as a developer message. Responses Lite carries the base prompt in its
-/// input prefix; normal Responses uses the top-level `instructions` field.
+/// Keeps a nonblank caller base prompt verbatim, using the model default only when needed.
+/// Normal Responses carries it at the top level. Lite carries it after the tool prefix; native
+/// Lite input (including incremental turns) already owns its instructions and needs no fallback.
 pub(crate) fn apply(
     object: &mut Map<String, Value>,
     responses_lite: bool,
-    lite_incremental: bool,
+    already_lite: bool,
 ) -> Result<(), ()> {
-    let model = object.get("model").and_then(Value::as_str).unwrap_or("");
-    let base = for_model(model);
-    let custom = take_custom_instructions(object);
-
-    if responses_lite {
-        if lite_incremental {
-            return Ok(());
+    if !responses_lite {
+        if object.get("input").is_some_and(|input| !input.is_array()) {
+            return Err(());
         }
-        replace_input_base(object, base, custom)
-    } else {
-        object.insert("instructions".to_string(), Value::String(base.to_string()));
-        replace_input_base_messages(object, custom)
+        if !has_valid_instructions(object) {
+            let model = object.get("model").and_then(Value::as_str).unwrap_or("");
+            object.insert(
+                "instructions".to_string(),
+                Value::String(for_model(model).to_string()),
+            );
+        }
+        return Ok(());
     }
+
+    let base = match object.remove("instructions") {
+        Some(Value::String(text)) if !text.trim().is_empty() => text,
+        _ if already_lite => return Ok(()),
+        _ => {
+            let model = object.get("model").and_then(Value::as_str).unwrap_or("");
+            for_model(model).to_string()
+        }
+    };
+    let input = input_items(object)?;
+    let insertion = usize::from(
+        input
+            .first()
+            .and_then(|item| item.get("type"))
+            .and_then(Value::as_str)
+            == Some("additional_tools"),
+    );
+    input.insert(insertion, developer_message(base));
+    Ok(())
+}
+
+pub(crate) fn has_valid_instructions(object: &Map<String, Value>) -> bool {
+    object
+        .get("instructions")
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
 }
 
 fn find_by_longest_prefix(model: &str) -> Option<&'static str> {
@@ -74,103 +100,12 @@ fn find_by_namespaced_suffix(model: &str) -> Option<&'static str> {
     find_by_longest_prefix(suffix)
 }
 
-fn take_custom_instructions(object: &mut Map<String, Value>) -> Option<String> {
-    match object.remove("instructions") {
-        Some(Value::String(instructions)) if !instructions.is_empty() => {
-            let custom = known_prefix(&instructions)
-                .map(|base| instructions[base.len()..].to_string())
-                .unwrap_or(instructions);
-            (!custom.is_empty()).then_some(custom)
-        }
-        _ => None,
-    }
-}
-
-fn replace_input_base(
-    object: &mut Map<String, Value>,
-    base: &str,
-    custom: Option<String>,
-) -> Result<(), ()> {
-    let input = input_items(object)?;
-    strip_known_base_prefixes(input);
-    let insertion = usize::from(
-        input
-            .first()
-            .and_then(Value::as_object)
-            .and_then(|item| item.get("type"))
-            .and_then(Value::as_str)
-            == Some("additional_tools"),
-    );
-    input.insert(insertion, developer_message(base.to_string()));
-    if let Some(custom) = custom {
-        input.insert(insertion + 1, developer_message(custom));
-    }
-    Ok(())
-}
-
-fn replace_input_base_messages(
-    object: &mut Map<String, Value>,
-    custom: Option<String>,
-) -> Result<(), ()> {
-    let Some(input) = object.get_mut("input") else {
-        if let Some(custom) = custom {
-            object.insert(
-                "input".to_string(),
-                Value::Array(vec![developer_message(custom)]),
-            );
-        }
-        return Ok(());
-    };
-    let input = input.as_array_mut().ok_or(())?;
-    strip_known_base_prefixes(input);
-    if let Some(custom) = custom {
-        input.insert(0, developer_message(custom));
-    }
-    Ok(())
-}
-
 fn input_items(object: &mut Map<String, Value>) -> Result<&mut Vec<Value>, ()> {
     object
         .entry("input".to_string())
         .or_insert_with(|| Value::Array(Vec::new()))
         .as_array_mut()
         .ok_or(())
-}
-
-fn strip_known_base_prefixes(input: &mut Vec<Value>) {
-    input.retain_mut(|item| {
-        let Some(text) = developer_message_text_mut(item) else {
-            return true;
-        };
-        let Some(base) = known_prefix(text) else {
-            return true;
-        };
-        let custom = text[base.len()..].to_string();
-        if custom.is_empty() {
-            return false;
-        }
-        *text = custom;
-        true
-    });
-}
-
-fn developer_message_text_mut(item: &mut Value) -> Option<&mut String> {
-    let item = item.as_object_mut()?;
-    if item.get("role").and_then(Value::as_str) != Some("developer") {
-        return None;
-    }
-    let content = item.get_mut("content")?.as_array_mut()?;
-    let [content] = content.as_mut_slice() else {
-        return None;
-    };
-    let content = content.as_object_mut()?;
-    if content.get("type").and_then(Value::as_str) != Some("input_text") {
-        return None;
-    }
-    match content.get_mut("text")? {
-        Value::String(text) => Some(text),
-        _ => None,
-    }
 }
 
 fn developer_message(text: String) -> Value {
@@ -181,21 +116,6 @@ fn developer_message(text: String) -> Value {
     })
 }
 
-fn known_prefix(instructions: &str) -> Option<&'static str> {
-    [
-        GPT_5_6_INSTRUCTIONS,
-        GPT_5_5_INSTRUCTIONS,
-        GPT_5_4_INSTRUCTIONS,
-        GPT_5_4_MINI_INSTRUCTIONS,
-        GPT_5_2_INSTRUCTIONS,
-        EXP_CODEX_PERSONALITY_INSTRUCTIONS,
-        FALLBACK_INSTRUCTIONS,
-    ]
-    .into_iter()
-    .filter(|base| instructions.starts_with(base))
-    .max_by_key(|base| base.len())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,6 +124,10 @@ mod tests {
 
     #[test]
     fn model_lookup_matches_catalog_prefix_and_namespace_rules() {
+        assert_eq!(MODEL_INSTRUCTIONS.len(), 8);
+        for (model, instructions) in MODEL_INSTRUCTIONS {
+            assert_eq!(for_model(model), *instructions, "catalog model {model}");
+        }
         assert_eq!(for_model("gpt-5.6-sol"), GPT_5_6_INSTRUCTIONS);
         assert_eq!(for_model("gpt-5.6-terra-preview"), GPT_5_6_INSTRUCTIONS);
         assert_eq!(
@@ -221,6 +145,17 @@ mod tests {
             "future-model",
         ] {
             assert_eq!(for_model(model), FALLBACK_INSTRUCTIONS, "model {model}");
+        }
+    }
+
+    #[test]
+    fn all_bundled_defaults_are_nonblank_and_fully_rendered() {
+        for (model, prompt) in MODEL_INSTRUCTIONS.iter().copied().chain([
+            ("fallback", FALLBACK_INSTRUCTIONS),
+            ("exp-codex-personality", EXP_CODEX_PERSONALITY_INSTRUCTIONS),
+        ]) {
+            assert!(!prompt.trim().is_empty(), "empty prompt for {model}");
+            assert!(!prompt.contains("{{"), "unresolved placeholder for {model}");
         }
     }
 

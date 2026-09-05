@@ -157,18 +157,31 @@ false value it extracts the terminal `response.completed`, `response.failed`, or
 not parsed or converted. Aggregated SSE input is capped at 64 MiB and fails closed when the cap or
 terminal-event contract is violated.
 
-The base prompt is also a fixed part of both Codex-emulated profiles. The core resolves the
-model-specific effective default from the Codex `0.149.0` catalog (including its empty default
-personality substitution), using longest-prefix and single-namespace matching plus the pinned
-fallback for an unknown model. For normal Responses, the canonical prompt replaces top-level
-`instructions`; a non-empty caller value that is not a known pinned prompt is preserved as a
-leading `developer` message. For Responses Lite, top-level `instructions` is absent and the input
-prefix is `additional_tools`, canonical base-prompt `developer` message, optional caller-custom
-`developer` message, then caller input. Known pinned prompts already present in either carrier are
-replaced and deduplicated. A Lite WebSocket delta with `previous_response_id` retains its incremental
-shape and does not resend the base prompt. An invalid input shape that cannot carry a caller
-customization fails closed, and the final expanded body remains subject to the configured size
-limit. `BareOpenAi` is not parsed or prompted.
+Base instructions describe the model's base behavior; developer input messages carry additional
+caller rules and runtime instructions. Both Codex-emulated profiles preserve a top-level
+`instructions` string verbatim when it contains non-whitespace text, including surrounding
+whitespace. Missing, `null`, empty, whitespace-only, numeric, boolean, array, and object values use
+the model-specific effective default from the Codex `0.149.0` catalog when a base is needed. Model
+lookup uses longest-prefix and single-namespace matching, with a pinned fallback for unknown models
+and the special experimental fallback. All eight catalog defaults and both fallbacks are complete
+rendered texts; generation and regression checks reject unresolved template placeholders. Valid
+caller text is never rendered or split by known template prefixes.
+
+Normal Responses keeps the selected base in top-level `instructions`; it never relocates valid
+caller base text into developer input. Conversion to Responses Lite removes top-level
+`instructions` and emits `additional_tools`, one developer message containing the selected base,
+then original input. Native Lite is recognized by a leading `additional_tools` item: its input
+instructions are retained, with no fallback inserted when the top-level value is absent or invalid.
+An explicit valid top-level base is inserted immediately after its tools and removed from the top
+level. A Lite WebSocket delta suppresses the fallback only when it has `previous_response_id`, no
+top-level `tools`, and no valid top-level `instructions` (including blank and invalid values).
+
+Existing developer messages are neither merged nor removed, including repeated text and known
+Codex prompts. Subscription `system` messages become `developer` while retaining content and
+position. Multi-turn input, tool calls, and results preserve their relative order through the
+existing item normalization. Invalid input that cannot carry a selected Lite base fails closed;
+normal Responses input validation and the final encoded-size limit remain enforced. `BareOpenAi`
+is not parsed or prompted.
 
 For both Codex-emulated profiles, the core replaces the complete client identity with
 `User-Agent: codex-tui/0.149.0 (<runtime OS>; <runtime architecture>) <runtime terminal> (codex-tui; 0.149.0)`,

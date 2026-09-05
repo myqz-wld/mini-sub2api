@@ -2,170 +2,324 @@ use super::*;
 use crate::codex_instructions;
 use pretty_assertions::assert_eq;
 
-#[test]
-fn normal_codex_profiles_pin_base_and_append_custom_as_developer() {
-    for profile in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ] {
-        for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
-            let normalized = prepare(
-                profile,
-                serde_json::json!({
-                    "type": "response.create",
-                    "model": "gpt-5.4",
-                    "instructions": "caller custom instructions",
-                    "input": [{"role":"user","content":"hello"}],
-                    "tools": []
-                }),
-                transport,
-            )
-            .expect("normalized request");
+const PROFILES: [UpstreamProfile; 2] = [
+    UpstreamProfile::CodexOpenAi149,
+    UpstreamProfile::CodexSubscription149,
+];
+const TRANSPORTS: [EmulationTransport; 2] =
+    [EmulationTransport::Http, EmulationTransport::WebSocket];
 
-            assert_eq!(
-                normalized["instructions"],
-                codex_instructions::for_model("gpt-5.4")
-            );
-            assert_developer_text(&normalized["input"][0], "caller custom instructions");
-            assert_eq!(normalized["input"][1]["role"], "user");
+#[test]
+fn normal_and_converted_lite_select_one_base_and_preserve_caller_history() {
+    for profile in PROFILES {
+        for transport in TRANSPORTS {
+            for (model, lite) in [("gpt-5.4", false), ("gpt-5.6-sol", true)] {
+                for (instructions, expected) in instruction_cases() {
+                    let history = caller_history();
+                    let mut caller = serde_json::json!({
+                        "type":"response.create","model":model,"input":history,
+                        "tools":[{"type":"function","name":"lookup"}]
+                    });
+                    set_instructions(&mut caller, instructions);
+                    let normalized =
+                        prepare(profile, caller, transport).expect("normalized request");
+                    let expected = expected
+                        .unwrap_or_else(|| codex_instructions::for_model(model).to_string());
+                    let input = normalized["input"].as_array().expect("input");
+                    let offset = if lite {
+                        assert!(normalized.get("instructions").is_none());
+                        assert!(normalized.get("tools").is_none());
+                        assert_eq!(input[0]["type"], "additional_tools");
+                        assert_developer_text(&input[1], &expected);
+                        2
+                    } else {
+                        assert_eq!(normalized["instructions"], expected);
+                        0
+                    };
+                    assert_history(&input[offset..], &history, profile);
+                }
+            }
         }
     }
 }
 
 #[test]
-fn normal_profile_does_not_duplicate_known_codex_prompts() {
-    let caller_base_with_custom = format!(
-        "{}{}",
-        codex_instructions::for_model("gpt-5.4"),
-        "caller suffix after known base"
-    );
-    let normalized = prepare(
-        UpstreamProfile::CodexOpenAi149,
-        serde_json::json!({
-            "model": "gpt-5.4-mini",
-            "instructions": caller_base_with_custom,
-            "input": [
-                developer_message(codex_instructions::for_model("gpt-5.2")),
-                developer_message("existing custom developer message"),
-                {"role":"user","content":"hello"}
-            ],
-            "tools": []
-        }),
-        EmulationTransport::Http,
-    )
-    .expect("normalized request");
-
-    assert_eq!(
-        normalized["instructions"],
-        codex_instructions::for_model("gpt-5.4-mini")
-    );
-    assert_eq!(normalized["input"].as_array().expect("input").len(), 3);
-    assert_developer_text(&normalized["input"][0], "caller suffix after known base");
-    assert_developer_text(&normalized["input"][1], "existing custom developer message");
-    assert_eq!(normalized["input"][2]["role"], "user");
+fn native_lite_preserves_input_and_only_inserts_an_explicit_valid_base() {
+    for profile in PROFILES {
+        for transport in TRANSPORTS {
+            // A leading additional_tools item also selects Lite for a normally non-Lite model.
+            for model in ["gpt-5.6-terra", "gpt-5.4-mini"] {
+                for (instructions, expected) in instruction_cases() {
+                    // Native Lite must not invent an input base even when there is none already.
+                    for history in [Vec::new(), caller_history()] {
+                        let mut input = vec![serde_json::json!({
+                            "type":"additional_tools","role":"developer","tools":[]
+                        })];
+                        input.extend(history.clone());
+                        let mut caller = serde_json::json!({
+                            "type":"response.create","model":model,"input":input
+                        });
+                        set_instructions(&mut caller, instructions.clone());
+                        let normalized =
+                            prepare(profile, caller, transport).expect("normalized request");
+                        assert!(normalized.get("instructions").is_none());
+                        assert!(normalized.get("tools").is_none());
+                        let input = normalized["input"].as_array().expect("input");
+                        assert_eq!(input[0]["type"], "additional_tools");
+                        let offset = if let Some(base) = &expected {
+                            assert_developer_text(&input[1], base);
+                            2
+                        } else {
+                            1
+                        };
+                        assert_history(&input[offset..], &history, profile);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]
-fn lite_codex_profiles_use_tools_base_custom_then_caller_input() {
-    for profile in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ] {
-        for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
-            let normalized = prepare(
-                profile,
-                serde_json::json!({
-                    "type": "response.create",
-                    "model": "gpt-5.6-sol",
-                    "instructions": "caller custom instructions",
-                    "input": [{"role":"user","content":"hello"}],
-                    "tools": [{"type":"function","name":"lookup"}]
-                }),
-                transport,
-            )
-            .expect("normalized request");
+fn lite_incremental_websocket_ignores_all_absent_or_invalid_top_level_bases() {
+    for profile in PROFILES {
+        for instructions in invalid_instructions() {
+            for history in [Vec::new(), caller_history()] {
+                let mut caller = serde_json::json!({
+                    "type":"response.create","model":"gpt-5.6-luna",
+                    "previous_response_id":"resp_previous","input":history
+                });
+                set_instructions(&mut caller, instructions.clone());
+                let normalized = prepare(profile, caller, EmulationTransport::WebSocket)
+                    .expect("normalized request");
+                assert!(normalized.get("instructions").is_none());
+                assert!(normalized.get("tools").is_none());
+                assert_eq!(normalized["previous_response_id"], "resp_previous");
+                assert_history(
+                    normalized["input"].as_array().expect("input"),
+                    &history,
+                    profile,
+                );
+            }
+        }
+    }
+}
 
+#[test]
+fn lite_base_is_inserted_when_any_incremental_condition_is_not_met() {
+    for profile in PROFILES {
+        for (transport, previous, tools, instructions, expected) in [
+            (EmulationTransport::Http, true, false, Value::Null, None),
+            (
+                EmulationTransport::WebSocket,
+                false,
+                false,
+                Value::Null,
+                None,
+            ),
+            (EmulationTransport::WebSocket, true, true, Value::Null, None),
+            (
+                EmulationTransport::WebSocket,
+                true,
+                false,
+                Value::String("  explicit continuation base\n".to_string()),
+                Some("  explicit continuation base\n"),
+            ),
+        ] {
+            let mut caller = serde_json::json!({
+                "type":"response.create","model":"gpt-5.6-luna",
+                "input":[],"instructions":instructions
+            });
+            if previous {
+                caller["previous_response_id"] = Value::String("resp_previous".to_string());
+            }
+            if tools {
+                caller["tools"] = serde_json::json!([]);
+            }
+            let normalized = prepare(profile, caller, transport).expect("normalized request");
             assert!(normalized.get("instructions").is_none());
-            assert_eq!(normalized["input"][0]["type"], "additional_tools");
+            let input = normalized["input"].as_array().expect("input");
+            assert_eq!(input.len(), 2);
+            assert_eq!(input[0]["type"], "additional_tools");
             assert_developer_text(
-                &normalized["input"][1],
-                codex_instructions::for_model("gpt-5.6-sol"),
+                &input[1],
+                expected.unwrap_or_else(|| codex_instructions::for_model("gpt-5.6-luna")),
             );
-            assert_developer_text(&normalized["input"][2], "caller custom instructions");
-            assert_eq!(normalized["input"][3]["role"], "user");
         }
     }
 }
 
 #[test]
-fn already_shaped_lite_request_replaces_known_base_and_preserves_custom() {
-    let old_base_with_custom = format!(
-        "{}{}",
-        codex_instructions::for_model("gpt-5.4"),
-        "custom suffix from old base carrier"
-    );
-    let normalized = prepare(
-        UpstreamProfile::CodexOpenAi149,
-        serde_json::json!({
-            "type": "response.create",
-            "model": "gpt-5.6-terra",
-            "input": [
-                {"type":"additional_tools","role":"developer","tools":[]},
-                developer_message(&old_base_with_custom),
-                developer_message("existing custom developer message"),
-                {"type":"message","role":"user","content":[
-                    {"type":"input_text","text":"hello"}
-                ]}
-            ]
-        }),
-        EmulationTransport::WebSocket,
-    )
-    .expect("normalized request");
-
-    assert!(normalized.get("instructions").is_none());
-    assert_eq!(normalized["input"][0]["type"], "additional_tools");
-    assert_developer_text(
-        &normalized["input"][1],
-        codex_instructions::for_model("gpt-5.6-terra"),
-    );
-    assert_developer_text(
-        &normalized["input"][2],
-        "custom suffix from old base carrier",
-    );
-    assert_developer_text(&normalized["input"][3], "existing custom developer message");
-    assert_eq!(normalized["input"][4]["role"], "user");
+fn normal_responses_continuation_still_fills_missing_base() {
+    for profile in PROFILES {
+        let normalized = prepare(
+            profile,
+            serde_json::json!({
+                "type":"response.create","model":"gpt-5.4",
+                "previous_response_id":"resp_previous","input":[]
+            }),
+            EmulationTransport::WebSocket,
+        )
+        .expect("normalized request");
+        assert_eq!(
+            normalized["instructions"],
+            codex_instructions::for_model("gpt-5.4")
+        );
+        assert_eq!(normalized["input"], serde_json::json!([]));
+    }
 }
 
 #[test]
-fn lite_incremental_websocket_request_does_not_repeat_base_prompt() {
-    let normalized = prepare(
-        UpstreamProfile::CodexOpenAi149,
-        serde_json::json!({
-            "type": "response.create",
-            "model": "gpt-5.6-luna",
-            "previous_response_id": "resp_previous",
-            "input": []
-        }),
-        EmulationTransport::WebSocket,
-    )
-    .expect("normalized request");
-
-    assert!(normalized.get("instructions").is_none());
-    assert_eq!(normalized["input"], serde_json::json!([]));
+fn base_selection_handles_missing_and_string_input_without_extra_developer_messages() {
+    for profile in PROFILES {
+        for transport in TRANSPORTS {
+            for (model, lite) in [("gpt-5.4", false), ("gpt-5.6-sol", true)] {
+                for input in [None, Some(Value::String("hello".to_string()))] {
+                    let mut caller = serde_json::json!({
+                        "model":model,"instructions":"caller base"
+                    });
+                    if let Some(input) = &input {
+                        caller["input"] = input.clone();
+                    }
+                    let normalized =
+                        prepare(profile, caller, transport).expect("normalized request");
+                    if lite {
+                        let items = normalized["input"].as_array().expect("input");
+                        assert_eq!(items.len(), 2 + usize::from(input.is_some()));
+                        assert_eq!(items[0]["type"], "additional_tools");
+                        assert_developer_text(&items[1], "caller base");
+                    } else {
+                        assert_eq!(normalized["instructions"], "caller base");
+                        assert_eq!(normalized.get("input").is_some(), input.is_some());
+                    }
+                    if input.is_some() {
+                        let items = normalized["input"].as_array().expect("input");
+                        let user = items.last().expect("user message");
+                        assert_eq!(user["role"], "user");
+                        assert_eq!(user["content"][0]["text"], "hello");
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]
-fn custom_instructions_fail_closed_when_input_cannot_hold_developer_message() {
-    let result = prepare(
-        UpstreamProfile::CodexOpenAi149,
-        serde_json::json!({
-            "model": "gpt-5.4",
-            "instructions": "caller custom instructions",
-            "input": {"invalid":"shape"}
-        }),
-        EmulationTransport::Http,
-    );
-    assert!(result.is_err());
+fn invalid_input_still_fails_closed_and_fallback_respects_request_size_limit() {
+    for model in ["gpt-5.4", "gpt-5.6-sol"] {
+        assert!(
+            prepare(
+                UpstreamProfile::CodexOpenAi149,
+                serde_json::json!({
+                    "model":model,"instructions":"caller base","input":{"invalid":"shape"}
+                }),
+                EmulationTransport::Http,
+            )
+            .is_err()
+        );
+        let caller = serde_json::json!({"model":model,"input":[]});
+        let result = prepare_codex_overlay_for_test(
+            UpstreamProfile::CodexOpenAi149,
+            EmulationTransport::Http,
+            &HeaderMap::new(),
+            Bytes::from(serde_json::to_vec(&caller).expect("caller JSON")),
+            codex_instructions::for_model(model).len() / 2,
+        );
+        assert!(result.is_err());
+    }
+}
+
+fn instruction_cases() -> Vec<(Option<Value>, Option<String>)> {
+    let mut cases = invalid_instructions()
+        .into_iter()
+        .map(|value| (value, None))
+        .collect::<Vec<_>>();
+    for text in [
+        "caller custom instructions".to_string(),
+        " \t保留两端空白\r\n".to_string(),
+        "caller template {{ personality }} and {{ untouched }}".to_string(),
+        codex_instructions::for_model("gpt-5.4").to_string(),
+        format!(
+            "{}caller suffix after known base",
+            codex_instructions::for_model("gpt-5.4")
+        ),
+        codex_instructions::for_model("gpt-5.6-sol").replacen(
+            "# Personality",
+            "# Caller personality",
+            1,
+        ),
+    ] {
+        cases.push((Some(Value::String(text.clone())), Some(text)));
+    }
+    cases
+}
+
+fn invalid_instructions() -> Vec<Option<Value>> {
+    vec![
+        None,
+        Some(Value::Null),
+        Some(serde_json::json!("")),
+        Some(serde_json::json!(" \t\r\n")),
+        Some(serde_json::json!("\u{00a0}\u{3000}")),
+        Some(serde_json::json!(42)),
+        Some(serde_json::json!(0)),
+        Some(serde_json::json!(1.5)),
+        Some(serde_json::json!(true)),
+        Some(serde_json::json!(false)),
+        Some(serde_json::json!([])),
+        Some(serde_json::json!(["not a base"])),
+        Some(serde_json::json!({})),
+        Some(serde_json::json!({"text":"not a base"})),
+    ]
+}
+
+fn caller_history() -> Vec<Value> {
+    let known = codex_instructions::for_model("gpt-5.4");
+    vec![
+        developer_message(known),
+        developer_message(&format!("{known}caller developer suffix")),
+        serde_json::json!({"type":"message","role":"system","content":[
+            {"type":"input_text","text":known}
+        ]}),
+        serde_json::json!({"type":"message","role":"user","content":[
+            {"type":"input_text","text":"first question"}
+        ]}),
+        serde_json::json!({"type":"message","role":"assistant","content":[
+            {"type":"output_text","text":"first answer"}
+        ]}),
+        serde_json::json!({"type":"function_call","name":"lookup","call_id":"call_1","arguments":"{}"}),
+        developer_message("  keep repeated rule\n"),
+        serde_json::json!({"type":"function_call_output","call_id":"call_1","output":"result"}),
+        developer_message("  keep repeated rule\n"),
+        serde_json::json!({"type":"message","role":"developer","content":[
+            {"type":"input_text","text":known},{"type":"input_text","text":"second part"}
+        ]}),
+        serde_json::json!({"type":"message","role":"user","content":[
+            {"type":"input_text","text":"continue"}
+        ]}),
+    ]
+}
+
+fn assert_history(actual: &[Value], expected: &[Value], profile: UpstreamProfile) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        for (field, value) in expected.as_object().expect("input item") {
+            if field == "role"
+                && value == "system"
+                && profile == UpstreamProfile::CodexSubscription149
+            {
+                assert_eq!(actual[field], "developer");
+            } else {
+                assert_eq!(&actual[field], value, "history field {field}");
+            }
+        }
+    }
+}
+
+fn set_instructions(caller: &mut Value, instructions: Option<Value>) {
+    if let Some(instructions) = instructions {
+        caller["instructions"] = instructions;
+    }
 }
 
 fn prepare(
@@ -185,9 +339,7 @@ fn prepare(
 
 fn developer_message(text: &str) -> Value {
     serde_json::json!({
-        "type": "message",
-        "role": "developer",
-        "content": [{"type":"input_text","text":text}]
+        "type":"message","role":"developer","content":[{"type":"input_text","text":text}]
     })
 }
 
