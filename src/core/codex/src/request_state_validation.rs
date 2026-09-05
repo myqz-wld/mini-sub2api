@@ -146,6 +146,10 @@ impl ScopeState {
         for (downstream_lookup, entry) in &self.wire_ids {
             validate_wire_id(&entry.downstream_id)?;
             validate_wire_id(&entry.upstream_id)?;
+            if entry.domain == WireIdDomain::ContextWindow {
+                Uuid::parse_str(&entry.downstream_id)?;
+                Uuid::parse_str(&entry.upstream_id)?;
+            }
             anyhow::ensure!(
                 entry.downstream_id != entry.upstream_id,
                 "wire ID pair is not pseudonymized"

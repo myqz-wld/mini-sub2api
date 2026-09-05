@@ -45,7 +45,7 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
         "user": "user_explicit",
         "future_top_level": {"opaque":[1,2,3]}
     });
-    let normalized = prepare_openai(caller.clone(), EmulationTransport::Http);
+    let normalized = prepare_subscription(caller.clone(), EmulationTransport::Http);
 
     for (name, expected) in caller
         .as_object()
@@ -61,6 +61,10 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
                     | "store"
                     | "stream"
                     | "tools"
+                    | "max_output_tokens"
+                    | "temperature"
+                    | "top_p"
+                    | "stream_options"
                     | "truncation"
                     | "user"
             )
@@ -100,7 +104,7 @@ fn explicit_previous_response_id_survives_http_and_websocket_for_both_profiles()
             "previous_response_id": "resp_explicit",
             "input": []
         });
-        let openai = prepare_openai(caller.clone(), transport);
+        let openai = prepare_subscription(caller.clone(), transport);
         let subscription = prepare_subscription(caller, transport);
         assert_eq!(openai["previous_response_id"], "resp_explicit");
         assert_eq!(subscription["previous_response_id"], "resp_explicit");
@@ -123,7 +127,7 @@ fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
         "text": null,
         "previous_response_id": null
     });
-    let normalized = prepare_openai(explicit.clone(), EmulationTransport::Http);
+    let normalized = prepare_subscription(explicit.clone(), EmulationTransport::Http);
     for name in [
         "tool_choice",
         "reasoning",
@@ -139,7 +143,7 @@ fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
 
-    let defaults = prepare_openai(
+    let defaults = prepare_subscription(
         serde_json::json!({"model":"gpt-5.4","input":[]}),
         EmulationTransport::Http,
     );
@@ -166,7 +170,7 @@ fn image_detail_defaults_are_profile_aware_and_explicit_values_are_authoritative
             {"type":"input_image","image_url":"explicit-null","detail":null}
         ]}
     ]);
-    let normal = prepare_openai(
+    let normal = prepare_subscription(
         serde_json::json!({"model":"gpt-5.4","input":input.clone()}),
         EmulationTransport::Http,
     );
@@ -179,7 +183,7 @@ fn image_detail_defaults_are_profile_aware_and_explicit_values_are_authoritative
     assert_image_detail(&normal, "explicit-low", Some(&serde_json::json!("low")));
     assert_image_detail(&normal, "explicit-null", Some(&Value::Null));
 
-    let lite = prepare_openai(
+    let lite = prepare_subscription(
         serde_json::json!({"model":"gpt-5.6-sol","input":input}),
         EmulationTransport::Http,
     );
@@ -191,7 +195,7 @@ fn image_detail_defaults_are_profile_aware_and_explicit_values_are_authoritative
 
 #[test]
 fn lite_relocation_preserves_controls_and_filters_structured_tools() {
-    let normalized = prepare_openai(
+    let normalized = prepare_subscription(
         serde_json::json!({
             "model": "gpt-5.6-sol",
             "instructions": "developer guidance",
@@ -237,7 +241,7 @@ fn lite_relocation_preserves_controls_and_filters_structured_tools() {
 
 #[test]
 fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque() {
-    let normalized = prepare_openai(
+    let normalized = prepare_subscription(
         serde_json::json!({
             "model":"gpt-5.4",
             "input":[
@@ -333,7 +337,7 @@ fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
     let body = Bytes::from_static(br#"{"model":"gpt-5.4","input":[]}"#);
     assert!(
         prepare_codex_overlay_for_test(
-            UpstreamProfile::BareOpenAi,
+            UpstreamProfile::ApiKeyPassthrough,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body.clone(),
@@ -341,10 +345,8 @@ fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
         )
         .is_err()
     );
-    for profile in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ] {
+    {
+        let profile = UpstreamProfile::CodexSubscription1534;
         assert!(
             prepare_codex_overlay_for_test(
                 profile,
@@ -371,11 +373,6 @@ fn system_message_roles_are_rewritten_only_for_subscription() {
                     "arguments":{"role":"system"}}
             ]
         });
-
-        let openai = prepare_openai(caller.clone(), transport);
-        assert_eq!(openai["input"][0]["role"], "system");
-        assert_eq!(openai["input"][1]["role"], "developer");
-        assert_eq!(openai["input"][2]["arguments"]["role"], "system");
 
         let subscription = prepare_subscription(caller, transport);
         assert_eq!(subscription["input"][0]["role"], "developer");
@@ -417,11 +414,6 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
             "temperature":0.2,
             "top_p":0.9
         });
-        let openai = prepare_openai(caller.clone(), transport);
-        assert_eq!(openai["max_output_tokens"], 2048);
-        assert_eq!(openai["temperature"], 0.2);
-        assert_eq!(openai["top_p"], 0.9);
-
         let subscription = prepare_subscription(caller, transport);
         for field in ["max_output_tokens", "temperature", "top_p"] {
             assert!(subscription.get(field).is_none(), "field {field} crossed");
@@ -430,12 +422,8 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
     }
 }
 
-fn prepare_openai(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(UpstreamProfile::CodexOpenAi149, caller, transport)
-}
-
 fn prepare_subscription(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(UpstreamProfile::CodexSubscription149, caller, transport)
+    prepare(UpstreamProfile::CodexSubscription1534, caller, transport)
 }
 
 fn prepare(profile: UpstreamProfile, caller: Value, transport: EmulationTransport) -> Value {

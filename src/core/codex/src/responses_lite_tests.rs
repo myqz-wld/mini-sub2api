@@ -36,7 +36,7 @@ fn groups_default_tools_and_matches_item_identity_metadata() {
     });
     canonicalize_request_items(request.as_object_mut().expect("request"), Some("high"));
     let items = request["input"].as_array().expect("items");
-    assert!(items[2].get("id").is_none());
+    assert_eq!(items[2]["id"], "server-id");
     for item in items {
         assert_eq!(
             item["internal_chat_message_metadata_passthrough"]["turn_id"],
@@ -61,7 +61,7 @@ fn groups_default_tools_and_matches_item_identity_metadata() {
 }
 
 #[test]
-fn preserves_explicit_item_reference_when_stripping_legacy_inline_ids() {
+fn preserves_inline_ids_and_explicit_item_references() {
     let mut request = serde_json::json!({
         "input": [
             {"type":"message","id":"legacy-message","role":"user","content":[]},
@@ -71,7 +71,7 @@ fn preserves_explicit_item_reference_when_stripping_legacy_inline_ids() {
 
     canonicalize_request_items(request.as_object_mut().expect("request"), Some("high"));
 
-    assert!(request["input"][0].get("id").is_none());
+    assert_eq!(request["input"][0]["id"], "legacy-message");
     assert_eq!(request["input"][1]["id"], "legacy-reference");
 }
 

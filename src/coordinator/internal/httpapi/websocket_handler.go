@@ -81,7 +81,7 @@ func (h *Handler) serveWebSocket(
 		return
 	}
 	defer publicSocket.CloseNow()
-	publicSocket.SetReadLimit(maxRequestBytes)
+	publicSocket.SetReadLimit(h.requestLimit)
 
 	session := newWebSocketSession(h, route, publicSocket, coreSocket, providerRequestID)
 	if !h.websockets.register(session) {

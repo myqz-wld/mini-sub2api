@@ -353,6 +353,7 @@ fn valid_wire_prefix(prefix: &str) -> bool {
 
 fn default_wire_prefix(domain: WireIdDomain) -> &'static str {
     match domain {
+        WireIdDomain::ContextWindow => "context_window",
         WireIdDomain::Installation => "installation",
         WireIdDomain::Session => "session",
         WireIdDomain::Thread => "thread",

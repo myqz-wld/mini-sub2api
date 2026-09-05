@@ -41,12 +41,11 @@ use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamCloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as UpstreamCloseCode;
 
-pub(crate) const MAX_WEBSOCKET_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
-
 #[path = "responses_websocket_initial.rs"]
 mod initial;
 #[path = "responses_websocket_relay_helpers.rs"]
 mod relay_helpers;
+use relay_context::RelayExit;
 use relay_helpers::allowed_close_code;
 use relay_helpers::continuation_guard;
 pub(crate) use relay_helpers::fingerprint_is_current;
@@ -94,8 +93,8 @@ async fn responses_socket_inner(
             resolved,
         };
         return Ok(upgrade
-            .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
-            .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+            .max_message_size(crate::inference_limits::get().request_bytes)
+            .max_frame_size(crate::inference_limits::get().request_bytes)
             .on_upgrade(move |internal| async move {
                 crate::responses_websocket_deferred::run(internal, context).await;
             })
@@ -135,10 +134,11 @@ async fn responses_socket_inner(
         vault: state.vault.clone(),
         fingerprint,
         identity: None,
+        operation: None,
     };
     let mut response = upgrade
-        .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
-        .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_message_size(crate::inference_limits::get().request_bytes)
+        .max_frame_size(crate::inference_limits::get().request_bytes)
         .on_upgrade(move |internal| async move {
             relay(internal, upstream, relay_context, None).await;
         })
@@ -162,7 +162,7 @@ pub(crate) async fn send_handshake(
         upstream_url,
         auth,
         profile,
-        MAX_WEBSOCKET_MESSAGE_BYTES,
+        crate::inference_limits::get().output_bytes,
     )?;
     transport
         .websocket_connector_for_url(upstream_url)
@@ -171,18 +171,9 @@ pub(crate) async fn send_handshake(
         .map_err(|_| CoreFailure::UpstreamConnectFailed)
 }
 
-pub(crate) struct RelayContext {
-    pub(crate) headers: HeaderMap,
-    pub(crate) account_ref: String,
-    pub(crate) state_namespace: Option<String>,
-    pub(crate) pseudonym_scope: String,
-    pub(crate) profile: UpstreamProfile,
-    pub(crate) continuation: ResponsesWebSocketState,
-    pub(crate) pending: VecDeque<InternalMessage>,
-    pub(crate) vault: Vault,
-    pub(crate) fingerprint: FingerprintSnapshot,
-    pub(crate) identity: Option<ResolvedRequestIdentity>,
-}
+#[path = "responses_websocket_relay_context.rs"]
+mod relay_context;
+pub(crate) use relay_context::RelayContext;
 
 pub(crate) async fn relay(
     internal: WebSocket,
@@ -201,11 +192,19 @@ pub(crate) async fn relay(
         vault,
         fingerprint,
         mut identity,
+        operation,
     } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
     let delivery = WebSocketDeliveryTracker::default();
     let continuation = Arc::new(StdMutex::new(continuation));
+    if let (Some(namespace), Some(identity)) = (state_namespace.as_deref(), identity.as_ref()) {
+        vault.request_state().contexts.track_baseline(
+            crate::subscription_context::ContextStore::scope_key(namespace, &pseudonym_scope),
+            identity,
+            &continuation,
+        );
+    }
     let response_state = state_namespace.as_deref().and_then(|namespace| {
         profile.uses_identity_state().then(|| {
             ResponseStateContext::new(
@@ -216,6 +215,7 @@ pub(crate) async fn relay(
                 identity.as_ref(),
                 None,
             )
+            .with_operation(operation)
         })
     });
     let exit = {
@@ -254,11 +254,7 @@ pub(crate) async fn relay(
                         let text = text.to_string();
                         let is_create = match is_response_create(&text) {
                             Ok(is_create) => is_create,
-                            Err(()) => {
-                                let close = upstream_close(UpstreamCloseCode::Protocol);
-                                let _ = upstream_write.send(close).await;
-                                return RelayExit::Complete;
-                            }
+                            Err(()) => return RelayExit::Protocol,
                         };
                         if is_create
                             && !fingerprint_is_current(&vault, &account_ref, &fingerprint).await
@@ -268,6 +264,7 @@ pub(crate) async fn relay(
                         if is_create && public_create_in_flight(&client_continuation) {
                             return RelayExit::Policy;
                         }
+                        vault.request_state().contexts.enforce_baseline_budget();
                         let prepared = prepare_client_text(
                             text,
                             &mut headers,
@@ -286,13 +283,23 @@ pub(crate) async fn relay(
                                     delivery.failure_for_phase(FailurePhase::Internal),
                                 );
                             }
-                            Err(ClientPrepareError::Protocol) => {
-                                upstream_close(UpstreamCloseCode::Protocol)
-                            }
+                            Err(ClientPrepareError::Protocol) => return RelayExit::Protocol,
                             Ok(prepared) => {
+                                if !is_create && profile.emulates_codex() {
+                                    continuation_guard(&client_continuation)
+                                        .abandon_cached_bodies();
+                                }
+                                if is_create
+                                    && let Some(state) = client_response_state.as_ref()
+                                    && state.update_operation(prepared.operation.clone()).is_err()
+                                {
+                                    return RelayExit::StateUnavailable(
+                                        delivery.failure_for_phase(FailurePhase::Internal),
+                                    );
+                                }
                                 let planned = if let Some(value) = prepared.create_value.as_ref() {
                                     let mut continuation = continuation_guard(&client_continuation);
-                                    if profile == UpstreamProfile::BareOpenAi {
+                                    if profile == UpstreamProfile::ApiKeyPassthrough {
                                         continuation.plan_public_create(value);
                                         Ok(prepared.text)
                                     } else {
@@ -301,7 +308,7 @@ pub(crate) async fn relay(
                                             value,
                                             &prepared.synthesized_item_ids,
                                             prepared.pending_compaction.clone(),
-                                            MAX_WEBSOCKET_MESSAGE_BYTES,
+                                            crate::inference_limits::get().request_bytes,
                                         )
                                     }
                                 } else {
@@ -374,6 +381,7 @@ pub(crate) async fn relay(
                     Ok(UpstreamMessage::Text(text)) => {
                         let upstream_text = text.to_string();
                         let observed = observe_server_text(&server_continuation, &upstream_text);
+                        vault.request_state().contexts.enforce_baseline_budget();
                         if observed.disposition == EventDisposition::ConsumeHiddenSetup {
                             continue;
                         }
@@ -382,7 +390,7 @@ pub(crate) async fn relay(
                             Some(state) => match state
                                 .translate_text_with_compaction(
                                     upstream_text.clone(),
-                                    MAX_WEBSOCKET_MESSAGE_BYTES,
+                                    crate::inference_limits::get().output_bytes,
                                     observed.completed_compaction.as_ref(),
                                 )
                                 .await
@@ -459,11 +467,16 @@ pub(crate) async fn relay(
                 .send(upstream_close(UpstreamCloseCode::Restart))
                 .await;
         }
-        RelayExit::Policy => {
+        RelayExit::Policy | RelayExit::Protocol => {
+            let code = if matches!(exit, RelayExit::Protocol) {
+                1002
+            } else {
+                1008
+            };
             continuation_guard(&continuation).reset();
-            let _ = internal_write.send(internal_close(1008)).await;
+            let _ = internal_write.send(internal_close(code)).await;
             let _ = upstream_write
-                .send(upstream_close(UpstreamCloseCode::Policy))
+                .send(upstream_close(UpstreamCloseCode::from(code)))
                 .await;
         }
         RelayExit::TooLarge => {
@@ -474,16 +487,6 @@ pub(crate) async fn relay(
                 .await;
         }
     }
-}
-
-#[derive(Clone, Copy)]
-enum RelayExit {
-    Complete,
-    StaleFingerprint,
-    Failure(mini_sub2api_protocol_v1::FailureMetadata),
-    StateUnavailable(mini_sub2api_protocol_v1::FailureMetadata),
-    Policy,
-    TooLarge,
 }
 
 #[cfg(test)]

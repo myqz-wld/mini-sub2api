@@ -60,7 +60,7 @@ async fn api_key_routes_preserve_identity_and_body_bytes_in_every_fingerprint_mo
                 .request_state()
                 .state_path_for_test(&account_ref)
                 .exists(),
-            "BareOpenAi created request state in {mode:?} mode"
+            "ApiKeyPassthrough created request state in {mode:?} mode"
         );
         assert_eq!(capture.bodies.lock().await[0], original);
         let captured = capture.headers.lock().await;

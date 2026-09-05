@@ -17,7 +17,7 @@ async fn bare_inject_is_byte_exact_but_emulated_inject_is_schema_filtered() {
         &mut bare_headers,
         super::ACCOUNT_REF,
         None,
-        UpstreamProfile::BareOpenAi,
+        UpstreamProfile::ApiKeyPassthrough,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
         &store,
@@ -27,13 +27,10 @@ async fn bare_inject_is_byte_exact_but_emulated_inject_is_schema_filtered() {
     .expect("bare inject");
     assert_eq!(got.text, original);
 
-    for (profile, account_namespace) in [
-        (UpstreamProfile::CodexOpenAi149, Some(super::ACCOUNT_REF)),
-        (
-            UpstreamProfile::CodexSubscription149,
-            Some(ACCOUNT_NAMESPACE),
-        ),
-    ] {
+    for (profile, account_namespace) in [(
+        UpstreamProfile::CodexSubscription1534,
+        Some(ACCOUNT_NAMESPACE),
+    )] {
         let state_namespace = account_namespace.expect("stateful profile namespace");
         let (response_alias, call_alias) = store
             .edit(
@@ -70,6 +67,8 @@ async fn bare_inject_is_byte_exact_but_emulated_inject_is_schema_filtered() {
         .to_string();
         let mut headers = HeaderMap::new();
         let mut identity = None;
+        let _operation =
+            super::bind_control_test_operation(&store, &call_alias, &mut identity).await;
         let got = prepare_client_text(
             emulated,
             &mut headers,

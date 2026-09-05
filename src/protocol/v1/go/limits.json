@@ -1,0 +1,9 @@
+{
+  "requestBytes": 134217728,
+  "outputBytes": 134217728,
+  "outputItems": 8192,
+  "globalBytes": 2147483648,
+  "keyBytes": 1073741824,
+  "sessionBytes": 268435456,
+  "sessionRecords": 8192
+}

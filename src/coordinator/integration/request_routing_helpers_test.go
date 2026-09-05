@@ -147,7 +147,7 @@ func assertCodexOpenAIProfileCapture(t *testing.T, capture routingMatrixCapture)
 		t.Fatal("Codex API-key profile crossed a subscription credential boundary")
 	}
 	if capture.Headers.Get("Originator") != "codex-tui" ||
-		capture.Headers.Get("Version") != "0.149.0" ||
+		capture.Headers.Get("Version") != "0.153.4" ||
 		capture.Headers.Get("Accept") != "text/event-stream" {
 		t.Fatalf("Codex API-key identity headers = %#v", capture.Headers)
 	}
@@ -165,7 +165,7 @@ func assertSubscriptionCapture(
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("Originator") != "codex-tui" ||
-		capture.Headers.Get("Version") != "0.149.0" {
+		capture.Headers.Get("Version") != "0.153.4" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
 	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
@@ -189,9 +189,9 @@ func assertSubscriptionCapture(
 
 func assertRuntimeCodexUserAgent(t *testing.T, value string) {
 	t.Helper()
-	if !strings.HasPrefix(value, "codex-tui/0.149.0 (") ||
+	if !strings.HasPrefix(value, "codex-tui/0.153.4 (") ||
 		!strings.Contains(value, "; ") || !strings.Contains(value, ") ") ||
-		!strings.HasSuffix(value, " (codex-tui; 0.149.0)") {
+		!strings.HasSuffix(value, " (codex-tui; 0.153.4)") {
 		t.Fatalf("runtime Codex User-Agent = %q", value)
 	}
 }
@@ -267,6 +267,13 @@ func expectedCodexInstructionsHash(model string) string {
 		}
 	}
 	switch {
+	case strings.HasPrefix(model, "gpt-6-astra"):
+		return "152dfaeeb552876190962be1c12c93d426840ff12691f648261554a7675a6698"
+	case strings.HasPrefix(model, "gpt-daybreak-blue-latest"), strings.HasPrefix(model, "codex-auto-review"):
+		return "ebd0d5854abd07dc38300a71e027204eb028e9fa443c59d18e36fcc24289e818"
+	case strings.HasPrefix(model, "gpt-daybreak-red-latest"):
+		return "40a1232c8bd01a87dc2283e5ae3c75f2b054dc2a12cf04e5a279c26e5c541b9b"
+
 	case strings.HasPrefix(model, "gpt-5.6-sol"),
 		strings.HasPrefix(model, "gpt-5.6-terra"),
 		strings.HasPrefix(model, "gpt-5.6-luna"):
@@ -275,7 +282,7 @@ func expectedCodexInstructionsHash(model string) string {
 		return "e58c21f9377e946e2e10f886fcbf6f030e1c6fd9067241c637a56e9e998d3c31"
 	case strings.HasPrefix(model, "gpt-5.4-mini"):
 		return "9109777dc7f3bc9ee9a0d187982b13538c53e0572de2959300f7226e9c59855e"
-	case strings.HasPrefix(model, "gpt-5.4"), strings.HasPrefix(model, "codex-auto-review"):
+	case strings.HasPrefix(model, "gpt-5.4"):
 		return "9721f7a86edc261996e628fe14fade8d66ec60e6cc727274a8da6a03e15464de"
 	case strings.HasPrefix(model, "gpt-5.2"):
 		return "c9b2fa097ac69cae82c3d2ae12271083890a96521c55ad8dc14cae5168ad3f39"
@@ -301,8 +308,8 @@ func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any
 	assertDeveloperMessageText(t, input[1], "Answer both user messages.")
 	assertNormalizedMessages(t, input[2:], messages)
 	base := input[1].(map[string]any)
-	if additional["id"] != nil || base["id"] != nil {
-		t.Fatal("synthetic Lite tools/base items received ids")
+	if !strings.HasPrefix(stringValue(additional["id"]), "at_") || !strings.HasPrefix(stringValue(base["id"]), "msg_") {
+		t.Fatal("synthetic Lite tools/base items omitted stable IDs")
 	}
 	if value["tools"] != nil || value["instructions"] != nil || value["store"] != false ||
 		value["stream"] != true || value["parallel_tool_calls"] != false {
@@ -391,8 +398,9 @@ func assertNormalizedMessages(t *testing.T, got, want []any) {
 		role, _ := gotMessage["role"].(string)
 		wantCreateTime := role == "user" || role == "system" || role == "developer"
 		hasCreateTime := metadata["create_time"] != nil
-		if hasID || metadata["turn_id"] == "" || hasCreateTime != wantCreateTime {
-			t.Fatalf("normalized message %d identity = %#v", index, gotMessage)
+		_, wantID := want[index].(map[string]any)["id"]
+		if hasID != wantID || metadata["turn_id"] == "" || hasCreateTime != wantCreateTime {
+			t.Fatalf("normalized message %d identity shape changed", index)
 		}
 	}
 }

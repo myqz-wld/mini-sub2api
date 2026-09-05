@@ -6,12 +6,9 @@ const HISTORY_SCOPE: &str = "psn_HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH";
 
 #[tokio::test]
 async fn lite_parallel_tool_calls_is_forced_off_for_both_profiles_and_transports() {
-    for (profile_index, profile) in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ]
-    .into_iter()
-    .enumerate()
+    for (profile_index, profile) in [UpstreamProfile::CodexSubscription1534]
+        .into_iter()
+        .enumerate()
     {
         for (transport_index, transport) in
             [EmulationTransport::Http, EmulationTransport::WebSocket]
@@ -63,13 +60,10 @@ async fn lite_parallel_tool_calls_is_forced_off_for_both_profiles_and_transports
 }
 
 #[tokio::test]
-async fn store_false_history_strips_item_ids_but_keeps_calls_and_explicit_references() {
-    for (profile_index, profile) in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ]
-    .into_iter()
-    .enumerate()
+async fn store_false_preserves_scoped_item_ids_calls_and_explicit_references() {
+    for (profile_index, profile) in [UpstreamProfile::CodexSubscription1534]
+        .into_iter()
+        .enumerate()
     {
         for (transport_index, transport) in
             [EmulationTransport::Http, EmulationTransport::WebSocket]
@@ -122,9 +116,14 @@ async fn store_false_history_strips_item_ids_but_keeps_calls_and_explicit_refere
             assert!(prepared.synthesized_item_ids.is_empty());
             let items = value["input"].as_array().expect("history input");
 
-            for item in &items[..5] {
-                assert!(item.get("id").is_none(), "inline history ID crossed");
+            for (index, item) in items[..4].iter().enumerate() {
+                assert!(item.get("id").is_some(), "validated inline ID was removed");
+                assert!(
+                    item["id"] != body["input"][index]["id"],
+                    "raw caller ID crossed the scope boundary"
+                );
             }
+            assert!(items[4].get("id").is_none());
             assert_eq!(items[5]["id"], "msg_provider_reference");
             assert_ne!(items[2]["call_id"], "call_old");
             assert_eq!(items[2]["call_id"], items[3]["call_id"]);

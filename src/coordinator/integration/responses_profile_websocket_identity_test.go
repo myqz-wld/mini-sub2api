@@ -99,7 +99,7 @@ func TestCodexProfilesRestoreWebSocketResponseOwnershipAfterReconnect(t *testing
 		keyID        string
 		subscription bool
 	}{
-		{name: "codex_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID},
+		{name: "codex_subscription_marked", secret: fixture.subscriptionKey, keyID: fixture.subscriptionKeyID, subscription: true},
 		{
 			name: "codex_subscription", secret: fixture.subscriptionKey,
 			keyID: fixture.subscriptionKeyID, subscription: true,
@@ -149,8 +149,11 @@ func TestCodexProfilesRestoreWebSocketResponseOwnershipAfterReconnect(t *testing
 			secondEvents := readResponsesProfileTerminalEvents(t, secondConnection)
 			secondCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
 			upstreamSecond := decodeResponsesProfileWebSocketFrame(t, secondCapture.Frame)
-			if upstreamSecond["previous_response_id"] != firstCapture.ResponseID {
-				t.Fatalf("WebSocket response owner was not restored: %#v", upstreamSecond)
+			if _, exists := upstreamSecond["previous_response_id"]; exists {
+				t.Fatal("a replacement upstream socket must receive complete local history")
+			}
+			if items, _ := upstreamSecond["input"].([]any); len(items) < 2 {
+				t.Fatal("WS reconnect lost the referenced parent context")
 			}
 			secondIdentity := identityFromWebSocketCapture(t, secondCapture)
 			if secondIdentity != firstIdentity {

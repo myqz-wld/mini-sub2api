@@ -17,6 +17,7 @@ pub(crate) struct ResponseStateContext {
     store: RequestStateStore,
     owner: Arc<Mutex<Option<WireIdOwner>>>,
     default_compaction: Option<PendingCompaction>,
+    operation: Arc<Mutex<Option<crate::subscription_context::Operation>>>,
 }
 
 impl ResponseStateContext {
@@ -35,7 +36,27 @@ impl ResponseStateContext {
             store: store.clone(),
             owner: Arc::new(Mutex::new(identity.map(owner_from_identity))),
             default_compaction: pending_compaction.cloned(),
+            operation: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub(crate) fn with_operation(
+        self,
+        operation: Option<crate::subscription_context::Operation>,
+    ) -> Self {
+        *self.operation.lock().expect("new operation lock") = operation;
+        self
+    }
+
+    pub(crate) fn update_operation(
+        &self,
+        operation: Option<crate::subscription_context::Operation>,
+    ) -> Result<()> {
+        *self
+            .operation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("operation state unavailable"))? = operation;
+        Ok(())
     }
 
     pub(crate) fn update_identity(&self, identity: Option<&ResolvedRequestIdentity>) -> Result<()> {
@@ -63,7 +84,23 @@ impl ResponseStateContext {
         let pending = completed
             .then_some(self.default_compaction.as_ref())
             .flatten();
-        self.translate_value_with_compaction(value, pending).await
+        // This caller already proved the terminal kind. Use the schema's response envelope even
+        // when the provider omits output/usage/object, so its ID cannot bypass response aliasing.
+        let mut envelope = self
+            .translate_value_with_compaction(serde_json::json!({"response": value}), pending)
+            .await?;
+        let translated = envelope["response"].take();
+        let operation = self
+            .operation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
+            .clone();
+        if let Some(operation) = operation {
+            self.store
+                .contexts
+                .observe(&operation, &translated, Some(completed))?;
+        }
+        Ok(translated)
     }
 
     async fn translate_value_with_compaction(
@@ -76,8 +113,24 @@ impl ResponseStateContext {
             .lock()
             .map_err(|_| anyhow::anyhow!("response identity owner lock poisoned"))?
             .clone();
+        let operation = self
+            .operation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
+            .clone();
+        if let Some(operation) = &operation
+            && value.get("type").and_then(Value::as_str) == Some("response.metadata")
+            && let Some(headers) = value.get("headers").and_then(Value::as_object)
+            && let Some(token) = headers
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("x-codex-turn-state"))
+                .and_then(|(_, value)| value.as_str())
+        {
+            self.store.contexts.learn_turn(operation, token)?;
+        }
         let pending_compaction = pending_compaction.cloned();
-        self.store
+        let translated = self
+            .store
             .edit(
                 &self.state_namespace,
                 &self.account_ref,
@@ -94,7 +147,13 @@ impl ResponseStateContext {
                     Ok(value)
                 },
             )
-            .await
+            .await?;
+        if let Some(operation) = operation
+            && translated.get("type").is_some()
+        {
+            self.store.contexts.observe(&operation, &translated, None)?;
+        }
+        Ok(translated)
     }
 
     pub(crate) async fn translate_text(&self, text: String, maximum: usize) -> Result<String> {

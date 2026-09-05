@@ -59,7 +59,9 @@ where
                 else {
                     return Err(RelayExit::TooLarge);
                 };
-                if pending.len() >= MAX_PENDING_MESSAGES || next > MAX_WEBSOCKET_MESSAGE_BYTES {
+                if pending.len() >= MAX_PENDING_MESSAGES
+                    || next > crate::inference_limits::get().request_bytes
+                {
                     return Err(RelayExit::TooLarge);
                 }
                 pending_cost = Some(next);
@@ -71,7 +73,9 @@ where
                 else {
                     return Err(RelayExit::TooLarge);
                 };
-                if pending.len() >= MAX_PENDING_MESSAGES || next > MAX_WEBSOCKET_MESSAGE_BYTES {
+                if pending.len() >= MAX_PENDING_MESSAGES
+                    || next > crate::inference_limits::get().request_bytes
+                {
                     return Err(RelayExit::TooLarge);
                 }
                 pending_cost = Some(next);

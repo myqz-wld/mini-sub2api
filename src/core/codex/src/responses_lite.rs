@@ -185,7 +185,6 @@ fn canonicalize_input_items(
                 continue;
             };
             crate::response_item_metadata::stamp(object, turn_id);
-            crate::response_item_metadata::strip_unprefixed_id(object);
             items::canonicalize_item(object);
         }
     }

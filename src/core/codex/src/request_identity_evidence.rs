@@ -64,10 +64,17 @@ impl RequestIdentityEvidence {
 
         let thread = evidence_text(RelationshipCarrier::Thread, &sources);
         let window = evidence_text(RelationshipCarrier::Window, &sources);
-        let conversation = evidence_text(RelationshipCarrier::Session, &sources)
-            .or_else(|| thread.clone())
-            .or_else(|| evidence_text(RelationshipCarrier::ClientRequest, &sources))
-            .or_else(|| window.as_deref().and_then(window_thread));
+        let empty_headers = HeaderMap::new();
+        let conversation = crate::subscription_request::selected_session(
+            object,
+            if ignore_headers {
+                &empty_headers
+            } else {
+                headers
+            },
+        )
+        .ok()
+        .flatten();
         let parent_thread = evidence_text(RelationshipCarrier::ParentThread, &sources);
         let forked_from_thread = evidence_text(RelationshipCarrier::ForkedFromThread, &sources);
         let subagent = evidence_text(RelationshipCarrier::Subagent, &sources);
@@ -88,10 +95,7 @@ impl RequestIdentityEvidence {
         Self {
             installation: evidence_text(RelationshipCarrier::Installation, &sources),
             conversation,
-            responses_conversation: evidence_text(
-                RelationshipCarrier::ResponsesConversation,
-                &sources,
-            ),
+            responses_conversation: None,
             thread,
             parent_thread,
             forked_from_thread,
@@ -191,12 +195,6 @@ fn nonempty(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_string())
 }
 
-fn window_thread(value: &str) -> Option<String> {
-    let (thread, number) = value.rsplit_once(':')?;
-    (!thread.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit()))
-        .then(|| thread.to_string())
-}
-
 fn window_number(value: &str) -> Option<u64> {
     let (_, number) = value.rsplit_once(':')?;
     number.parse().ok()
@@ -262,7 +260,7 @@ mod tests {
     use http::HeaderValue;
 
     #[test]
-    fn body_session_wins_and_root_conflicts_do_not_imply_lineage() {
+    fn header_session_wins_and_root_conflicts_do_not_imply_lineage() {
         let object = serde_json::json!({
             "prompt_cache_key": "cache-conflict",
             "client_metadata": {
@@ -279,7 +277,7 @@ mod tests {
             CodexTransport::Http,
             false,
         );
-        assert_eq!(evidence.conversation.as_deref(), Some("body-session"));
+        assert_eq!(evidence.conversation.as_deref(), Some("header-session"));
         assert_eq!(evidence.thread.as_deref(), Some("body-thread"));
         assert!(!evidence.explicit_thread_lineage);
     }

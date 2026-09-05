@@ -28,7 +28,7 @@ func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
 		{
 			name: "codex_api_key_normal", secret: fixture.apiKey,
 			headers: codexScenarioHeaders("profile-api", "profile-client/0.149.0"),
-			first:   firstNormal, second: secondNormal, emulates: true,
+			first:   firstNormal, second: secondNormal,
 		},
 		{
 			name: "bare_subscription_lite", secret: fixture.subscriptionKey,
@@ -75,7 +75,7 @@ func TestResponsesProfileHTTPMatrixTwoTurns(t *testing.T) {
 				if turn == 0 {
 					firstPublicResponseID = publicResponseID
 					firstProviderResponseID = capture.ResponseID
-				} else if decodeRequestObject(t, capture.Body)["previous_response_id"] != firstProviderResponseID {
+				} else if !test.subscription && decodeRequestObject(t, capture.Body)["previous_response_id"] != firstProviderResponseID {
 					t.Fatal("previous response alias was not restored before the second upstream turn")
 				}
 				assertHTTPProfileCredentialBoundary(t, capture, test.subscription)
@@ -134,7 +134,8 @@ func TestCodexProfilesPreserveDownstreamZstdStreamPreference(t *testing.T) {
 					t.Fatalf("zstd response = %d %s", status, publicBody)
 				}
 				capture := waitForRoutingCapture(t, fixture.captures)
-				if decodeRequestObject(t, capture.Body)["stream"] != true {
+				wantStream := stream || profile.name == "codex_subscription"
+				if decodeRequestObject(t, capture.Body)["stream"] != wantStream {
 					t.Fatalf("upstream stream flag = %s", capture.Body)
 				}
 				wantContentType := "application/json"
@@ -258,9 +259,8 @@ func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicit
 	value := decodeRequestObject(t, body)
 	assertResponsesProfileSurface(t, value, lite, false, subscription)
 	if hasExplicitPrevious {
-		previous, previousOK := value["previous_response_id"].(string)
-		if !previousOK || previous == "explicit-profile-previous" {
-			t.Fatal("stateful Codex HTTP continuation IDs were not pseudonymized")
+		if _, exists := value["previous_response_id"]; exists {
+			t.Fatal("Subscription HTTP increment was not expanded into a full request")
 		}
 		if !containsResponseProfileItem(value["input"], "function_call") ||
 			!containsResponseProfileItem(value["input"], "function_call_output") ||
@@ -308,7 +308,10 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 		}
 	}
 	if websocket {
-		for _, field := range []string{"stream", "background"} {
+		if value["stream"] != true {
+			t.Fatal("native WS stream flag is missing")
+		}
+		for _, field := range []string{"background"} {
 			if _, exists := value[field]; exists {
 				t.Fatalf("unsupported WebSocket field %q survived", field)
 			}

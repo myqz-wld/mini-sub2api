@@ -11,7 +11,6 @@ use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
 use crate::request_state_types::WireIdOwner;
-use crate::request_wire_ids::strip_inline_history_item_ids;
 use crate::request_wire_ids::translate_request_ids;
 
 #[path = "request_state_resolution_items.rs"]
@@ -39,6 +38,7 @@ pub(crate) fn resolve_and_project(
     headers: &mut http::HeaderMap,
     object: &mut Map<String, Value>,
     synthesized_item_ids: &[String],
+    lite_prefixes: &[usize],
 ) -> Result<ResolvedProjection> {
     let installation_lookup = evidence
         .installation
@@ -172,6 +172,7 @@ pub(crate) fn resolve_and_project(
     };
 
     let identity = ResolvedRequestIdentity {
+        connection_id: None,
         installation_id,
         session_id: conversation.id,
         thread_id,
@@ -184,7 +185,7 @@ pub(crate) fn resolve_and_project(
         request_kind: evidence.request_kind.clone(),
         turn_started_at_unix_ms,
     };
-    let generated_upstream_ids = project_items(
+    let mut generated_upstream_ids = project_items(
         editor,
         object,
         evidence,
@@ -194,7 +195,11 @@ pub(crate) fn resolve_and_project(
     )?;
     crate::request_identity_projection::apply(headers, object, &identity)
         .map_err(|_| anyhow::anyhow!("projecting request identity"))?;
-    strip_inline_history_item_ids(object);
+    generated_upstream_ids.extend(crate::lite_prefix_identity::apply(
+        object,
+        &identity.thread_id,
+        lite_prefixes,
+    )?);
     translate_request_ids(editor, object, &generated_upstream_ids)?;
     Ok(ResolvedProjection {
         identity,
@@ -306,6 +311,10 @@ fn resolve_thread_reference(
             "thread reference crosses sessions"
         );
         return Ok(existing.id);
+    }
+    if let Some(root) = editor.existing_wire_from_downstream(WireIdDomain::Session, raw)? {
+        anyhow::ensure!(root == session_id, "thread reference crosses sessions");
+        return Ok(root);
     }
     let key = editor.lookup("thread", raw);
     if let Some(existing) = editor.existing_child_thread(&key) {

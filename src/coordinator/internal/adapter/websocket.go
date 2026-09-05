@@ -55,6 +55,6 @@ func (s *Supervisor) DialWebSocket(
 	if err != nil {
 		return nil, response, fmt.Errorf("call Codex core WebSocket: %w", err)
 	}
-	connection.SetReadLimit(16 * 1024 * 1024)
+	connection.SetReadLimit(int64(protocolv1.MustInferenceLimits().OutputBytes))
 	return connection, response, nil
 }

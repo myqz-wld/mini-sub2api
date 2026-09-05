@@ -11,7 +11,9 @@ mod fingerprint_projection;
 mod http_body;
 mod http_client;
 mod inference_fingerprint;
+mod inference_limits;
 mod lifecycle_carriers;
+mod lite_prefix_identity;
 mod oauth;
 mod oauth_login;
 mod request_compaction;
@@ -19,6 +21,7 @@ mod request_defaults;
 mod request_identity;
 mod request_identity_evidence;
 mod request_identity_projection;
+mod request_native_metadata;
 mod request_normalizer;
 mod request_profile;
 mod request_state_editor;
@@ -46,6 +49,15 @@ mod responses_websocket_reuse;
 mod responses_websocket_state;
 mod sandbox_projection;
 mod server;
+mod subscription_aliases;
+mod subscription_context;
+mod subscription_controls;
+mod subscription_events;
+mod subscription_handshake;
+mod subscription_index;
+mod subscription_normalizer;
+mod subscription_prepare;
+mod subscription_request;
 mod terminal_detection;
 #[cfg(test)]
 mod test_support;
@@ -70,3 +82,6 @@ async fn main() -> anyhow::Result<()> {
 
     cli::Cli::parse().run().await
 }
+
+#[cfg(test)]
+mod subscription_state_tests;

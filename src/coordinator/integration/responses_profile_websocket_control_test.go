@@ -45,7 +45,7 @@ func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
 		keyID        string
 		subscription bool
 	}{
-		{name: "codex_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID},
+		{name: "codex_subscription_marked", secret: fixture.subscriptionKey, keyID: fixture.subscriptionKeyID, subscription: true},
 		{
 			name: "codex_subscription", secret: fixture.subscriptionKey,
 			keyID: fixture.subscriptionKeyID, subscription: true,

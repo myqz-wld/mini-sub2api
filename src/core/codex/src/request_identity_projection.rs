@@ -16,6 +16,7 @@ use crate::request_identity::turn_metadata::bounded_turn_metadata;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ResolvedRequestIdentity {
+    pub(crate) connection_id: Option<String>,
     pub(crate) installation_id: String,
     pub(crate) session_id: String,
     pub(crate) thread_id: String,
@@ -228,6 +229,7 @@ mod tests {
         .expect("body")
         .clone();
         let identity = ResolvedRequestIdentity {
+            connection_id: None,
             installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
             session_id: "01900000-0000-7000-8000-000000000001".to_string(),
             thread_id: "01900000-0000-7000-8000-000000000001".to_string(),

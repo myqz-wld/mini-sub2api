@@ -2,10 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn missing_provider_references_are_state_unavailable_for_both_codex_profiles() {
-    for profile in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ] {
+    for profile in [UpstreamProfile::CodexSubscription1534] {
         for body in [
             serde_json::json!({
                 "model":"gpt-5.4",
@@ -26,6 +23,10 @@ async fn missing_provider_references_are_state_unavailable_for_both_codex_profil
                 Bytes::from(serde_json::to_vec(&body).expect("body JSON")),
                 1024 * 1024,
                 CodexStateContext {
+                    force_lite: false,
+                    admission: None,
+                    binding: None,
+                    socket_id: None,
                     account_ref: ACCOUNT_REF,
                     state_namespace: NAMESPACE,
                     downstream_scope: SCOPE,

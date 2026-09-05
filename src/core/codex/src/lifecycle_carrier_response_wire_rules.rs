@@ -1,6 +1,27 @@
 use super::*;
 
 pub(super) const RULES: &[CarrierRule] = &[
+    wire(
+        CarrierDirection::Response,
+        CarrierContainer::TopLevel,
+        "context_window_id",
+        CarrierShape::Scalar,
+        Some(WireIdDomain::ContextWindow),
+    ),
+    wire(
+        CarrierDirection::Response,
+        CarrierContainer::ClientMetadata,
+        "context_window_id",
+        CarrierShape::Scalar,
+        Some(WireIdDomain::ContextWindow),
+    ),
+    wire(
+        CarrierDirection::Response,
+        CarrierContainer::TurnMetadata,
+        "context_window_id",
+        CarrierShape::Scalar,
+        Some(WireIdDomain::ContextWindow),
+    ),
     // Response reversible wire carriers and schema-owned traversal edges.
     wire(
         CarrierDirection::Response,

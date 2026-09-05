@@ -9,7 +9,6 @@ use crate::request_normalizer::prepare_stateful_codex_request;
 use crate::request_profile::UpstreamProfile;
 use crate::request_state_editor::RequiredWireReferenceUnavailable;
 use crate::request_state_store::RequestStateStore;
-use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket_inject;
 use crate::responses_websocket_state::PublicCreateMode;
 use crate::responses_websocket_state::ResponsesWebSocketState;
@@ -43,6 +42,7 @@ pub(crate) struct PreparedClientText {
     pub(crate) create_value: Option<Value>,
     pub(crate) synthesized_item_ids: Vec<String>,
     pub(crate) pending_compaction: Option<PendingCompaction>,
+    pub(crate) operation: Option<crate::subscription_context::Operation>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -57,11 +57,6 @@ pub(crate) async fn prepare_client_text(
     state_store: &RequestStateStore,
     identity_binding: &mut Option<ResolvedRequestIdentity>,
 ) -> Result<PreparedClientText, ClientPrepareError> {
-    let text = if profile.uses_identity_state() {
-        seed_socket_identity(text, identity_binding.as_ref())?
-    } else {
-        text
-    };
     let value: Value = serde_json::from_str(&text).map_err(|_| ())?;
     let message_type = value
         .as_object()
@@ -69,6 +64,26 @@ pub(crate) async fn prepare_client_text(
         .and_then(Value::as_str)
         .filter(|message_type| !message_type.is_empty())
         .ok_or(())?;
+    if message_type != "response.create" && profile.uses_identity_state() {
+        state_store
+            .contexts
+            .prepare_control(
+                &crate::subscription_context::ContextStore::scope_key(
+                    state_namespace.ok_or(())?,
+                    pseudonym_scope,
+                ),
+                identity_binding.as_ref(),
+                &value,
+            )
+            .map_err(|error| match error {
+                crate::request_normalizer::StatefulPrepareError::StateUnavailable => {
+                    ClientPrepareError::StateUnavailable
+                }
+                crate::request_normalizer::StatefulPrepareError::InvalidRequest => {
+                    ClientPrepareError::Protocol
+                }
+            })?;
+    }
     if message_type == "response.inject" {
         if profile.uses_identity_state() {
             let state_namespace = state_namespace.ok_or(())?;
@@ -76,7 +91,7 @@ pub(crate) async fn prepare_client_text(
                 text,
                 value,
                 profile,
-                MAX_WEBSOCKET_MESSAGE_BYTES,
+                crate::inference_limits::get().request_bytes,
             )?;
             let mut filtered = serde_json::from_str::<Value>(&filtered).map_err(|_| ())?;
             let filtered = state_store
@@ -101,21 +116,28 @@ pub(crate) async fn prepare_client_text(
                 )
                 .await
                 .map_err(classify_state_edit_error)?;
-            let text = encode_frame_bounded(&filtered, MAX_WEBSOCKET_MESSAGE_BYTES)?;
+            let text =
+                encode_frame_bounded(&filtered, crate::inference_limits::get().request_bytes)?;
             return Ok(PreparedClientText {
                 text,
                 create_value: None,
                 synthesized_item_ids: Vec::new(),
                 pending_compaction: None,
+                operation: None,
             });
         }
-        let text =
-            responses_websocket_inject::prepare(text, value, profile, MAX_WEBSOCKET_MESSAGE_BYTES)?;
+        let text = responses_websocket_inject::prepare(
+            text,
+            value,
+            profile,
+            crate::inference_limits::get().request_bytes,
+        )?;
         return Ok(PreparedClientText {
             text,
             create_value: None,
             synthesized_item_ids: Vec::new(),
             pending_compaction: None,
+            operation: None,
         });
     }
     if message_type != "response.create" {
@@ -148,13 +170,14 @@ pub(crate) async fn prepare_client_text(
             let text = if translated == original {
                 text
             } else {
-                encode_frame_bounded(&translated, MAX_WEBSOCKET_MESSAGE_BYTES)?
+                encode_frame_bounded(&translated, crate::inference_limits::get().request_bytes)?
             };
             return Ok(PreparedClientText {
                 text,
                 create_value: None,
                 synthesized_item_ids: Vec::new(),
                 pending_compaction: None,
+                operation: None,
             });
         }
         return Ok(PreparedClientText {
@@ -162,17 +185,19 @@ pub(crate) async fn prepare_client_text(
             create_value: None,
             synthesized_item_ids: Vec::new(),
             pending_compaction: None,
+            operation: None,
         });
     }
-    if profile == UpstreamProfile::BareOpenAi {
+    if profile == UpstreamProfile::ApiKeyPassthrough {
         return Ok(PreparedClientText {
             text,
             create_value: Some(value),
             synthesized_item_ids: Vec::new(),
             pending_compaction: None,
+            operation: None,
         });
     }
-    let (prepared, synthesized_item_ids, pending_compaction) = {
+    let (prepared, synthesized_item_ids, pending_compaction, operation) = {
         let prepared = if profile.uses_identity_state() {
             let state_namespace = state_namespace.ok_or(())?;
             prepare_stateful_codex_request(
@@ -180,8 +205,14 @@ pub(crate) async fn prepare_client_text(
                 EmulationTransport::WebSocket,
                 headers,
                 Bytes::from(text),
-                MAX_WEBSOCKET_MESSAGE_BYTES,
+                crate::inference_limits::get().request_bytes,
                 CodexStateContext {
+                    force_lite: false,
+                    admission: None,
+                    binding: identity_binding.as_ref(),
+                    socket_id: identity_binding
+                        .as_ref()
+                        .and_then(|identity| identity.connection_id.as_deref()),
                     account_ref,
                     state_namespace,
                     downstream_scope: pseudonym_scope,
@@ -204,7 +235,7 @@ pub(crate) async fn prepare_client_text(
         };
         let synthesized_item_ids = prepared.synthesized_item_ids;
         let pending_compaction = prepared.pending_compaction;
-        *headers = prepared.headers;
+
         if prepared.resolved_identity.is_some() {
             identity_binding.clone_from(&prepared.resolved_identity);
         }
@@ -212,6 +243,7 @@ pub(crate) async fn prepare_client_text(
             String::from_utf8(prepared.body.to_vec()).map_err(|_| ())?,
             synthesized_item_ids,
             pending_compaction,
+            prepared.operation,
         )
     };
     let prepared = if fingerprint.mode() == FingerprintMode::Device && profile.uses_identity_state()
@@ -224,7 +256,7 @@ pub(crate) async fn prepare_client_text(
             prepared,
             fingerprint,
             installation_id,
-            MAX_WEBSOCKET_MESSAGE_BYTES,
+            crate::inference_limits::get().request_bytes,
         )
         .map_err(|_| ())
     } else {
@@ -236,6 +268,7 @@ pub(crate) async fn prepare_client_text(
         create_value: Some(value),
         synthesized_item_ids,
         pending_compaction,
+        operation,
     })
 }
 
@@ -265,64 +298,6 @@ fn classify_projection_error(source: anyhow::Error) -> anyhow::Error {
     } else {
         InvalidWebSocketStateProjection { source }.into()
     }
-}
-
-fn seed_socket_identity(
-    text: String,
-    binding: Option<&ResolvedRequestIdentity>,
-) -> Result<String, ()> {
-    let Some(binding) = binding else {
-        return Ok(text);
-    };
-    let mut value = serde_json::from_str::<Value>(&text).map_err(|_| ())?;
-    let object = value.as_object_mut().ok_or(())?;
-    if object.get("type").and_then(Value::as_str) != Some("response.create") {
-        return Ok(text);
-    }
-    let has_user_input = object
-        .get("input")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items
-                .iter()
-                .any(|item| item.get("role").and_then(Value::as_str) == Some("user"))
-        });
-    let metadata = object
-        .entry("client_metadata".to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()));
-    if !metadata.is_object() {
-        *metadata = Value::Object(serde_json::Map::new());
-    }
-    let metadata = metadata.as_object_mut().ok_or(())?;
-    metadata
-        .entry("session_id".to_string())
-        .or_insert_with(|| Value::String(binding.session_id.clone()));
-    metadata
-        .entry("thread_id".to_string())
-        .or_insert_with(|| Value::String(binding.thread_id.clone()));
-    if let Some(parent_thread_id) = binding.parent_thread_id.as_ref() {
-        metadata
-            .entry("parent_thread_id".to_string())
-            .or_insert_with(|| Value::String(parent_thread_id.clone()));
-    }
-    if let Some(forked_from_thread_id) = binding.forked_from_thread_id.as_ref() {
-        metadata
-            .entry("forked_from_thread_id".to_string())
-            .or_insert_with(|| Value::String(forked_from_thread_id.clone()));
-    }
-    if !has_user_input {
-        if let Some(turn_id) = binding.turn_id.as_ref() {
-            metadata
-                .entry("turn_id".to_string())
-                .or_insert_with(|| Value::String(turn_id.clone()));
-        }
-        if let Some(root_turn_id) = binding.root_turn_id.as_ref() {
-            metadata
-                .entry("root_turn_id".to_string())
-                .or_insert_with(|| Value::String(root_turn_id.clone()));
-        }
-    }
-    serde_json::to_string(&value).map_err(|_| ())
 }
 
 #[cfg(test)]

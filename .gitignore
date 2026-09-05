@@ -12,3 +12,4 @@ target/
 *.db-shm
 *.db-wal
 *.log
+.prompt-asset-improver/local/

@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 
 fn state() -> ResponsesWebSocketState {
-    ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription149)
+    ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534)
 }
 
 fn item(item_type: &str, id: &str) -> Value {
@@ -174,18 +174,18 @@ fn automatic_prewarm_is_limited_to_bare_subscription_callers() {
     let cases = [
         (
             CallerKind::Codex,
-            UpstreamProfile::CodexSubscription149,
+            UpstreamProfile::CodexSubscription1534,
             PublicCreateMode::Full,
         ),
         (
             CallerKind::Bare,
-            UpstreamProfile::BareOpenAi,
+            UpstreamProfile::ApiKeyPassthrough,
             PublicCreateMode::Passthrough,
         ),
         (
             CallerKind::Codex,
-            UpstreamProfile::CodexOpenAi149,
-            PublicCreateMode::Full,
+            UpstreamProfile::ApiKeyPassthrough,
+            PublicCreateMode::Passthrough,
         ),
     ];
     for (caller, profile, expected_mode) in cases {
@@ -200,18 +200,20 @@ fn automatic_prewarm_is_limited_to_bare_subscription_callers() {
 }
 
 #[test]
-fn every_retained_non_input_property_change_forces_a_full_frame() {
+fn every_native_reuse_property_change_forces_a_full_frame() {
     let changes = [
         ("model", json!("gpt-5.5")),
         ("tools", json!([{"type": "function", "name": "changed"}])),
         ("reasoning", json!({"effort": "high"})),
         ("service_tier", json!("default")),
-        ("metadata", json!({"test_class": "changed"})),
-        (
-            "prompt_cache_options",
-            json!({"mode": "implicit", "ttl": "1h"}),
-        ),
-        ("safety_identifier", json!("changed-test-safety-id")),
+        ("instructions", json!("changed base")),
+        ("tool_choice", json!("required")),
+        ("parallel_tool_calls", json!(false)),
+        ("store", json!(true)),
+        ("stream", json!(false)),
+        ("include", json!(["different"])),
+        ("prompt_cache_key", json!("different")),
+        ("text", json!({"verbosity":"high"})),
     ];
     for (field, value) in changes {
         let user = message("user", "user-1");
@@ -235,7 +237,7 @@ fn every_retained_non_input_property_change_forces_a_full_frame() {
 }
 
 #[test]
-fn volatile_metadata_stream_options_and_synthesized_wire_ids_do_not_block_reuse() {
+fn volatile_metadata_and_stream_options_do_not_block_reuse_with_stable_ids() {
     let first_user = json!({
         "type":"message", "id":"generated-first", "role":"user", "content":[],
         "internal_chat_message_metadata_passthrough":{"turn_id":"turn-first","create_time":1}
@@ -246,7 +248,8 @@ fn volatile_metadata_stream_options_and_synthesized_wire_ids_do_not_block_reuse(
     });
     let mut first = request(vec![first_user]);
     first["client_metadata"] = json!({"turn_id":"turn-first"});
-    first["stream_options"] = json!({"include_obfuscation":true});
+    first["stream_options"] = json!({"reasoning_summary_delivery":"sequential_cutoff"});
+    first["access_programs"] = json!({"cyber":"standard"});
     let mut state = state();
     let first_plan =
         state.plan_public_create_with_synthesized_ids(&first, &["generated-first".to_string()]);
@@ -256,7 +259,7 @@ fn volatile_metadata_stream_options_and_synthesized_wire_ids_do_not_block_reuse(
 
     let mut next = request(vec![
         json!({
-            "type":"message", "id":"generated-second", "role":"user", "content":[],
+            "type":"message", "id":"generated-first", "role":"user", "content":[],
             "internal_chat_message_metadata_passthrough":{"turn_id":"turn-second","create_time":2}
         }),
         json!({
@@ -266,17 +269,18 @@ fn volatile_metadata_stream_options_and_synthesized_wire_ids_do_not_block_reuse(
         message("user", "new-user"),
     ]);
     next["client_metadata"] = json!({"turn_id":"turn-second"});
-    next["stream_options"] = json!({"include_obfuscation":false});
+    next.as_object_mut().unwrap().remove("stream_options");
+    next["access_programs"] = json!({"cyber":"daybreak_blue"});
 
     let plan =
-        state.plan_public_create_with_synthesized_ids(&next, &["generated-second".to_string()]);
+        state.plan_public_create_with_synthesized_ids(&next, &["generated-first".to_string()]);
     assert_eq!(plan.mode, PublicCreateMode::Incremental);
     assert_eq!(plan.frame["previous_response_id"], "response-1");
     assert_eq!(plan.frame["input"], json!([message("user", "new-user")]));
 }
 
 #[test]
-fn inline_input_or_output_item_id_changes_do_not_block_incremental_reuse() {
+fn inline_input_or_output_item_id_changes_block_incremental_reuse() {
     for (name, next_user_id, next_output_id) in [
         ("input", "user-changed", "assistant-stable"),
         ("output", "user-stable", "assistant-changed"),
@@ -297,7 +301,7 @@ fn inline_input_or_output_item_id_changes_do_not_block_incremental_reuse() {
         ]);
         assert_eq!(
             state.plan_public_create(&next).mode,
-            PublicCreateMode::Incremental,
+            PublicCreateMode::Full,
             "{name}"
         );
     }
@@ -311,7 +315,7 @@ fn cumulative_output_budget_disables_reuse_without_retaining_more_items() {
         .expect("encoded item size");
     let mut state = ResponsesWebSocketState::with_output_limits(
         CallerKind::Bare,
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         8,
         item_bytes + 1,
     );

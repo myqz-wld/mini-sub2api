@@ -9,7 +9,6 @@ use crate::request_normalizer::StatefulPrepareError;
 use crate::request_normalizer::prepare_stateful_codex_request;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
-use crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES;
 use crate::responses_websocket::RelayContext;
 use crate::responses_websocket::fingerprint_is_current;
 use crate::responses_websocket::relay;
@@ -71,13 +70,24 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         let _ = internal.send(internal_close(1012)).await;
         return;
     }
+    let socket_lease = match context.state.vault.request_state().contexts.open_socket() {
+        Ok(lease) => lease,
+        Err(_) => {
+            let _ = internal.send(internal_close(1011)).await;
+            return;
+        }
+    };
     let prepared = match prepare_stateful_codex_request(
         context.profile,
         EmulationTransport::WebSocket,
         &context.headers,
         Bytes::from(first),
-        MAX_WEBSOCKET_MESSAGE_BYTES,
+        crate::inference_limits::get().request_bytes,
         CodexStateContext {
+            force_lite: false,
+            admission: None,
+            binding: None,
+            socket_id: Some(&socket_lease.id),
             account_ref: &context.account_ref,
             state_namespace: &context.state_namespace,
             downstream_scope: &context.pseudonym_scope,
@@ -100,6 +110,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             return;
         }
     };
+    let operation = prepared.operation;
     let synthesized_item_ids = prepared.synthesized_item_ids;
     let pending_compaction = prepared.pending_compaction;
     let mut upstream_headers = prepared.headers;
@@ -123,7 +134,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             text,
             &context.resolved.fingerprint,
             &resolved_identity.installation_id,
-            MAX_WEBSOCKET_MESSAGE_BYTES,
+            crate::inference_limits::get().request_bytes,
         ) {
             Ok(text) => text,
             Err(_) => {
@@ -203,29 +214,44 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         let _ = internal.send(internal_close(1012)).await;
         return;
     }
+    if let (Some(operation), Some(token)) = (
+        &operation,
+        turn_state.as_ref().and_then(|v| v.to_str().ok()),
+    ) && context
+        .state
+        .vault
+        .request_state()
+        .contexts
+        .learn_turn(operation, token)
+        .is_err()
+    {
+        let _ = internal.send(internal_close(1011)).await;
+        return;
+    }
     if let Some(hidden) = hidden {
-        let outcome =
-            if let Ok(hidden) = encode_frame_bounded(&hidden.frame, MAX_WEBSOCKET_MESSAGE_BYTES) {
-                let Some(outcome) = wait_deferred(
-                    &mut internal,
-                    &mut pending,
-                    &mut pending_cost,
-                    run_hidden_setup(
-                        &mut upstream,
-                        &mut continuation,
-                        hidden,
-                        HIDDEN_SETUP_TIMEOUT,
-                    ),
-                )
-                .await
-                else {
-                    return;
-                };
-                outcome
-            } else {
-                continuation.fail_hidden_setup();
-                HiddenSetupOutcome::Failed
+        let outcome = if let Ok(hidden) =
+            encode_frame_bounded(&hidden.frame, crate::inference_limits::get().request_bytes)
+        {
+            let Some(outcome) = wait_deferred(
+                &mut internal,
+                &mut pending,
+                &mut pending_cost,
+                run_hidden_setup(
+                    &mut upstream,
+                    &mut continuation,
+                    hidden,
+                    HIDDEN_SETUP_TIMEOUT,
+                ),
+            )
+            .await
+            else {
+                return;
             };
+            outcome
+        } else {
+            continuation.fail_hidden_setup();
+            HiddenSetupOutcome::Failed
+        };
         if outcome == HiddenSetupOutcome::Reconnect {
             continuation.reset_for_reconnect();
             let Some(reconnected) = wait_deferred(
@@ -277,13 +303,41 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             }
         }
     }
+    if let Some(operation) = &operation {
+        for token in [
+            continuation.setup_turn_state(),
+            turn_state.as_ref().and_then(|v| v.to_str().ok()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if context
+                .state
+                .vault
+                .request_state()
+                .contexts
+                .learn_turn(operation, token)
+                .is_err()
+            {
+                let _ = internal.send(internal_close(1011)).await;
+                return;
+            }
+        }
+        turn_state = context
+            .state
+            .vault
+            .request_state()
+            .contexts
+            .turn_token(operation)
+            .and_then(|token| token.parse().ok());
+    }
     debug_assert!(!continuation.public_create_attempted());
     let text = match plan_public_text_with_state(
         &mut continuation,
         &value,
         &synthesized_item_ids,
         pending_compaction,
-        MAX_WEBSOCKET_MESSAGE_BYTES,
+        crate::inference_limits::get().request_bytes,
     ) {
         Ok(text) => text,
         Err(_) => {
@@ -291,12 +345,22 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             return;
         }
     };
-    let mut relay_headers = upstream_headers;
-    if let Some(turn_state) = turn_state {
-        relay_headers.insert("x-codex-turn-state", turn_state);
+    if let (Some(operation), Some(token)) = (
+        &operation,
+        turn_state.as_ref().and_then(|v| v.to_str().ok()),
+    ) && context
+        .state
+        .vault
+        .request_state()
+        .contexts
+        .learn_turn(operation, token)
+        .is_err()
+    {
+        let _ = internal.send(internal_close(1011)).await;
+        return;
     }
     let relay_context = RelayContext {
-        headers: relay_headers,
+        headers: context.headers,
         account_ref: context.account_ref,
         state_namespace: Some(context.state_namespace),
         pseudonym_scope: context.pseudonym_scope,
@@ -306,6 +370,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         vault: context.state.vault,
         fingerprint: context.resolved.fingerprint,
         identity: Some(resolved_identity),
+        operation,
     };
     relay(
         internal,
@@ -345,7 +410,7 @@ async fn wait_deferred<T>(
                                     return None;
                                 };
                                 if pending.len() >= MAX_DEFERRED_PENDING_MESSAGES
-                                    || next > MAX_WEBSOCKET_MESSAGE_BYTES
+                                    || next > crate::inference_limits::get().request_bytes
                                 {
                                     let _ = internal.send(internal_close(1009)).await;
                                     return None;

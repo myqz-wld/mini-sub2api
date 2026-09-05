@@ -85,6 +85,7 @@ fn encode(bytes: &[u8]) -> String {
 
 fn wire_domain(domain: WireIdDomain) -> &'static str {
     match domain {
+        WireIdDomain::ContextWindow => "context_window",
         WireIdDomain::Installation => "installation",
         WireIdDomain::Session => "session",
         WireIdDomain::Thread => "thread",

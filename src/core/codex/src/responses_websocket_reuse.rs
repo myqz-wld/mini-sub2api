@@ -3,7 +3,6 @@ use crate::responses_websocket_projection::project_properties;
 use crate::responses_websocket_projection::reusable_item;
 use serde_json::Map;
 use serde_json::Value;
-use std::collections::HashSet;
 
 const EXPLICIT_STATE_CARRIERS: &[&str] = &[
     "previous_response_id",
@@ -34,7 +33,7 @@ pub(crate) fn has_explicit_state_carrier(request: &Value) -> bool {
 
 pub(crate) fn request_snapshot(
     request: &Value,
-    synthesized_item_ids: &[String],
+    _synthesized_item_ids: &[String],
 ) -> Option<RequestSnapshot> {
     let object = request.as_object()?;
     if object.get("type").and_then(Value::as_str) != Some("response.create") {
@@ -44,25 +43,7 @@ pub(crate) fn request_snapshot(
     if !input.iter().all(reusable_item) {
         return None;
     }
-    let synthesized = synthesized_item_ids
-        .iter()
-        .map(String::as_str)
-        .collect::<HashSet<_>>();
-    let comparison_input = input
-        .iter()
-        .cloned()
-        .map(|mut item| {
-            if let Some(object) = item.as_object_mut()
-                && object
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| synthesized.contains(id))
-            {
-                object.remove("id");
-            }
-            item
-        })
-        .collect();
+    let comparison_input = input.clone();
     Some(RequestSnapshot {
         properties: project_properties(object),
         input,
@@ -117,4 +98,16 @@ pub(crate) fn incremental_input(
     }
     let (_, delta) = current.input.split_at_checked(prefix_len)?;
     Some(delta.to_vec())
+}
+
+impl RequestSnapshot {
+    pub(crate) fn cost(&self) -> usize {
+        serde_json::to_vec(&self.properties).map_or(0, |v| v.len() * 4)
+            + self
+                .input
+                .iter()
+                .chain(&self.comparison_input)
+                .map(|v| serde_json::to_vec(v).map_or(0, |b| b.len() * 4 + 64))
+                .sum::<usize>()
+    }
 }

@@ -155,7 +155,7 @@ async fn api_key_route_preserves_stream_and_replaces_sensitive_headers() {
 }
 
 #[tokio::test]
-async fn codex_api_key_route_streams_upstream_and_aggregates_for_non_streaming_caller() {
+async fn subscription_route_streams_upstream_and_aggregates_for_non_streaming_caller() {
     let capture = ApiCapture::default();
     let app = Router::new()
         .route(
@@ -181,7 +181,8 @@ async fn codex_api_key_route_streams_upstream_and_aggregates_for_non_streaming_c
         )
         .with_state(capture.clone());
     let mock = spawn_loopback(app).await;
-    let (state, account_ref, _temp) = api_key_state(&mock.base_url).await;
+    let (state, account_ref, _temp) =
+        super::integration_support::subscription_state(&mock.base_url).await;
     let mut headers = HeaderMap::new();
     headers.insert("originator", HeaderValue::from_static("codex_exec"));
 
@@ -224,9 +225,11 @@ async fn codex_api_key_route_streams_upstream_and_aggregates_for_non_streaming_c
         7
     );
 
-    let upstream: serde_json::Value =
-        serde_json::from_slice(capture.body.lock().await.as_deref().expect("captured body"))
-            .expect("upstream JSON");
+    let upstream: serde_json::Value = serde_json::from_slice(
+        &zstd::stream::decode_all(capture.body.lock().await.as_deref().expect("captured body"))
+            .expect("zstd body"),
+    )
+    .expect("upstream JSON");
     assert_eq!(upstream["store"], false);
     assert_eq!(upstream["stream"], true);
     assert_eq!(

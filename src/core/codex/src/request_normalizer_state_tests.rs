@@ -27,7 +27,7 @@ async fn prepare(
 ) -> PreparedEmulatedRequest {
     prepare_profile(
         store,
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         ACCOUNT_REF,
         NAMESPACE,
         headers,
@@ -44,13 +44,17 @@ async fn prepare_profile(
     headers: &HeaderMap,
     body: Value,
 ) -> PreparedEmulatedRequest {
-    prepare_stateful_codex_request(
+    prepare_identity_request(
         profile,
         EmulationTransport::Http,
         headers,
         Bytes::from(serde_json::to_vec(&body).expect("body JSON")),
         1024 * 1024,
         CodexStateContext {
+            force_lite: false,
+            admission: None,
+            binding: None,
+            socket_id: None,
             account_ref,
             state_namespace,
             downstream_scope: SCOPE,
@@ -159,11 +163,11 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
     assert_eq!(turn_metadata(&first_value)["session_id"], session);
     assert_eq!(turn_metadata(&first_value)["thread_id"], thread);
     assert_eq!(turn_metadata(&first_value)["turn_id"], turn);
-    assert!(first_value["input"][0].get("id").is_none());
+    assert!(first_value["input"][0].get("id").is_some());
 
     let state = fs::read_to_string(store.state_path_for_test(NAMESPACE)).expect("state file");
     for raw in [
-        "body-session-canonical",
+        "header-session-conflict",
         "body-thread-conflict",
         "turn-real",
         "downstream-installation",
@@ -173,10 +177,17 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
             "reversible identity pair missing: {raw}"
         );
     }
-    for discarded_conflict in ["cache-conflict", "root-turn-conflict"] {
+    for discarded_conflict in [
+        "body-session-canonical",
+        "cache-conflict",
+        "root-turn-conflict",
+    ] {
         assert!(!state.contains(discarded_conflict));
     }
-    assert!(!state.contains("msg_downstream_real"));
+    assert!(
+        state.contains("msg_downstream_real"),
+        "validated item alias must survive continuation"
+    );
     assert!(
         !state.contains("hello"),
         "request content leaked into state"
@@ -187,12 +198,12 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
 async fn both_codex_profiles_reuse_the_same_identity_contract_after_reopen() {
     for (profile, account_ref, state_namespace) in [
         (
-            UpstreamProfile::CodexOpenAi149,
+            UpstreamProfile::CodexSubscription1534,
             "acct_openai_stateful",
             "acct_openai_stateful",
         ),
         (
-            UpstreamProfile::CodexSubscription149,
+            UpstreamProfile::CodexSubscription1534,
             "acct_subscription_stateful",
             "chatgpt-subscription-stateful",
         ),
@@ -251,7 +262,7 @@ async fn both_codex_profiles_reuse_the_same_identity_contract_after_reopen() {
             );
         }
         assert_ne!(first["response_id"], "resp_downstream");
-        assert!(first["input"][0].get("id").is_none());
+        assert!(first["input"][0].get("id").is_some());
     }
 }
 
@@ -302,487 +313,11 @@ async fn sandbox_is_derived_from_sidecar_platform_and_header_body_stay_in_sync()
     }
 }
 
-#[tokio::test]
-async fn missing_turn_reuses_for_tool_roundtrip_and_changes_for_new_user() {
-    let (_temp, store) = store();
-    let headers = HeaderMap::new();
-    let request = |input: Value| {
-        serde_json::json!({
-            "model":"gpt-5.4",
-            "input":input,
-            "client_metadata":{"session_id":"conversation-stable"}
-        })
-    };
-    let first_input = serde_json::json!([{
-        "type":"message","role":"user","content":[{"type":"input_text","text":"first"}]
-    }]);
-    let first = value(&prepare(&store, &headers, request(first_input.clone())).await);
-    let first_turn = first["client_metadata"]["turn_id"]
-        .as_str()
-        .expect("first turn")
-        .to_string();
-    let first_user = first["input"]
-        .as_array()
-        .expect("input")
-        .iter()
-        .find(|item| item["role"] == "user")
-        .expect("user");
-    assert!(first_user.get("id").is_none());
-    let first_create_time =
-        first_user["internal_chat_message_metadata_passthrough"]["create_time"].clone();
+#[path = "request_normalizer_continuation_state_tests.rs"]
+mod continuation_tests;
 
-    let call = seed_upstream_wire(&store, WireIdDomain::Call, "call_provider").await;
-
-    let tool_input = serde_json::json!([
-        {"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
-        {"type":"function_call_output","call_id":call,"output":"done"}
-    ]);
-    let tool = value(&prepare(&store, &headers, request(tool_input)).await);
-    assert_eq!(tool["client_metadata"]["turn_id"], first_turn);
-    let repeated_user = tool["input"]
-        .as_array()
-        .expect("input")
-        .iter()
-        .find(|item| item["role"] == "user")
-        .expect("user");
-    assert!(repeated_user.get("id").is_none());
-    assert_eq!(
-        repeated_user["internal_chat_message_metadata_passthrough"]["create_time"],
-        first_create_time
-    );
-
-    let minimal_call =
-        seed_upstream_wire(&store, WireIdDomain::Call, "call_provider_minimal").await;
-    let minimal_tool = value(
-        &prepare(
-            &store,
-            &headers,
-            request(serde_json::json!([{
-                "type":"function_call_output",
-                "call_id":minimal_call,
-                "output":"done"
-            }])),
-        )
-        .await,
-    );
-    assert_eq!(minimal_tool["client_metadata"]["turn_id"], first_turn);
-
-    let next_input = serde_json::json!([
-        {"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]},
-        {"type":"function_call_output","call_id":call,"output":"done"},
-        {"type":"message","role":"user","content":[{"type":"input_text","text":"second"}]}
-    ]);
-    let next = value(&prepare(&store, &headers, request(next_input)).await);
-    assert_ne!(next["client_metadata"]["turn_id"], first_turn);
-}
-
-#[tokio::test]
-async fn explicit_parent_lineage_keeps_root_session_and_distinct_child_thread() {
-    let (_temp, store) = store();
-    let body = serde_json::json!({
-        "model":"gpt-5.4",
-        "input":[{"type":"message","role":"user","content":"child work"}],
-        "client_metadata":{
-            "session_id":"root-session",
-            "thread_id":"child-thread",
-            "x-codex-turn-metadata":"{\"parent_thread_id\":\"root-session\",\"turn_id\":\"child-turn\",\"root_turn_id\":\"root-turn\"}"
-        }
-    });
-    let prepared = prepare(&store, &HeaderMap::new(), body).await;
-    let value = value(&prepared);
-    let metadata = &value["client_metadata"];
-    assert_ne!(metadata["session_id"], metadata["thread_id"]);
-    assert_eq!(metadata["parent_thread_id"], metadata["session_id"],);
-    assert_ne!(metadata["turn_id"], metadata["root_turn_id"]);
-    assert_eq!(
-        prepared.headers["x-codex-parent-thread-id"],
-        metadata["session_id"].as_str().expect("session")
-    );
-}
-
-#[tokio::test]
-async fn oversized_schema_id_is_an_invalid_request_not_a_state_outage() {
-    let (_temp, store) = store();
-    let body = serde_json::json!({
-        "model":"gpt-5.4",
-        "input":"hello",
-        "client_metadata":{"session_id":"x".repeat(513)}
-    });
-    let error = prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription149,
-        EmulationTransport::Http,
-        &HeaderMap::new(),
-        Bytes::from(serde_json::to_vec(&body).expect("body JSON")),
-        1024 * 1024,
-        CodexStateContext {
-            account_ref: ACCOUNT_REF,
-            state_namespace: NAMESPACE,
-            downstream_scope: SCOPE,
-            fingerprint_mode: FingerprintMode::Device,
-            store: &store,
-        },
-        false,
-    )
-    .await
-    .expect_err("oversized ID must fail");
-    assert_eq!(error, StatefulPrepareError::InvalidRequest);
-    assert!(!store.state_path_for_test(NAMESPACE).exists());
-}
-
-#[tokio::test]
-async fn responses_conversation_anchors_fallback_but_carrier_free_calls_stay_distinct() {
-    let (_temp, store) = store();
-    let conversation_a =
-        seed_upstream_wire(&store, WireIdDomain::Conversation, "conv-provider-a").await;
-    let conversation_b =
-        seed_upstream_wire(&store, WireIdDomain::Conversation, "conv-provider-b").await;
-    let request = |conversation: Option<&str>, text: &str| {
-        let mut value = serde_json::json!({
-            "model":"gpt-5.4",
-            "input":[{"type":"message","role":"user","content":text}]
-        });
-        if let Some(conversation) = conversation {
-            value
-                .as_object_mut()
-                .expect("request")
-                .insert("conversation".to_string(), conversation.into());
-        }
-        value
-    };
-    let a = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request(Some(&conversation_a), "same"),
-        )
-        .await,
-    );
-    let b = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request(Some(&conversation_b), "same"),
-        )
-        .await,
-    );
-    let a_next = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request(Some(&conversation_a), "different"),
-        )
-        .await,
-    );
-    assert_ne!(
-        a["client_metadata"]["session_id"],
-        b["client_metadata"]["session_id"]
-    );
-    assert_eq!(
-        a["client_metadata"]["session_id"],
-        a_next["client_metadata"]["session_id"]
-    );
-
-    let first_free = value(&prepare(&store, &HeaderMap::new(), request(None, "identical")).await);
-    let second_free = value(&prepare(&store, &HeaderMap::new(), request(None, "identical")).await);
-    assert_ne!(
-        first_free["client_metadata"]["session_id"],
-        second_free["client_metadata"]["session_id"]
-    );
-}
-
-#[tokio::test]
-async fn previous_response_alias_restores_its_conversation_and_thread_owner() {
-    let (temp, store) = store();
-    let first = prepare(
-        &store,
-        &HeaderMap::new(),
-        serde_json::json!({
-            "model":"gpt-5.4",
-            "input":[{"type":"message","id":"msg_first","role":"user","content":"first"}]
-        }),
-    )
-    .await;
-    let first_value = value(&first);
-    let first_identity = first.resolved_identity.as_ref().expect("identity");
-    let response_state = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        Some(first_identity),
-        None,
-    );
-    let translated = response_state
-        .translate_value(serde_json::json!({
-            "type":"response.completed",
-            "response":{"id":"resp_provider_first","output":[]}
-        }))
-        .await
-        .expect("translate response");
-    let alias = translated["response"]["id"]
-        .as_str()
-        .expect("response alias");
-    assert_ne!(alias, "resp_provider_first");
-
-    let reopened = RequestStateStore::new(temp.path().join("accounts"));
-    let next = value(
-        &prepare(
-            &reopened,
-            &HeaderMap::new(),
-            serde_json::json!({
-                "model":"gpt-5.4",
-                "previous_response_id":alias,
-                "input":[{"type":"message","id":"msg_next","role":"user","content":"next"}]
-            }),
-        )
-        .await,
-    );
-    assert_eq!(
-        next["client_metadata"]["session_id"],
-        first_value["client_metadata"]["session_id"]
-    );
-    assert_eq!(
-        next["client_metadata"]["thread_id"],
-        first_value["client_metadata"]["thread_id"]
-    );
-    assert_ne!(
-        next["client_metadata"]["turn_id"],
-        first_value["client_metadata"]["turn_id"]
-    );
-}
-
-#[tokio::test]
-async fn equal_user_content_uses_item_identity_and_tool_history_reuses_active_turn() {
-    let (_temp, store) = store();
-    let request = |input: Value| {
-        serde_json::json!({
-            "model":"gpt-5.4",
-            "input":input,
-            "client_metadata":{"session_id":"equal-content-session"}
-        })
-    };
-    let first = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request(serde_json::json!([{
-                "type":"message","id":"msg_equal_1","role":"user","content":"repeat"
-            }])),
-        )
-        .await,
-    );
-    let second_body = request(serde_json::json!([{
-        "type":"message","id":"msg_equal_2","role":"user","content":"repeat"
-    }]));
-    let second = value(&prepare(&store, &HeaderMap::new(), second_body.clone()).await);
-    let retry = value(&prepare(&store, &HeaderMap::new(), second_body).await);
-    assert_ne!(
-        first["client_metadata"]["turn_id"],
-        second["client_metadata"]["turn_id"]
-    );
-    assert_eq!(
-        second["client_metadata"]["turn_id"],
-        retry["client_metadata"]["turn_id"]
-    );
-
-    let call = seed_upstream_wire(&store, WireIdDomain::Call, "call_provider_equal").await;
-    let tool = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request(serde_json::json!([
-                {"type":"message","id":"msg_equal_2","role":"user","content":"repeat"},
-                {"type":"function_call_output","call_id":call,"output":"done"}
-            ])),
-        )
-        .await,
-    );
-    assert_eq!(
-        tool["client_metadata"]["turn_id"],
-        second["client_metadata"]["turn_id"]
-    );
-}
-
-#[tokio::test]
-async fn compaction_commits_only_on_completed_and_same_base_operations_converge() {
-    let (_temp, store) = store();
-    let request = |session: &str, turn: &str| {
-        let metadata = serde_json::json!({
-            "session_id":session,
-            "thread_id":session,
-            "turn_id":turn,
-            "request_kind":"compaction",
-            "compaction":{
-                "trigger":"manual",
-                "reason":"user_requested",
-                "implementation":"responses_compaction_v2",
-                "phase":"standalone_turn",
-                "strategy":"memento"
-            }
-        });
-        serde_json::json!({
-            "model":"gpt-5.4",
-            "input":[
-                {"type":"message","role":"user","content":"history"},
-                {"type":"compaction_trigger"}
-            ],
-            "client_metadata":{"x-codex-turn-metadata":metadata.to_string()}
-        })
-    };
-    let first = prepare(
-        &store,
-        &HeaderMap::new(),
-        request("compact-session-a", "compact-turn-a1"),
-    )
-    .await;
-    let first_value = value(&first);
-    let first_pending = first
-        .pending_compaction
-        .as_ref()
-        .expect("first pending compaction")
-        .clone();
-    let retry = prepare(
-        &store,
-        &HeaderMap::new(),
-        request("compact-session-a", "compact-turn-a1"),
-    )
-    .await;
-    let retry_value = value(&retry);
-    assert_eq!(retry.pending_compaction.as_ref(), Some(&first_pending));
-    let overlapping = prepare(
-        &store,
-        &HeaderMap::new(),
-        request("compact-session-a", "compact-turn-a2"),
-    )
-    .await;
-    let overlapping_value = value(&overlapping);
-    assert_eq!(
-        overlapping
-            .pending_compaction
-            .as_ref()
-            .expect("overlapping pending")
-            .target_window,
-        first_pending.target_window
-    );
-    let other = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request("compact-session-b", "compact-turn-b1"),
-        )
-        .await,
-    );
-    assert_eq!(
-        first_value["client_metadata"]["x-codex-window-id"],
-        retry_value["client_metadata"]["x-codex-window-id"]
-    );
-    assert!(
-        first_value["client_metadata"]["x-codex-window-id"]
-            .as_str()
-            .is_some_and(|window| window.ends_with(":0"))
-    );
-    assert!(
-        overlapping_value["client_metadata"]["x-codex-window-id"]
-            .as_str()
-            .is_some_and(|window| window.ends_with(":0"))
-    );
-    assert!(
-        other["client_metadata"]["x-codex-window-id"]
-            .as_str()
-            .is_some_and(|window| window.ends_with(":0"))
-    );
-    assert_ne!(
-        first_value["client_metadata"]["session_id"],
-        other["client_metadata"]["session_id"]
-    );
-
-    let failed = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        first.resolved_identity.as_ref(),
-        first.pending_compaction.as_ref(),
-    );
-    failed
-        .translate_value(serde_json::json!({
-            "type":"response.failed",
-            "response":{"id":"resp_failed"}
-        }))
-        .await
-        .expect("translate failed terminal");
-    let after_failure = prepare(
-        &store,
-        &HeaderMap::new(),
-        request("compact-session-a", "compact-turn-a1"),
-    )
-    .await;
-    assert!(
-        value(&after_failure)["client_metadata"]["x-codex-window-id"]
-            .as_str()
-            .is_some_and(|window| window.ends_with(":0"))
-    );
-
-    let completed = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        after_failure.resolved_identity.as_ref(),
-        after_failure.pending_compaction.as_ref(),
-    );
-    completed
-        .translate_value(serde_json::json!({
-            "type":"response.completed",
-            "response":{"id":"resp_completed"}
-        }))
-        .await
-        .expect("commit completed terminal");
-    let overlapping_completed = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        overlapping.resolved_identity.as_ref(),
-        overlapping.pending_compaction.as_ref(),
-    );
-    overlapping_completed
-        .translate_value(serde_json::json!({
-            "type":"response.completed",
-            "response":{"id":"resp_overlapping"}
-        }))
-        .await
-        .expect("converge overlapping completion");
-
-    let committed_retry = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request("compact-session-a", "compact-turn-a1"),
-        )
-        .await,
-    );
-    assert!(
-        committed_retry["client_metadata"]["x-codex-window-id"]
-            .as_str()
-            .is_some_and(|window| window.ends_with(":0")),
-        "a completed marker retry must reuse its original committed base"
-    );
-
-    let later = value(
-        &prepare(
-            &store,
-            &HeaderMap::new(),
-            request("compact-session-a", "compact-turn-a3"),
-        )
-        .await,
-    );
-    assert!(
-        later["client_metadata"]["x-codex-window-id"]
-            .as_str()
-            .is_some_and(|window| window.ends_with(":1"))
-    );
-}
+#[path = "request_normalizer_compaction_state_tests.rs"]
+mod compaction_tests;
 
 #[path = "request_normalizer_reference_tests.rs"]
 mod reference_tests;

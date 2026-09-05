@@ -76,7 +76,7 @@ async fn deferred_codex_rejection_sends_private_diagnostic_before_structured_clo
         }),
     ))
     .await;
-    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let (state, account_ref, _temp) = subscription_state(&upstream.base_url).await;
     let core = spawn_internal(state).await;
     let mut socket = internal_handshake(&core.base_url, &account_ref)
         .header("originator", "codex_exec")

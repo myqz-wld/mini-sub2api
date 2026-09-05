@@ -9,7 +9,16 @@ pub(crate) struct ModelProfile {
     verbosity: Option<&'static str>,
 }
 
-const MODEL_PROFILES: [(&str, ModelProfile); 8] = [
+const MODEL_PROFILES: [(&str, ModelProfile); 11] = [
+    ("gpt-6-astra", profile(true, Some("low"), None, Some("low"))),
+    (
+        "gpt-daybreak-blue-latest",
+        profile(true, Some("low"), None, Some("low")),
+    ),
+    (
+        "gpt-daybreak-red-latest",
+        profile(true, Some("medium"), None, Some("high")),
+    ),
     ("gpt-5.6-sol", profile(true, Some("low"), None, Some("low"))),
     (
         "gpt-5.6-terra",
@@ -31,7 +40,7 @@ const MODEL_PROFILES: [(&str, ModelProfile); 8] = [
     ("gpt-5.4", profile(false, Some("medium"), None, Some("low"))),
     (
         "codex-auto-review",
-        profile(false, Some("medium"), None, Some("low")),
+        profile(true, Some("medium"), None, Some("low")),
     ),
 ];
 

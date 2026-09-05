@@ -112,7 +112,7 @@ func TestCodexProfilesTranslateStreamingAndAggregatedResponses(t *testing.T) {
 		headers http.Header
 	}{
 		{
-			name: "codex_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID,
+			name: "codex_subscription_marked", secret: fixture.subscriptionKey, keyID: fixture.subscriptionKeyID,
 			headers: http.Header{"Originator": []string{"codex_exec"}},
 		},
 		{
@@ -173,7 +173,7 @@ func TestProfilesEnforceNon2xxBodyAndHeaderPrivacyBoundaries(t *testing.T) {
 		{name: "bare_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID},
 		{
 			name: "codex_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID,
-			headers: http.Header{"Originator": []string{"codex_exec"}}, stateful: true,
+			headers: http.Header{"Originator": []string{"codex_exec"}}, stateful: false,
 		},
 		{
 			name: "codex_subscription", secret: fixture.subscriptionKey,
@@ -226,7 +226,7 @@ func TestCodexProfilesTranslateStreamingAndAggregatedTerminalFailures(t *testing
 		headers http.Header
 	}{
 		{
-			name: "codex_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID,
+			name: "codex_subscription_marked", secret: fixture.subscriptionKey, keyID: fixture.subscriptionKeyID,
 			headers: http.Header{"Originator": []string{"codex_exec"}},
 		},
 		{
@@ -309,7 +309,7 @@ func terminalHTTPResponse(
 	return nil
 }
 
-func TestCodexProfilesRestoreResponseOwnershipAcrossCoreRestart(t *testing.T) {
+func TestSubscriptionRestartRequiresFullHistoryButRestoresExplicitIdentity(t *testing.T) {
 	fixture := newResponsesProfileHTTPFixture(t)
 	tests := []struct {
 		name    string
@@ -318,7 +318,7 @@ func TestCodexProfilesRestoreResponseOwnershipAcrossCoreRestart(t *testing.T) {
 		headers http.Header
 	}{
 		{
-			name: "codex_api_key", secret: fixture.apiKey, keyID: fixture.apiKeyID,
+			name: "codex_subscription_marked", secret: fixture.subscriptionKey, keyID: fixture.subscriptionKeyID,
 			headers: http.Header{"Originator": []string{"codex_exec"}},
 		},
 		{
@@ -381,6 +381,19 @@ func TestCodexProfilesRestoreResponseOwnershipAcrossCoreRestart(t *testing.T) {
 		status, publicBody, publicHeaders := publicRequestWithHeaders(
 			t, fixture.public, test.secret, string(body), test.headers,
 		)
+		if status != http.StatusServiceUnavailable {
+			t.Fatalf("%s restarted delta status = %d", test.name, status)
+		}
+		select {
+		case <-fixture.captures:
+			t.Fatal("unmaterialized delta reached upstream")
+		default:
+		}
+		rebuild := decodeRequestObject(t, body)
+		delete(rebuild, "previous_response_id")
+		rebuild["client_metadata"] = map[string]any{"session_id": "session-conflict-" + test.name}
+		status, publicBody, publicHeaders = publicRequestWithHeaders(t, fixture.public, test.secret,
+			string(mustRequestJSON(t, rebuild)), test.headers)
 		if status != http.StatusOK {
 			t.Fatalf("%s second response = %d %s", test.name, status, publicBody)
 		}
@@ -389,8 +402,8 @@ func TestCodexProfilesRestoreResponseOwnershipAcrossCoreRestart(t *testing.T) {
 			t, fixture.store, test.keyID, publicHeaders, capture.ProviderRequestID,
 		)
 		upstream := decodeRequestObject(t, capture.Body)
-		if upstream["previous_response_id"] != first.providerResponseID {
-			t.Fatalf("%s previous response owner was not restored: %#v", test.name, upstream)
+		if _, exists := upstream["previous_response_id"]; exists {
+			t.Fatal("full restart rebuild retained a response reference")
 		}
 		second := identityFromProfileCapture(t, capture)
 		if second.sessionID != first.sessionID || second.threadID != first.threadID ||

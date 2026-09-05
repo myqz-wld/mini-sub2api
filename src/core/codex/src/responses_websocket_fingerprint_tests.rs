@@ -250,8 +250,8 @@ async fn accepting_upstream(
     capture.handshakes.lock().await.push(headers);
     let relay_capture = capture.clone();
     upgrade
-        .max_message_size(MAX_WEBSOCKET_MESSAGE_BYTES)
-        .max_frame_size(MAX_WEBSOCKET_MESSAGE_BYTES)
+        .max_message_size(crate::inference_limits::get().request_bytes)
+        .max_frame_size(crate::inference_limits::get().request_bytes)
         .on_upgrade(move |mut socket| async move {
             while let Some(Ok(InternalMessage::Text(frame))) = socket.next().await {
                 relay_capture.frames.lock().await.push(frame.to_string());

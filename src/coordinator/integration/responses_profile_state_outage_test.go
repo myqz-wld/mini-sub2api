@@ -21,7 +21,6 @@ func TestCodexProfilesFailSafeWhenRequiredReferenceMappingIsMissing(t *testing.T
 		name         string
 		subscription bool
 	}{
-		{name: "codex_api_key"},
 		{name: "codex_subscription", subscription: true},
 	}
 	for _, profile := range profiles {
@@ -69,7 +68,6 @@ func TestCodexProfilesFailSafeBeforeUpstreamWhenRequestStateIsCorrupt(t *testing
 		name         string
 		subscription bool
 	}{
-		{name: "codex_api_key"},
 		{name: "codex_subscription", subscription: true},
 	}
 	for _, profile := range profiles {
@@ -130,7 +128,6 @@ func TestCodexProfilesCloseFirstWebSocketCreateSafelyWhenRequestStateIsCorrupt(t
 		name         string
 		subscription bool
 	}{
-		{name: "codex_api_key"},
 		{name: "codex_subscription", subscription: true},
 	}
 	for _, profile := range profiles {

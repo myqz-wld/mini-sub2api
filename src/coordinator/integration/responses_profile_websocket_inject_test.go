@@ -33,7 +33,7 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 			case "response.inject":
 				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
 					"type": "response.completed", "response": map[string]any{
-						"id": responseID, "usage": map[string]any{"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
+						"id": event["response_id"], "usage": map[string]any{"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
 					},
 				}))
 			}
@@ -46,7 +46,7 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 		emulated bool
 	}{
 		{name: "bare_api_key", secret: fixture.apiKey},
-		{name: "codex_api_key", secret: fixture.apiKey, headers: codexScenarioHeaders("inject-api", "inject/9.9.9"), emulated: true},
+		{name: "codex_api_key", secret: fixture.apiKey, headers: codexScenarioHeaders("inject-api", "inject/9.9.9")},
 		{name: "bare_subscription", secret: fixture.subscriptionKey, emulated: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -76,8 +76,8 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 				t.Fatalf("function call ID was not translated: %#v", callEvent)
 			}
 			createCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
-			if test.name == "codex_api_key" && createCapture.Headers.Get("Version") != "0.149.0" {
-				t.Fatal("Codex API-key WebSocket profile did not pin version 0.149.0")
+			if test.name == "codex_api_key" && createCapture.Headers.Get("Version") != "9.9.9" {
+				t.Fatal("API-key WebSocket changed caller version")
 			}
 			callID := "call_1"
 			if test.emulated {

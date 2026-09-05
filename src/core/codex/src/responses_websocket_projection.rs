@@ -4,12 +4,19 @@ use serde_json::Value;
 use std::io;
 use std::io::Write;
 
-const VOLATILE_REQUEST_FIELDS: &[&str] = &[
-    "client_metadata",
-    "generate",
-    "input",
-    "previous_response_id",
-    "stream_options",
+const REUSE_PROPERTIES: &[&str] = &[
+    "model",
+    "instructions",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "reasoning",
+    "store",
+    "stream",
+    "include",
+    "service_tier",
+    "prompt_cache_key",
+    "text",
 ];
 
 const REUSABLE_ITEM_TYPES: &[&str] = &[
@@ -50,7 +57,7 @@ const REUSABLE_ITEM_TYPES: &[&str] = &[
 pub(crate) fn project_properties(object: &Map<String, Value>) -> Map<String, Value> {
     object
         .iter()
-        .filter(|(name, _)| !VOLATILE_REQUEST_FIELDS.contains(&name.as_str()))
+        .filter(|(name, _)| REUSE_PROPERTIES.contains(&name.as_str()))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect()
 }
@@ -94,7 +101,6 @@ fn project_item(value: &Value) -> Value {
     let Some(object) = projected.as_object_mut() else {
         return projected;
     };
-    object.remove("id");
     object.remove("internal_chat_message_metadata_passthrough");
     projected
 }

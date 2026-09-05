@@ -28,7 +28,7 @@ func TestCodexProfileCredentialDeletionRemovesOnlyItsIdentityNamespace(t *testin
 		t.Fatalf("subscription materialization = %d", status)
 	}
 	_ = waitForRoutingCapture(t, fixture.captures)
-	assertProfileStateFileCount(t, fixture.coreStateDir, 2)
+	assertProfileStateFileCount(t, fixture.coreStateDir, 1)
 
 	if err := fixture.store.RevokeAPIKey(context.Background(), fixture.apiKeyID); err != nil {
 		t.Fatal(err)

@@ -18,7 +18,7 @@ async fn native_websocket_turn_pseudonymizes_identity_deterministically() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription149,
+            UpstreamProfile::CodexSubscription1534,
             EmulationTransport::WebSocket,
             &native_headers(),
             body.clone(),
@@ -32,7 +32,7 @@ async fn native_websocket_turn_pseudonymizes_identity_deterministically() {
 
     let repeated = harness
         .prepare(
-            UpstreamProfile::CodexSubscription149,
+            UpstreamProfile::CodexSubscription1534,
             EmulationTransport::WebSocket,
             &native_headers(),
             body,
@@ -87,7 +87,7 @@ async fn native_websocket_prewarm_keeps_empty_turn_semantics_after_pseudonymizat
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription149,
+            UpstreamProfile::CodexSubscription1534,
             EmulationTransport::WebSocket,
             &native_headers(),
             body.clone(),
@@ -204,7 +204,7 @@ fn prepare_prewarm(turn_metadata: &str, stream_start_ms: &str) -> PreparedEmulat
         .expect("prewarm request"),
     );
     prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::WebSocket,
         &native_headers(),
         body,

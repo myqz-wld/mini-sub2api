@@ -13,13 +13,15 @@ import (
 	"strings"
 )
 
-const sourceCommit = "758ef40f50c1a458425c7cfbf1eb12cbc07af0b0"
-const promptDirectory = "src/core/codex/prompts/codex-0.149.0"
+const sourceCommit = "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a"
+const promptDirectory = "src/core/codex/prompts/codex-0.153.4"
 
 var modelFiles = map[string]string{
 	"gpt-5.6-sol": "gpt-5.6.md", "gpt-5.6-terra": "gpt-5.6.md", "gpt-5.6-luna": "gpt-5.6.md",
 	"gpt-5.5": "gpt-5.5.md", "gpt-5.4": "gpt-5.4.md", "gpt-5.4-mini": "gpt-5.4-mini.md",
-	"gpt-5.2": "gpt-5.2.md", "codex-auto-review": "gpt-5.4.md",
+	"gpt-5.2": "gpt-5.2.md", "codex-auto-review": "gpt-daybreak-blue.md",
+	"gpt-6-astra": "gpt-6-astra.md", "gpt-daybreak-blue-latest": "gpt-daybreak-blue.md",
+	"gpt-daybreak-red-latest": "gpt-daybreak-red.md",
 }
 
 type model struct {
@@ -37,7 +39,7 @@ type instructionVariables struct {
 }
 
 func main() {
-	source := flag.String("codex-source", "", "local Codex Git repository containing the pinned 0.149.0 commit")
+	source := flag.String("codex-source", "", "local Codex Git repository containing the pinned 0.153.4 commit")
 	output := flag.String("output", promptDirectory, "snapshot output directory")
 	check := flag.Bool("check", false, "compare snapshots without writing files")
 	flag.Parse()
@@ -49,7 +51,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("Validated Codex 0.149.0: 8 catalog defaults and 2 fallbacks in 7 prompt files.")
+	fmt.Println("Validated Codex 0.153.4: 11 catalog defaults and 2 fallbacks in 10 prompt files.")
 }
 
 func run(source, output string, check bool) error {
@@ -143,6 +145,9 @@ func renderSnapshots(catalog []byte, fallback, personalityHeader string) (map[st
 		// Codex treats templates without instructions_variables as literal text.
 		if variables := entry.Messages.Variables; variables != nil {
 			text = strings.ReplaceAll(text, "{{ personality }}", variables.PersonalityDefault)
+			if strings.Contains(text, "{{ personality }}") {
+				return nil, fmt.Errorf("unresolved template placeholder for model: %s", entry.Slug)
+			}
 		}
 		if previous, exists := snapshots[name]; exists && string(previous) != text {
 			return nil, fmt.Errorf("shared prompt differs for model: %s", entry.Slug)
@@ -156,9 +161,7 @@ func renderSnapshots(catalog []byte, fallback, personalityHeader string) (map[st
 		if len(bytes.TrimSpace(data)) == 0 {
 			return nil, fmt.Errorf("empty rendered prompt: %s", name)
 		}
-		if bytes.Contains(data, []byte("{{")) {
-			return nil, fmt.Errorf("unresolved template placeholder in %s", name)
-		}
+
 	}
 	return snapshots, nil
 }

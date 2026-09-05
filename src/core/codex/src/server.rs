@@ -64,8 +64,6 @@ use tokio::sync::Mutex;
 pub(crate) use internal_request::validate_internal_auth;
 pub(crate) use internal_request::validate_internal_request;
 
-const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
-
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) vault: Vault,
@@ -146,9 +144,12 @@ async fn responses_inner(
     let caller = CallerKind::from_headers(&headers);
     let account_ref = identity.account_ref;
     let pseudonym_scope = identity.pseudonym_scope;
-    let body = to_bytes(request.into_body(), MAX_REQUEST_BYTES)
-        .await
-        .map_err(|_| CoreFailure::InvalidRequest)?;
+    let body = to_bytes(
+        request.into_body(),
+        crate::inference_limits::get().request_bytes,
+    )
+    .await
+    .map_err(|_| CoreFailure::InvalidRequest)?;
     let account_lock = account_lock(state, &account_ref).await;
 
     let _guard = account_lock.lock().await;
@@ -158,43 +159,52 @@ async fn responses_inner(
     let state_namespace = resolved.state_namespace.clone();
     let mut forward_headers = headers;
     let body = if profile.emulates_codex() {
-        decode_emulated_request_body(&mut forward_headers, body, MAX_REQUEST_BYTES)
-            .map_err(|()| CoreFailure::InvalidRequest)?
+        decode_emulated_request_body(
+            &mut forward_headers,
+            body,
+            crate::inference_limits::get().request_bytes,
+        )
+        .map_err(|()| CoreFailure::InvalidRequest)?
     } else {
         body
     };
     let downstream_expects_sse = request_expects_sse(&body);
-    let (forward_headers, body, resolved_identity, pending_compaction) = if profile.emulates_codex()
-    {
-        let prepared = prepare_stateful_codex_request(
-            profile,
-            EmulationTransport::Http,
-            &forward_headers,
-            body,
-            MAX_REQUEST_BYTES,
-            CodexStateContext {
-                account_ref: &account_ref,
-                state_namespace: &state_namespace,
-                downstream_scope: &pseudonym_scope,
-                fingerprint_mode: resolved.fingerprint.mode(),
-                store: state.vault.request_state(),
-            },
-            false,
-        )
-        .await
-        .map_err(|error| match error {
-            StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
-            StatefulPrepareError::StateUnavailable => CoreFailure::StateUnavailable,
-        })?;
-        (
-            prepared.headers,
-            prepared.body,
-            prepared.resolved_identity,
-            prepared.pending_compaction,
-        )
-    } else {
-        (forward_headers, body, None, None)
-    };
+    let (forward_headers, body, resolved_identity, pending_compaction, operation) =
+        if profile.emulates_codex() {
+            let prepared = prepare_stateful_codex_request(
+                profile,
+                EmulationTransport::Http,
+                &forward_headers,
+                body,
+                crate::inference_limits::get().request_bytes,
+                CodexStateContext {
+                    force_lite: false,
+                    admission: None,
+                    binding: None,
+                    socket_id: None,
+                    account_ref: &account_ref,
+                    state_namespace: &state_namespace,
+                    downstream_scope: &pseudonym_scope,
+                    fingerprint_mode: resolved.fingerprint.mode(),
+                    store: state.vault.request_state(),
+                },
+                false,
+            )
+            .await
+            .map_err(|error| match error {
+                StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
+                StatefulPrepareError::StateUnavailable => CoreFailure::StateUnavailable,
+            })?;
+            (
+                prepared.headers,
+                prepared.body,
+                prepared.resolved_identity,
+                prepared.pending_compaction,
+                prepared.operation,
+            )
+        } else {
+            (forward_headers, body, None, None, None)
+        };
     let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device
         && profile.uses_identity_state()
     {
@@ -207,7 +217,7 @@ async fn responses_inner(
             body,
             &resolved.fingerprint,
             installation_id,
-            MAX_REQUEST_BYTES,
+            crate::inference_limits::get().request_bytes,
         )
         .map_err(|_| CoreFailure::InvalidRequest)?;
         (projected.headers, projected.body)
@@ -252,6 +262,19 @@ async fn responses_inner(
         }
     }
     let ttfb_ms = started.elapsed().as_millis();
+    if let Some(operation) = &operation
+        && let Some(token) = upstream
+            .headers()
+            .get("x-codex-turn-state")
+            .and_then(|v| v.to_str().ok())
+    {
+        state
+            .vault
+            .request_state()
+            .contexts
+            .learn_turn(operation, token)
+            .map_err(|_| CoreFailure::StateUnavailable)?;
+    }
     let response_state = profile.uses_identity_state().then(|| {
         ResponseStateContext::new(
             &account_ref,
@@ -261,6 +284,7 @@ async fn responses_inner(
             resolved_identity.as_ref(),
             pending_compaction.as_ref(),
         )
+        .with_operation(operation)
     });
     build_http_response(
         upstream,
@@ -430,14 +454,9 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-pub fn parse_internal_listen(raw: &str) -> Result<SocketAddr> {
-    let address: SocketAddr = raw.parse().context("parsing internal listen address")?;
-    anyhow::ensure!(
-        address.ip().is_loopback(),
-        "internal listener must be loopback"
-    );
-    Ok(address)
-}
+#[path = "server_listener.rs"]
+mod listener;
+pub use listener::parse_internal_listen;
 
 #[cfg(test)]
 #[path = "server_tests.rs"]
@@ -445,7 +464,7 @@ mod tests;
 
 #[cfg(test)]
 #[path = "server_integration_support.rs"]
-mod integration_support;
+pub(crate) mod integration_support;
 
 #[cfg(test)]
 #[path = "server_integration_tests.rs"]
@@ -470,3 +489,11 @@ mod response_privacy_tests;
 #[cfg(test)]
 #[path = "server_reference_tests.rs"]
 mod reference_integration_tests;
+
+#[cfg(test)]
+#[path = "server_passthrough_tests.rs"]
+mod passthrough_tests;
+
+#[cfg(test)]
+#[path = "server_context_tests.rs"]
+mod context_tests;

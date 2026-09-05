@@ -33,11 +33,18 @@ const LOCK_SUFFIX: &str = ".request-state.lock";
 #[derive(Clone)]
 pub(crate) struct RequestStateStore {
     accounts_dir: PathBuf,
+    pub(crate) contexts: crate::subscription_context::ContextStore,
 }
 
 impl RequestStateStore {
     pub(crate) fn new(accounts_dir: PathBuf) -> Self {
-        Self { accounts_dir }
+        Self {
+            accounts_dir,
+            contexts: crate::subscription_context::ContextStore::new(
+                mini_sub2api_protocol_v1::limits::InferenceLimits::load()
+                    .expect("valid operator inference limits"),
+            ),
+        }
     }
 
     pub(crate) async fn edit<R, F>(
@@ -81,6 +88,7 @@ impl RequestStateStore {
         anyhow::ensure!(!downstream_scope.is_empty(), "empty downstream scope");
         anyhow::ensure!(now_unix_ms >= 0, "invalid request state time");
         let accounts_dir = self.accounts_dir.clone();
+        let contexts = self.contexts.clone();
         let account_namespace = account_namespace.to_string();
         let owner_account_ref = owner_account_ref.to_string();
         let downstream_scope = downstream_scope.to_string();
@@ -91,6 +99,7 @@ impl RequestStateStore {
                 &owner_account_ref,
                 &downstream_scope,
                 now_unix_ms,
+                &contexts,
                 operation,
             )
         })
@@ -204,6 +213,7 @@ fn edit_locked<R, F>(
     owner_account_ref: &str,
     downstream_scope: &str,
     now_unix_ms: i64,
+    contexts: &crate::subscription_context::ContextStore,
     operation: F,
 ) -> Result<R>
 where
@@ -231,7 +241,8 @@ where
     let mut editor =
         RequestStateEditor::new(&mut state, keys, owner_account_ref, day, now_unix_ms)?;
     let output = operation(&mut editor)?;
-    let summary = editor.finish();
+    let mut summary = editor.finish();
+    contexts.protect_aliases(&state, &mut summary.protected)?;
     let mut changed = summary.changed | state.prune(day, &summary.protected)?;
     let mut bytes = serde_json::to_vec(&state).context("encoding request state")?;
     while bytes.len() as u64 > MAX_REQUEST_STATE_BYTES {
@@ -266,6 +277,10 @@ fn read_optional_state(path: &Path) -> Result<Option<PersistedRequestState>> {
     anyhow::ensure!(
         metadata.file_type().is_file(),
         "request state is not a regular file"
+    );
+    anyhow::ensure!(
+        metadata.len() <= MAX_REQUEST_STATE_BYTES,
+        "request state is too large"
     );
     #[cfg(unix)]
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))

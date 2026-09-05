@@ -212,26 +212,14 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 			},
 		},
 		{
-			name:      "api_key_emulates_codex_api_multi_message_mixed_tools",
-			secret:    apiKey.Secret,
-			body:      codexAPIBody,
+			name:   "api_key_preserves_codex_multi_message_mixed_tools",
+			secret: apiKey.Secret, body: codexAPIBody,
 			headers:   codexScenarioHeaders("api-key", "codex_cli_rs/9.9.9 routing-matrix"),
-			wantRoute: "Codex OpenAI 0.149",
+			wantRoute: "API key passthrough",
 			assert: func(t *testing.T, capture routingMatrixCapture) {
-				assertCodexOpenAIProfileCapture(t, capture)
-				assertSharedRuntimeUserAgent(t, capture)
-				value := decodeRequestObject(t, capture.Body)
-				if value["instructions"] != "Use the available tools only when needed." {
-					t.Fatal("caller base instructions changed")
-				}
-				input := value["input"].([]any)
-				assertNormalizedMessages(t, input, messages)
-				if !isUUIDVersion(capture.Headers.Get("Session-Id"), '7') ||
-					!isUUIDVersion(capture.Headers.Get("Thread-Id"), '7') ||
-					!isUUIDVersion(capture.Headers.Get("X-Codex-Installation-Id"), '4') ||
-					capture.Headers.Get("Version") != "0.149.0" ||
-					capture.Headers.Get("X-Openai-Subagent") != "review" {
-					t.Fatalf("Codex API headers = %#v", capture.Headers)
+				assertAPIKeyCapture(t, capture, codexAPIBody)
+				if capture.Headers.Get("Originator") != "codex_exec" || capture.Headers.Get("Version") != "9.9.9" || capture.Headers.Get("Session-Id") != "api-key-session" {
+					t.Fatal("API key caller headers changed")
 				}
 			},
 		},

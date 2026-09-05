@@ -13,60 +13,9 @@ use crate::responses_websocket_reuse::lite_prewarm_prefix;
 use crate::responses_websocket_reuse::request_snapshot;
 use serde_json::Value;
 
-const DEFAULT_MAX_OUTPUT_ITEMS: usize = 1024;
-const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PrewarmMode {
-    Ordinary,
-    ResponsesLite,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum PublicCreateMode {
-    Passthrough,
-    ExplicitState,
-    Full,
-    Incremental,
-}
-
-pub(crate) struct HiddenSetupPlan {
-    pub(crate) frame: Value,
-}
-
-pub(crate) struct PublicCreatePlan {
-    pub(crate) frame: Value,
-    pub(crate) mode: PublicCreateMode,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum OperationKind {
-    HiddenSetup,
-    PublicCreate,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum OperationPhase {
-    #[default]
-    Idle,
-    Planned,
-    Attempted,
-    ResponseObserved,
-    Completed,
-    Failed,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EventDisposition {
-    Unassociated,
-    ConsumeHiddenSetup,
-    ForwardPublic,
-}
-
-pub(crate) struct ObservedServerEvent {
-    pub(crate) disposition: EventDisposition,
-    pub(crate) completed_compaction: Option<PendingCompaction>,
-}
+#[path = "responses_websocket_state_types.rs"]
+mod types;
+pub(crate) use types::*;
 
 struct PlannedOperation {
     kind: OperationKind,
@@ -88,6 +37,7 @@ pub(crate) struct ResponsesWebSocketState {
     caller: CallerKind,
     profile: UpstreamProfile,
     baseline: Option<ReuseBaseline>,
+    setup_turn_state: Option<String>,
     planned: Option<PlannedOperation>,
     active: Option<ActiveOperation>,
     setup_phase: OperationPhase,
@@ -102,12 +52,13 @@ impl ResponsesWebSocketState {
             caller,
             profile,
             baseline: None,
+            setup_turn_state: None,
             planned: None,
             active: None,
             setup_phase: OperationPhase::Idle,
             public_phase: OperationPhase::Idle,
-            max_output_items: DEFAULT_MAX_OUTPUT_ITEMS,
-            max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
+            max_output_items: crate::inference_limits::get().output_items,
+            max_output_bytes: crate::inference_limits::get().output_bytes,
         }
     }
 
@@ -221,7 +172,7 @@ impl ResponsesWebSocketState {
             PublicCreateMode::ExplicitState
         } else if !automatic {
             self.baseline = None;
-            if self.profile == UpstreamProfile::BareOpenAi {
+            if self.profile == UpstreamProfile::ApiKeyPassthrough {
                 PublicCreateMode::Passthrough
             } else {
                 PublicCreateMode::Full
@@ -279,6 +230,22 @@ impl ResponsesWebSocketState {
                 completed_compaction: None,
             };
         };
+        if kind == OperationKind::HiddenSetup
+            && event.get("type").and_then(Value::as_str) == Some("response.metadata")
+            && self.setup_turn_state.is_none()
+            && let Some(token) = event
+                .get("headers")
+                .and_then(Value::as_object)
+                .and_then(|headers| {
+                    headers
+                        .iter()
+                        .find(|(key, _)| key.eq_ignore_ascii_case("x-codex-turn-state"))
+                })
+                .and_then(|(_, value)| value.as_str())
+            && crate::request_state_types::validate_wire_id(token).is_ok()
+        {
+            self.setup_turn_state = Some(token.to_string());
+        }
         let disposition = match kind {
             OperationKind::HiddenSetup => EventDisposition::ConsumeHiddenSetup,
             OperationKind::PublicCreate => EventDisposition::ForwardPublic,
@@ -330,6 +297,42 @@ impl ResponsesWebSocketState {
 
     pub(crate) fn reset(&mut self) {
         self.reset_for_reconnect();
+    }
+
+    pub(crate) fn setup_turn_state(&self) -> Option<&str> {
+        self.setup_turn_state.as_deref()
+    }
+
+    pub(crate) fn expire_baseline(&mut self) {
+        self.baseline = None;
+    }
+
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.baseline.as_ref().map_or(0, |b| {
+            b.request.cost()
+                + b.output
+                    .iter()
+                    .map(|v| serde_json::to_vec(v).map_or(0, |b| b.len() * 4 + 64))
+                    .sum::<usize>()
+        }) + self
+            .planned
+            .as_ref()
+            .and_then(|p| p.request.as_ref())
+            .map_or(0, RequestSnapshot::cost)
+            + self.active.as_ref().map_or(0, |a| {
+                a.request.as_ref().map_or(0, RequestSnapshot::cost) + a.output_bytes * 4
+            })
+    }
+
+    pub(crate) fn abandon_cached_bodies(&mut self) {
+        self.baseline = None;
+        if let Some(active) = &mut self.active {
+            active.request = None;
+            abandon_output(active);
+        }
+        if let Some(planned) = &mut self.planned {
+            planned.request = None;
+        }
     }
 
     fn automatic_reuse_enabled(&self) -> bool {

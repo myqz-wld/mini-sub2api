@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,7 +186,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	if additional["type"] != "additional_tools" {
 		t.Fatalf("first input = %#v", additional)
 	}
-	if additional["id"] != nil || !jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
+	if !strings.HasPrefix(stringValue(additional["id"]), "at_") || !jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
 		t.Fatalf("normalized tools = %#v, want %#v", additional["tools"], tools)
 	}
 	assertCodexBaseDeveloperMessage(t, input, "gpt-5.6-sol")

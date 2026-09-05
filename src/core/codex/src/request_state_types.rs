@@ -12,23 +12,23 @@ pub(crate) use validation::validate_wire_id;
 
 pub(crate) const REQUEST_STATE_VERSION: u32 = 1;
 pub(crate) const INITIAL_REQUEST_STATE_REVISION: u64 = 1;
-pub(crate) const MAX_REQUEST_STATE_BYTES: u64 = 16 * 1024 * 1024;
+pub(crate) const MAX_REQUEST_STATE_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_OWNERS: usize = 64;
-pub(crate) const MAX_SCOPES: usize = 32;
+pub(crate) const MAX_SCOPES: usize = 1_024;
 pub(crate) const MAX_SCOPED_INSTALLATIONS: usize = 2_048;
-pub(crate) const MAX_CONVERSATIONS: usize = 256;
-pub(crate) const MAX_CHILD_THREADS: usize = 1_024;
-pub(crate) const MAX_TURNS: usize = 4_096;
-pub(crate) const MAX_GENERATED_ITEMS: usize = 8_192;
-pub(crate) const MAX_COMPACTION_MARKERS: usize = 4_096;
-pub(crate) const MAX_WIRE_ID_PAIRS: usize = 32_768;
+pub(crate) const MAX_CONVERSATIONS: usize = 16_384;
+pub(crate) const MAX_CHILD_THREADS: usize = 65_536;
+pub(crate) const MAX_TURNS: usize = 262_144;
+pub(crate) const MAX_GENERATED_ITEMS: usize = 524_288;
+pub(crate) const MAX_COMPACTION_MARKERS: usize = 262_144;
+pub(crate) const MAX_WIRE_ID_PAIRS: usize = 1_048_576;
 pub(crate) const MAX_SCOPE_INSTALLATIONS: usize = 64;
-pub(crate) const MAX_SCOPE_CONVERSATIONS: usize = 64;
-pub(crate) const MAX_SCOPE_CHILD_THREADS: usize = 256;
-pub(crate) const MAX_SCOPE_TURNS: usize = 512;
-pub(crate) const MAX_SCOPE_GENERATED_ITEMS: usize = 1_024;
-pub(crate) const MAX_SCOPE_COMPACTION_MARKERS: usize = 512;
-pub(crate) const MAX_SCOPE_WIRE_ID_PAIRS: usize = 4_096;
+pub(crate) const MAX_SCOPE_CONVERSATIONS: usize = 8_192;
+pub(crate) const MAX_SCOPE_CHILD_THREADS: usize = 16_384;
+pub(crate) const MAX_SCOPE_TURNS: usize = 65_536;
+pub(crate) const MAX_SCOPE_GENERATED_ITEMS: usize = 131_072;
+pub(crate) const MAX_SCOPE_COMPACTION_MARKERS: usize = 65_536;
+pub(crate) const MAX_SCOPE_WIRE_ID_PAIRS: usize = 262_144;
 pub(crate) const MAX_WIRE_ID_BYTES: usize = 512;
 pub(crate) const DETAIL_RETENTION_DAYS: i64 = 30;
 
@@ -114,6 +114,7 @@ pub(crate) struct CompactionMarkerEntry {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WireIdDomain {
+    ContextWindow,
     Installation,
     Session,
     Thread,

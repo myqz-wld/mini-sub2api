@@ -17,6 +17,7 @@ import (
 	"mini-sub2api/src/coordinator/internal/adapter"
 	"mini-sub2api/src/coordinator/internal/httpapi"
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 type responsesProfileWebSocketCapture struct {
@@ -55,7 +56,7 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 		{
 			name: "codex_api_key_normal", secret: fixture.apiKey,
 			headers: codexScenarioHeaders("profile-ws-api", "profile-ws/0.149.0"),
-			model:   "gpt-5.4", emulates: true,
+			model:   "gpt-5.4",
 		},
 		{
 			name: "bare_subscription_lite", secret: fixture.subscriptionKey, model: "gpt-5.6-sol",
@@ -71,6 +72,16 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			first, second := responsesProfileWebSocketFrames(t, test.model)
+			if session := test.headers.Get("Session-Id"); test.emulates && session != "" {
+				// This matrix exercises valid repeated creates on one bound session. Conflicting
+				// later frame identities have dedicated rejection coverage.
+				frames := []*[]byte{&first, &second}
+				for _, frame := range frames {
+					value := decodeResponsesProfileWebSocketFrame(t, *frame)
+					value["client_metadata"].(map[string]any)["session_id"] = session
+					*frame = mustRequestJSON(t, value)
+				}
+			}
 			connection, publicHandshake := dialResponsesProfileWebSocketWithResponse(
 				t, fixture.public, test.secret, test.headers,
 			)
@@ -187,6 +198,7 @@ func newResponsesProfileWebSocketFixtureWithResponder(
 			return
 		}
 		defer connection.CloseNow()
+		connection.SetReadLimit(int64(protocolv1.MustInferenceLimits().RequestBytes))
 		for {
 			messageType, payload, err := connection.Read(context.Background())
 			if err != nil || messageType != websocket.MessageText {

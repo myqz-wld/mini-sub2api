@@ -16,7 +16,7 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
         "input":[]
     });
     let http = prepare_value(
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         caller.clone(),
     );
@@ -26,10 +26,10 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     assert!(http.value.get("state").is_none());
     assert_eq!(http.value["background"], true);
     assert_eq!(http.value["stream"], true);
-    assert!(http.headers.get("x-codex-routing-hint").is_none());
+    assert!(http.headers.get("x-codex-routing-hint").is_some());
 
     let websocket = prepare_value(
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::WebSocket,
         caller.clone(),
     );
@@ -38,11 +38,11 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     assert_eq!(websocket.value["stream_id"], "stream-caller");
     assert!(websocket.value.get("state").is_none());
     assert!(websocket.value.get("background").is_none());
-    assert!(websocket.value.get("stream").is_none());
-    assert!(websocket.headers.get("x-codex-routing-hint").is_none());
+    assert_eq!(websocket.value["stream"], true);
+    assert!(websocket.headers.get("x-codex-routing-hint").is_some());
 
     let subscription = prepare_value(
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::WebSocket,
         caller,
     );
@@ -55,13 +55,13 @@ fn transport_allowlists_and_routing_hint_are_profile_specific() {
     );
     assert_eq!(subscription.value["stream_id"], "stream-caller");
     assert!(subscription.value.get("background").is_none());
-    assert!(subscription.value.get("stream").is_none());
+    assert_eq!(subscription.value["stream"], true);
 }
 
 #[test]
 fn web_and_file_search_filters_use_disjoint_documented_schemas() {
     let prepared = prepare_value(
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         json!({
             "model":"gpt-5.4",
@@ -98,7 +98,7 @@ fn web_and_file_search_filters_use_disjoint_documented_schemas() {
 #[test]
 fn documented_replay_items_survive_while_structured_unknowns_are_stripped() {
     let prepared = prepare_value(
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         json!({
             "model":"gpt-5.4",
@@ -137,7 +137,7 @@ fn documented_replay_items_survive_while_structured_unknowns_are_stripped() {
         }),
     );
     let input = prepared.value["input"].as_array().expect("input items");
-    assert_eq!(input[0]["role"], "system");
+    assert_eq!(input[0]["role"], "developer");
     assert!(
         input[0]["content"][0]["prompt_cache_breakpoint"]
             .get("unknown")
@@ -181,10 +181,7 @@ fn documented_replay_items_survive_while_structured_unknowns_are_stripped() {
 
 #[test]
 fn agent_and_shell_replay_fields_are_filtered_at_documented_boundaries() {
-    for profile in [
-        UpstreamProfile::CodexOpenAi149,
-        UpstreamProfile::CodexSubscription149,
-    ] {
+    for profile in [UpstreamProfile::CodexSubscription1534] {
         for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
             let prepared = prepare_value(
                 profile,
@@ -239,7 +236,7 @@ fn agent_and_shell_replay_fields_are_filtered_at_documented_boundaries() {
 #[test]
 fn moderation_policy_children_are_filtered_but_supported_modes_survive() {
     let prepared = prepare_value(
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         json!({
             "model":"gpt-5.4",

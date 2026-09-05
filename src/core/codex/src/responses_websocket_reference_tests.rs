@@ -1,13 +1,13 @@
 use super::*;
 
 #[tokio::test]
-async fn codex_api_key_missing_previous_response_closes_before_provider_handshake() {
+async fn subscription_missing_previous_response_closes_before_provider_handshake() {
     let capture = WebSocketCapture::default();
     let app = Router::new()
         .route("/responses", get(accepting_upstream))
         .with_state(capture.clone());
     let upstream = spawn_loopback(app).await;
-    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let (state, account_ref, _temp) = subscription_state(&upstream.base_url).await;
     let core = spawn_internal(state).await;
     let handshake = internal_handshake(&core.base_url, &account_ref)
         .header("originator", "codex_exec")

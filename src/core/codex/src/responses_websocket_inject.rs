@@ -10,7 +10,7 @@ pub(crate) fn prepare(
     profile: UpstreamProfile,
     maximum: usize,
 ) -> Result<String, ()> {
-    if profile == UpstreamProfile::BareOpenAi {
+    if profile == UpstreamProfile::ApiKeyPassthrough {
         return Ok(original);
     }
     prepare_object(&mut value, profile)?;
@@ -23,7 +23,7 @@ pub(crate) fn prepare_without_identity(
     profile: UpstreamProfile,
     maximum: usize,
 ) -> Result<String, ()> {
-    if profile == UpstreamProfile::BareOpenAi {
+    if profile == UpstreamProfile::ApiKeyPassthrough {
         return Ok(original);
     }
     prepare_object(&mut value, profile)?;

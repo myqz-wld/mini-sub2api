@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::handshake::client::Request as WebSocketReque
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
-pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.149.0";
+pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.153.4";
 pub(crate) const CODEX_VERSION_HEADER: &str = "version";
 pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
 pub(crate) const CODEX_ROUTING_HINT_HEADER: &str = "x-codex-routing-hint";

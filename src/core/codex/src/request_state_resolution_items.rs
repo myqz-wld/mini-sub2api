@@ -23,7 +23,7 @@ pub(super) fn project_items(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let mut generated_upstream = BTreeSet::new();
+    let generated_upstream = BTreeSet::new();
     let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(generated_upstream);
     };
@@ -80,8 +80,9 @@ pub(super) fn project_items(
                 add_create_time,
             )?;
             if is_synthesized {
-                item.insert("id".to_string(), Value::String(assignment.id.clone()));
-                generated_upstream.insert(assignment.id);
+                // Ordinary Responses input may omit IDs. Preserve that omission instead of
+                // changing all historical IDs when a new turn is projected.
+                item.remove("id");
             }
             if add_create_time && let Some(micros) = assignment.create_time_micros {
                 set_create_time(item, micros)?;

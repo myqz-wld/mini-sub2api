@@ -28,7 +28,10 @@ use mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER;
 use mini_sub2api_protocol_v1::RetryAdvice;
 use std::convert::Infallible;
 
-const MAX_NON_STREAMING_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
+#[path = "response_aggregation.rs"]
+mod aggregation;
+#[cfg(test)]
+use aggregation::{TerminalKind, terminal_response_from_sse};
 
 pub(crate) async fn build_http_response(
     upstream: reqwest::Response,
@@ -132,7 +135,7 @@ fn build_streaming_response(
         let stream = translated_sse_frames(
             upstream_stream,
             response_state.expect("translation context"),
-            MAX_NON_STREAMING_RESPONSE_BYTES,
+            crate::inference_limits::get().output_bytes,
         );
         return builder
             .body(Body::new(StreamBody::new(stream)))
@@ -185,18 +188,19 @@ async fn build_non_streaming_response(
     let mut stream = upstream.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| CoreFailure::UpstreamResponseFailed)?;
-        append_bounded(&mut bytes, &chunk, MAX_NON_STREAMING_RESPONSE_BYTES)?;
+        append_bounded(
+            &mut bytes,
+            &chunk,
+            crate::inference_limits::get().output_bytes,
+        )?;
     }
-    let terminal = terminal_response_from_sse(&bytes)?;
+    let terminal = aggregation::prepare_terminal(&bytes, response_state).await?;
     let terminal_kind = terminal.kind;
-    let mut response = terminal.response;
-    if let Some(state) = response_state {
-        response = state
-            .translate_terminal_value(response, terminal_kind == TerminalKind::Completed)
-            .await
-            .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
-    }
+    let response = terminal.response;
     let body = serde_json::to_vec(&response).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    if body.len() > crate::inference_limits::get().output_bytes {
+        return Err(CoreFailure::UpstreamResponseFailed);
+    }
     builder
         .header(http::header::CONTENT_TYPE, "application/json")
         .header(CORE_TTFB_HEADER, ttfb_ms.to_string())
@@ -248,63 +252,6 @@ fn append_bounded(
     }
     destination.extend_from_slice(chunk);
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TerminalKind {
-    Completed,
-    Failed,
-    Incomplete,
-}
-
-impl TerminalKind {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Completed => RESPONSE_TERMINAL_COMPLETED,
-            Self::Failed => RESPONSE_TERMINAL_FAILED,
-            Self::Incomplete => RESPONSE_TERMINAL_INCOMPLETE,
-        }
-    }
-}
-
-struct TerminalResponse {
-    kind: TerminalKind,
-    response: serde_json::Value,
-}
-
-fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalResponse, CoreFailure> {
-    let text = std::str::from_utf8(bytes).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
-    let mut data = Vec::new();
-    let mut terminal = None;
-    for line in text.lines().chain(std::iter::once("")) {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        if line.is_empty() {
-            if !data.is_empty() {
-                let payload = data.join("\n");
-                data.clear();
-                if payload != "[DONE]" {
-                    let event: serde_json::Value = serde_json::from_str(&payload)
-                        .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
-                    let kind = match event.get("type").and_then(serde_json::Value::as_str) {
-                        Some("response.completed") => Some(TerminalKind::Completed),
-                        Some("response.failed") => Some(TerminalKind::Failed),
-                        Some("response.incomplete") => Some(TerminalKind::Incomplete),
-                        _ => None,
-                    };
-                    if let Some(kind) = kind
-                        && let Some(response) = event.get("response").cloned()
-                    {
-                        terminal = Some(TerminalResponse { kind, response });
-                    }
-                }
-            }
-            continue;
-        }
-        if let Some(value) = line.strip_prefix("data:") {
-            data.push(value.strip_prefix(' ').unwrap_or(value));
-        }
-    }
-    terminal.ok_or(CoreFailure::UpstreamResponseFailed)
 }
 
 pub(crate) fn request_expects_sse(body: &[u8]) -> bool {
@@ -372,6 +319,8 @@ mod tests {
             b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
         );
         assert!(matches!(result, Err(CoreFailure::UpstreamResponseFailed)));
+        let duplicate = b"data: {\"type\":\"response.completed\",\"response\":{}}\n\ndata: {\"type\":\"response.failed\",\"response\":{}}\n\n";
+        assert!(terminal_response_from_sse(duplicate).is_err());
     }
 
     #[test]

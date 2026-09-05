@@ -114,80 +114,146 @@ Set `supports_websockets = false` when HTTP-only behavior is required.
 
 ## Behavior
 
-### Routing profiles
+### Credential routing
 
-A valid non-empty `Originator` header marks a Codex caller. It selects request formatting only and
-never changes authentication or credential visibility.
+Each distribution key selects its bound upstream credential. There is no account pool or automatic
+account switching. Caller markers such as `Originator` do not select emulation or authentication.
 
-| Caller | Credential | Upstream behavior |
-|---|---|---|
-| No `Originator` | OpenAI API key | `BareOpenAi`: reviewed headers; HTTP bodies and valid WS text frames remain byte-exact. |
-| Codex | OpenAI API key | `CodexOpenAi149`: Codex 0.149.0 request shape; no HTTP zstd. |
-| Any | Codex subscription | `CodexSubscription149`: Codex 0.149.0 request shape; OAuth HTTP uses zstd level 3. |
+| Upstream credential | Behavior for every caller |
+|---|---|
+| API key | Request bodies, valid WS application frames and response bodies pass through unchanged, including Codex-marked callers. Authentication, routing, admission, usage accounting and reviewed response-header policy still apply. Identity/cache failures do not affect this route. |
+| Codex subscription | Emulate the supported Codex v0.153.4 request shape, defaults and identity metadata. HTTP uses zstd level 3 upstream; WS application frames remain JSON. |
 
-### Compatibility and state
+### Context and continuation
 
-- Codex profiles pin the 0.149.0 user agent, `originator`, `version`, fallback base prompts, supported
-  request fields, and model defaults. Unknown structured members are removed; documented
-  schemas and free-form payloads stay opaque. Responses Lite always forces
-  `parallel_tool_calls:false`.
-- Emulated HTTP always uses `store:false`, `stream:true`, and SSE upstream. A non-streaming caller
-  receives the terminal Responses object, bounded to 64 MiB. Supported downstream zstd is decoded
-  before the caller's original streaming preference is evaluated. Inline history drops ordinary
-  top-level item IDs after local identity resolution; `call_id` and explicit `item_reference.id`
-  carriers remain available for their schema-defined relationships.
-- Both Codex profiles persist a UUIDv4 installation identity plus UUIDv7 conversation, thread, and
-  turn identities, and translate schema-recognized lifecycle IDs in both directions. API-key state
-  is isolated by local credential; duplicate OAuth credentials share their ChatGPT-account state.
-- Request state remains schema v1 with no historical compatibility branch. Each private file is
-  limited to 16 MiB; completed detail becomes pruneable after 30 days. Compaction advances its
-  window only after the matching `response.completed` is persisted.
-- Historical response/conversation and control/item/call/approval references must resolve an
-  existing reversible mapping. A missing required reference fails locally as `state_unavailable`
-  before upstream delivery; new sessions, stream IDs, and request-local definitions still allocate
-  fresh pseudonyms.
-- Sandbox permission meaning is preserved, while `seatbelt`, `seccomp`, or
-  `windows_sandbox` is derived from the gateway OS. Caller `workspaces` values remain unchanged.
-- Provider response headers are default-denied. Public provider request-ID headers contain only the
-  gateway `req_*` alias; one bounded raw provider ID may appear only in local request history and is
-  pruned with that detail. SQLite migrates schema 2 to 3 for this nullable field.
-- Stateful Codex non-2xx bodies are replaced with bounded gateway errors; `BareOpenAi` keeps its
-  reviewed response body bytes. Unknown body fields, content, tool arguments, and output stay opaque.
-- WebSocket turns are sequential. Each key may hold eight sockets; first-frame, idle, write, and
-  message limits are 30 seconds, 5 minutes, 120 seconds, and 16 MiB respectively.
-- Inference is never replayed after ordinary transport, `429`, or `5xx` failures. OAuth may refresh
-  and replay once after a pre-response upstream `401`. Delivery failures expose
-  `retryAdvice`, `phase`, and `deliveryState`; `ambiguous` must not be retried automatically.
-- HTTP `response.failed`, `response.incomplete`, and `error` terminals remain valid Responses
-  output but are recorded as upstream errors in request history and daily statistics.
+HTTP stays HTTP, including SSE/JSON response adaptation. WebSocket stays WebSocket during full
+sending, optimization and recovery. Neither path falls back to the other transport.
 
-See [the v1 protocol reference](src/protocol/v1/README.md) for the complete HTTP, SSE, WebSocket,
-identity, and failure contracts.
+| Subscription request | Upstream behavior |
+|---|---|
+| Full HTTP, ordinary or Lite | Send the complete validated request over HTTP. |
+| HTTP with `previous_response_id` | Append all supplied input to that exact completed response's locally materialized context, then send full HTTP without the reference. Missing context fails before inference. |
+| Full WS, ordinary or Lite | Send full WS, or use an eligible completed socket baseline to send a suffix and `previous_response_id`. |
+| WS with `previous_response_id` | Continue through that live upstream socket when ownership, mappings and format permit. Complete local history is needed only when the selected transformation or replacement socket requires full sending. |
+
+A valid previous response means append semantics: even apparently repeated history remains in the
+input. Earlier-response forks use that response's context. Failed and incomplete responses never
+become completed context baselines. Output item events and final output are reconciled once, and
+response ownership/context is published before the corresponding public event.
+
+Session lookup is scoped by distribution key and upstream account namespace:
+
+1. The original HTTP/WS handshake `session-id` header takes priority, followed by
+   `client_metadata.session_id`, then turn metadata `session_id`.
+2. Without an explicit session, a known `previous_response_id` restores its owning session.
+3. Full history can match completed-response prefixes within a known session or the same key's
+   anonymous-only pool. Explicitly identified sessions are excluded from that pool. Structured
+   content, explicit IDs and tool dependencies determine eligibility before the longest match;
+   recency does not resolve conflicting contexts.
+4. A WS connection binds its session on the first request. Later frames inherit it and reject
+   cross-session identities/references. Handshake turn/window fields apply to the first frame;
+   later frames provide current turn evidence. Reconnection performs session lookup again.
+
+`conversation_id`, cache keys, request IDs and thread/window identifiers do not locate a session.
+Existing mapped top-level `conversation` references remain a compatibility boundary, and cannot
+establish complete local history. This service does not provide `/v1/conversations` management.
+
+Turns and responses are separate: valid explicit turn identity is authoritative; otherwise known
+context and tool dependencies determine continuation. New user input after a quiescent completed
+context starts a turn. Tool follow-ups retain their turn. Equivalent anonymous contexts can share
+immutable content while retaining independent execution state. Each branch/turn and physical WS
+allows one inference at a time. Identity edits commit only after admission; cache identity facts
+publish after that commit.
+
+The first upstream `x-codex-turn-state` from a handshake or `response.metadata` is retained within
+its turn. A new turn starts without the prior token. That token is distinct from the generated or
+mapped UUIDv7 turn ID. Optional v0.153.4 window, fork, trigger and history-ingest metadata is validated
+and forwarded without becoming session identity. Context-window UUIDs receive scoped aliases.
+
+### Retention and limits
+
+Complete history, comparison snapshots and prefix-index membership expire after **3 hours of business
+inactivity**, checked at lookup and by a 30-second sweep. Active operations are protected. Expiry does
+not disconnect a live WS, rotate required aliases or clear its valid turn token. A full request can
+rebuild materialized history. Expired HTTP increments fail; valid live WS increments may continue
+through upstream history. A remote-only response stays unmaterialized locally until full history is
+actually supplied.
+
+| Resource | Default |
+|---|---:|
+| Accepted request and selected outgoing JSON/frame | 128 MiB |
+| Collected response / WS response frame | 128 MiB |
+| Retained output items per response | 8,192 |
+| Context, index, live metadata and assembly reservations per Core | 2 GiB |
+| Per distribution key | 1 GiB |
+| Per session | 256 MiB |
+| Completed response records per session | 8,192 |
+
+The cache budgets account for retained objects and assembly reservations; they are not a process-RSS
+limit. Protocol buffers have separate request/response bounds. A small WS delta is checked at its
+selected frame size, independently of the expanded history size. Essential capacity is reserved
+before inference. Completed body-retention overflow preserves otherwise valid delivery and marks
+its context unavailable; it never publishes truncated history as usable. Compaction whose replacement
+history depends on client retention choices, and interleaved injection, require a subsequent full
+request to establish reconstruction proof.
+
+[Shared limit defaults](src/protocol/v1/go/limits.json) and the `MINI_SUB2API_LIMITS` JSON environment
+variable apply across Go and Rust. Operators can override individual fields, for example:
+
+```bash
+export MINI_SUB2API_LIMITS='{"requestBytes":134217728,"outputBytes":134217728}'
+```
+
+Values must be positive integers, with `sessionBytes <= keyBytes <= globalBytes`. Unknown fields,
+invalid types and invalid hierarchies are rejected. Caller metadata cannot override these settings.
+Authentication/error-body limits remain separate. Each key may hold eight WS connections; existing
+first-frame, idle and write limits remain 30 seconds, 5 minutes and 120 seconds.
+
+Private identity files retain UUID assignments and reversible schema-owned ID mappings, with no
+request/response bodies or raw distribution keys. They remain schema v1, bounded to 512 MiB per
+account namespace, with inactive detail eligible for pruning after 30 days. Live/retained context
+mappings are protected independently of bulk history. Installation IDs use UUIDv4, session/thread/
+turn IDs use UUIDv7, and generated Lite prefix IDs use native UUIDv5 thread/payload derivation.
+
+### Delivery and recovery
+
+A missing required mapping or context fails as `state_unavailable` before inference. Full WS sending
+on a replacement connection requires complete local history. Automatic WS recovery permits at most one
+additional attempt only while public inference is proven unsent; the upstream rejection retry
+allowlist is empty. An attempted send, uncertain completion or any delivered current-response event
+prevents hidden replay. OAuth handshake/authentication refresh remains bounded to its existing single
+retry. A caller may submit a later full request after a surfaced failure.
+
+Failure metadata exposes `retryAdvice`, `phase` and `deliveryState`. HTTP failed/incomplete/error
+terminals remain valid Responses output and count as upstream errors. Subscription non-2xx bodies
+are bounded gateway errors; API-key bodies stay transparent. Provider response headers are reviewed:
+public request-ID headers use gateway aliases, while one bounded provider ID may be retained in local
+diagnostics. Sandbox names follow the gateway OS, preserving permission meaning and caller workspaces.
+
+See [the v1 protocol reference](src/protocol/v1/README.md) for transport and failure contracts.
 
 ### Base and developer instructions
 
-Both Codex profiles prefer caller-supplied base instructions. A valid top-level `instructions`
-value is a string containing non-whitespace text; its exact text, including surrounding whitespace,
-personality variants, template-like content, and custom suffixes, is preserved. Missing, `null`,
-empty, whitespace-only, and non-string values use the model's pinned Codex `0.149.0` default.
+Subscription emulation prefers a nonblank caller `instructions` string verbatim, including whitespace
+and literal template syntax. Missing, null, blank and non-string bases use the selected model default
+only when a base is required.
 
-| Request shape | Base instruction placement |
+| Caller shape | Placement |
 |---|---|
-| Normal Responses | Keep the selected base in top-level `instructions`. |
-| Normal Responses converted to Lite | Emit `additional_tools`, one selected-base `developer` message, then original input; remove top-level `instructions`. |
-| Native Lite, recognized by a leading `additional_tools` item | Preserve input instructions; only an explicit valid top-level base is inserted after tools. Remove top-level `instructions`, with no implicit fallback. |
-| Lite WebSocket delta with `previous_response_id`, no top-level `tools`, and no valid top-level base | Preserve the delta without repeating a base instruction. |
+| Ordinary Responses | Selected base stays in top-level `instructions`. |
+| Ordinary converted to Lite | `additional_tools`, one selected-base developer message, then original input. Remove top-level `instructions`. |
+| Already formed Lite | Preserve input instructions. An explicit valid top-level base is inserted after tools; otherwise add no fallback base. |
+| Valid Lite WS delta | Inherit validated caller format and existing setup. Changed setup requires a complete full send when it cannot be represented as the existing delta. |
 
-Existing developer messages retain their text and relative order. Subscription messages with the
-`system` role become `developer` at the same position; their content is preserved. Multi-turn
-messages, tool calls, and results retain their relative order. The core does not split known prompt
-prefixes, merge messages, or deduplicate caller content, even when the caller repeats a base prompt.
+Developer messages retain content, duplicates and relative order. Subscription converts `system` to
+`developer` in place. Caller format, actual upstream format and setup provenance stay distinct, so
+ordinary-to-Lite conversion does not reclassify future ordinary input as native Lite.
 
-The fallback snapshots cover all eight catalog models plus the generic and experimental fallbacks.
-Only bundled defaults are rendered ahead of time; caller text is never rendered by the core.
-The [snapshot generator and checks](src/core/codex/prompts/codex-0.149.0/README.md) protect against
-unresolved template placeholders. Ordinary callers using API keys keep the byte-transparent
-`BareOpenAi` path.
+The [offline snapshots and generator](src/core/codex/prompts/codex-0.153.4/README.md) cover all eleven
+catalog models plus generic and experimental fallbacks. Native template variables are rendered;
+literal examples such as `{{connector_id}}` remain unchanged. Caller text is never rendered. Explicit
+supported `access_programs` selection and `sequential_cutoff` summary delivery are forwarded per
+response; the gateway does not synthesize account entitlements.
 
 ## Administration
 
@@ -255,13 +321,14 @@ Operational boundaries:
 ## Validation
 
 ```bash
-mise exec -- go test ./src/coordinator/...
+mise exec -- go test -count=1 ./src/coordinator/...
 bash scripts/test.sh
 bash scripts/build.sh
 ```
 
 The direct Go integration suite builds the current debug core when no explicit test binary is set;
-it never silently skips cross-language coverage.
+it never silently skips cross-language coverage. `scripts/test.sh` disables Go test-result caching
+so Rust-only changes are exercised through the newly built Core, including race checks.
 
 ## Disclaimer
 

@@ -18,7 +18,7 @@ fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
         .expect("memory request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -60,7 +60,7 @@ fn gpt_5_2_preserves_explicit_null_public_members() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -110,7 +110,7 @@ fn unknown_model_uses_codex_fallback_reasoning_without_verbosity() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -139,7 +139,7 @@ fn derived_and_namespaced_models_use_catalog_profile_shape() {
             .expect("request"),
         );
         let prepared = prepare_codex_overlay_for_test(
-            UpstreamProfile::CodexSubscription149,
+            UpstreamProfile::CodexSubscription1534,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body,
@@ -183,7 +183,7 @@ fn reused_lite_websocket_frame_keeps_incremental_input_without_prefix() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         EmulationTransport::WebSocket,
         &HeaderMap::new(),
         body,

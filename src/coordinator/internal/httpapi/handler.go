@@ -17,7 +17,7 @@ import (
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
-const maxRequestBytes = 16 * 1024 * 1024
+var maxRequestBytes = int(protocolv1.MustInferenceLimits().RequestBytes)
 
 type Core interface {
 	Forward(
@@ -31,12 +31,13 @@ type Core interface {
 }
 
 type Handler struct {
-	store      *storage.Store
-	core       Core
-	clock      func() time.Time
-	logger     *log.Logger
-	websockets *websocketManager
-	wsTimeouts websocketTimeouts
+	requestLimit int64
+	store        *storage.Store
+	core         Core
+	clock        func() time.Time
+	logger       *log.Logger
+	websockets   *websocketManager
+	wsTimeouts   websocketTimeouts
 }
 
 func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
@@ -45,8 +46,9 @@ func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
 	}
 	return &Handler{
 		store: store, core: core, clock: time.Now, logger: logger,
-		websockets: newWebSocketManager(maxWebSocketsPerKey),
-		wsTimeouts: defaultWebSocketTimeouts(),
+		requestLimit: int64(protocolv1.MustInferenceLimits().RequestBytes),
+		websockets:   newWebSocketManager(maxWebSocketsPerKey),
+		wsTimeouts:   defaultWebSocketTimeouts(),
 	}
 }
 
@@ -93,7 +95,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		writeOpenAIError(writer, http.StatusBadGateway, "adapter_unavailable", "The selected adapter is unavailable.", requestID)
 		return
 	}
-	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBytes)
+	request.Body = http.MaxBytesReader(writer, request.Body, h.requestLimit)
 	body, err := io.ReadAll(request.Body)
 	if err != nil {
 		status := http.StatusBadRequest

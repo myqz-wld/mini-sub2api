@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use super::integration_support::api_key_state;
 use super::integration_support::app_state;
 use super::integration_support::call_core_with_headers;
+use super::integration_support::subscription_state;
 
 #[derive(Clone, Default)]
 struct TranslationFailureState {
@@ -49,7 +50,7 @@ async fn codex_failure_normalizes_body_and_default_denies_response_headers() {
         }),
     ))
     .await;
-    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let (state, account_ref, _temp) = subscription_state(&upstream.base_url).await;
     let mut headers = HeaderMap::new();
     headers.insert("originator", HeaderValue::from_static("codex_exec"));
     let response = call_core_with_headers(
@@ -293,12 +294,12 @@ async fn aggregated_translation_failure_retains_private_provider_diagnostic() {
             .with_state(failure.clone()),
     )
     .await;
-    let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
+    let (state, account_ref, _temp) = subscription_state(&upstream.base_url).await;
     *failure.state_path.lock().expect("state path lock") = Some(
         state
             .vault
             .request_state()
-            .state_path_for_test(&account_ref),
+            .state_path_for_test("subscription-test"),
     );
     let mut headers = HeaderMap::new();
     headers.insert("originator", HeaderValue::from_static("codex_exec"));

@@ -24,7 +24,7 @@ pub(super) fn complete_turn_metadata(raw: &str, generated: &str) -> Option<Strin
             Some(raw.to_string())
         };
     }
-    // Codex 0.149.0 deliberately emits startup prewarm metadata with an empty turn ID and without
+    // Codex 0.153.4 deliberately emits startup prewarm metadata with an empty turn ID and without
     // root-turn or turn-start fields. That native shape is complete and must remain byte-stable.
     if is_complete_native_prewarm_metadata(existing) {
         return if stripped {

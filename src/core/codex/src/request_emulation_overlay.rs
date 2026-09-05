@@ -13,6 +13,7 @@ use serde_json::Value;
 // `client_metadata` carrier. HTTP- and WebSocket-only fields are selected separately below.
 const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
     "client_metadata",
+    "access_programs",
     "context_management",
     "conversation",
     "include",
@@ -45,8 +46,8 @@ const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
 ];
 
 const SUPPORTED_HTTP_FIELDS: &[&str] = &["background", "stream"];
-const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id"];
-// Codex 0.149.0 does not expose these public Responses fields in its request builder.
+const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id", "stream"];
+// Codex 0.153.4 does not expose these public Responses fields in its request builder.
 const UNSUPPORTED_CODEX_EMULATION_FIELDS: &[&str] = &[
     "metadata",
     "prompt_cache_retention",
@@ -70,7 +71,9 @@ pub(super) fn apply(
     headers: &mut HeaderMap,
     transport: EmulationTransport,
     profile: UpstreamProfile,
-) -> Result<Vec<String>, ()> {
+    force_lite: bool,
+) -> Result<(Vec<String>, Vec<usize>), ()> {
+    let caller_base = codex_instructions::has_valid_instructions(object);
     object.retain(|name, _| {
         SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
             || match transport {
@@ -87,7 +90,7 @@ pub(super) fn apply(
         .and_then(Value::as_str)
         .map(request_defaults::model_profile)
         .unwrap_or_else(|| request_defaults::model_profile(""));
-    model_profile.responses_lite |= responses_lite_requested(object);
+    model_profile.responses_lite |= force_lite || responses_lite_requested(object);
     let lite_incremental = model_profile.responses_lite && lite_incremental(object, transport);
     let already_lite =
         model_profile.responses_lite && (responses_lite_requested(object) || lite_incremental);
@@ -105,7 +108,7 @@ pub(super) fn apply(
     } else {
         canonicalize_top_level_tools(object);
     }
-    if !profile.allows_openai_controls() {
+    if profile.uses_subscription_transport() {
         strip_unsupported_subscription_fields(object);
         rewrite_subscription_system_roles(object);
     }
@@ -135,7 +138,21 @@ pub(super) fn apply(
         (!model_profile.responses_lite).then_some("high"),
     );
     canonicalize_request_order(object, transport);
-    Ok(synthesized_item_ids)
+    let mut prefixes = Vec::new();
+    if model_profile.responses_lite
+        && let Some(input) = object.get("input").and_then(Value::as_array)
+        && input.first().is_some_and(|item| {
+            item.get("type").and_then(Value::as_str) == Some("additional_tools")
+        })
+    {
+        if input[0].get("id").is_none() {
+            prefixes.push(0);
+        }
+        if !already_lite || caller_base {
+            prefixes.push(1);
+        }
+    }
+    Ok((synthesized_item_ids, prefixes))
 }
 
 fn strip_unsupported_codex_emulation_fields(object: &mut Map<String, Value>) {
@@ -149,9 +166,8 @@ fn enforce_upstream_transport_controls(
     transport: EmulationTransport,
 ) {
     object.insert("store".to_string(), Value::Bool(false));
-    if transport == EmulationTransport::Http {
-        object.insert("stream".to_string(), Value::Bool(true));
-    }
+    let _ = transport;
+    object.insert("stream".to_string(), Value::Bool(true));
 }
 
 fn canonicalize_structured_request_members(object: &mut Map<String, Value>) {
@@ -283,8 +299,20 @@ fn normalize_input(object: &mut Map<String, Value>) -> Vec<String> {
 // The fixed Subscription target rejects these public/legacy output-cap, sampling, and stream
 // delivery controls. There is no evidence-backed equivalent, so only that profile drops them.
 fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) {
+    let summary_delivery = object
+        .get("stream_options")
+        .and_then(Value::as_object)
+        .and_then(|options| options.get("reasoning_summary_delivery"))
+        .filter(|value| value.as_str() == Some("sequential_cutoff"))
+        .cloned();
     for field in UNSUPPORTED_SUBSCRIPTION_FIELDS {
         object.remove(*field);
+    }
+    if let Some(delivery) = summary_delivery {
+        object.insert(
+            "stream_options".into(),
+            serde_json::json!({"reasoning_summary_delivery":delivery}),
+        );
     }
 }
 
@@ -352,6 +380,7 @@ fn canonicalize_request_order(object: &mut Map<String, Value>, transport: Emulat
         "prompt_cache_key",
         "text",
         "client_metadata",
+        "access_programs",
     ];
     const WEBSOCKET_ORDER: &[&str] = &[
         "type",
@@ -372,6 +401,7 @@ fn canonicalize_request_order(object: &mut Map<String, Value>, transport: Emulat
         "text",
         "generate",
         "client_metadata",
+        "access_programs",
     ];
     let order = if transport == EmulationTransport::WebSocket {
         WEBSOCKET_ORDER

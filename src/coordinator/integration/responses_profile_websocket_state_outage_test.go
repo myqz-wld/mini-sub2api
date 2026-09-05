@@ -20,7 +20,6 @@ func TestCodexProfilesPreserveActiveWebSocketDeliveryAcrossStateOutage(t *testin
 		name         string
 		subscription bool
 	}{
-		{name: "codex_api_key"},
 		{name: "codex_subscription", subscription: true},
 	}
 	for _, profile := range profiles {

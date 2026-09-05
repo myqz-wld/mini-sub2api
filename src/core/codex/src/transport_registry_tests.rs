@@ -174,8 +174,8 @@ async fn literal_loopback_http_and_websocket_bypass_bad_proxy() {
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-test-key".to_string(),
         },
-        crate::request_profile::UpstreamProfile::BareOpenAi,
-        crate::responses_websocket::MAX_WEBSOCKET_MESSAGE_BYTES,
+        crate::request_profile::UpstreamProfile::ApiKeyPassthrough,
+        crate::inference_limits::get().request_bytes,
     )
     .expect("WebSocket request");
     let handshake = context

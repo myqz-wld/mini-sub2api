@@ -27,7 +27,7 @@ fn assert_safe_state_failure(error: CoreFailure, calls: &AtomicUsize) {
 }
 
 #[tokio::test]
-async fn codex_api_key_missing_previous_response_fails_before_upstream_delivery() {
+async fn codex_api_key_missing_previous_response_is_transparent() {
     let calls = Arc::new(AtomicUsize::new(0));
     let app = Router::new().route(
         "/responses",
@@ -46,7 +46,7 @@ async fn codex_api_key_missing_previous_response_fails_before_upstream_delivery(
     let (state, account_ref, _temp) = api_key_state(&upstream.base_url).await;
     let mut headers = HeaderMap::new();
     headers.insert("originator", HeaderValue::from_static("codex_exec"));
-    let error = call_core_with_headers(
+    let response = call_core_with_headers(
         &state,
         &account_ref,
         Bytes::from_static(
@@ -55,8 +55,9 @@ async fn codex_api_key_missing_previous_response_fails_before_upstream_delivery(
         headers,
     )
     .await
-    .expect_err("missing response mapping must fail closed");
-    assert_safe_state_failure(error, &calls);
+    .expect("API key bypasses reference resolution");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

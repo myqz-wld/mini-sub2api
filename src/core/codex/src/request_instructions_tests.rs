@@ -3,8 +3,8 @@ use crate::codex_instructions;
 use pretty_assertions::assert_eq;
 
 const PROFILES: [UpstreamProfile; 2] = [
-    UpstreamProfile::CodexOpenAi149,
-    UpstreamProfile::CodexSubscription149,
+    UpstreamProfile::CodexSubscription1534,
+    UpstreamProfile::CodexSubscription1534,
 ];
 const TRANSPORTS: [EmulationTransport; 2] =
     [EmulationTransport::Http, EmulationTransport::WebSocket];
@@ -209,7 +209,7 @@ fn invalid_input_still_fails_closed_and_fallback_respects_request_size_limit() {
     for model in ["gpt-5.4", "gpt-5.6-sol"] {
         assert!(
             prepare(
-                UpstreamProfile::CodexOpenAi149,
+                UpstreamProfile::CodexSubscription1534,
                 serde_json::json!({
                     "model":model,"instructions":"caller base","input":{"invalid":"shape"}
                 }),
@@ -219,7 +219,7 @@ fn invalid_input_still_fails_closed_and_fallback_respects_request_size_limit() {
         );
         let caller = serde_json::json!({"model":model,"input":[]});
         let result = prepare_codex_overlay_for_test(
-            UpstreamProfile::CodexOpenAi149,
+            UpstreamProfile::CodexSubscription1534,
             EmulationTransport::Http,
             &HeaderMap::new(),
             Bytes::from(serde_json::to_vec(&caller).expect("caller JSON")),
@@ -306,7 +306,7 @@ fn assert_history(actual: &[Value], expected: &[Value], profile: UpstreamProfile
         for (field, value) in expected.as_object().expect("input item") {
             if field == "role"
                 && value == "system"
-                && profile == UpstreamProfile::CodexSubscription149
+                && profile == UpstreamProfile::CodexSubscription1534
             {
                 assert_eq!(actual[field], "developer");
             } else {

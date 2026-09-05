@@ -25,6 +25,28 @@ pub(super) async fn api_key_state_with_mode(
     (app_state(vault), metadata.account_ref, temp)
 }
 
+pub(super) async fn subscription_state(base_url: &str) -> (AppState, String, tempfile::TempDir) {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let vault = Vault::open(temp.path().to_path_buf()).expect("vault");
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: crate::test_support::test_jwt(Some("subscription-test"), 7200),
+                access_token: crate::test_support::test_jwt(None, 7200),
+                refresh_token: "offline-refresh".to_string(),
+                account_id: "subscription-test".to_string(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(2)),
+                issuer: base_url.to_string(),
+                client_id: "offline-client".to_string(),
+            },
+            format!("{base_url}/responses"),
+            FingerprintMode::Device,
+        )
+        .await
+        .expect("subscription credential");
+    (app_state(vault), metadata.account_ref, temp)
+}
+
 pub(super) fn app_state(vault: Vault) -> AppState {
     AppState {
         vault,
@@ -42,7 +64,7 @@ pub(super) async fn call_core(
     call_core_with_headers(state, account_ref, body, HeaderMap::new()).await
 }
 
-pub(super) async fn call_core_with_headers(
+pub(crate) async fn call_core_with_headers(
     state: &AppState,
     account_ref: &str,
     body: Bytes,

@@ -17,7 +17,7 @@ fn originator_profile_cannot_promote_an_api_key_to_subscription_auth() {
         &HeaderMap::new(),
         "https://example.test/v1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription149,
+        UpstreamProfile::CodexSubscription1534,
         Bytes::from_static(br#"{"model":"offline"}"#),
     );
 
@@ -34,7 +34,7 @@ fn api_key_profile_cannot_be_used_with_subscription_auth() {
         &HeaderMap::new(),
         "https://example.test/v1/responses",
         &auth,
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::ApiKeyPassthrough,
         1024,
     );
 
@@ -51,7 +51,7 @@ fn codex_openai_profile_keeps_http_body_uncompressed() {
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-profile-key-not-real".to_string(),
         },
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::ApiKeyPassthrough,
         body.clone(),
     )
     .expect("Codex OpenAI request");
@@ -68,7 +68,7 @@ fn codex_openai_profile_keeps_http_body_uncompressed() {
 }
 
 #[test]
-fn codex_openai_profile_replaces_the_complete_client_identity() {
+fn api_key_profile_preserves_the_complete_client_identity() {
     let mut inbound = HeaderMap::new();
     inbound.insert(
         http::header::USER_AGENT,
@@ -86,7 +86,7 @@ fn codex_openai_profile_replaces_the_complete_client_identity() {
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-profile-key-not-real".to_string(),
         },
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::ApiKeyPassthrough,
         Bytes::from_static(br#"{"model":"offline"}"#),
     )
     .expect("Codex OpenAI request");
@@ -96,21 +96,21 @@ fn codex_openai_profile_replaces_the_complete_client_identity() {
             .headers()
             .get("originator")
             .and_then(|value| value.to_str().ok()),
-        Some(DEFAULT_CODEX_ORIGINATOR)
+        Some("codex_exec")
     );
     assert_eq!(
         request
             .headers()
             .get(CODEX_VERSION_HEADER)
             .and_then(|value| value.to_str().ok()),
-        Some(CODEX_COMPATIBILITY_VERSION)
+        Some("caller-version-must-not-survive")
     );
     assert_eq!(
         request
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok()),
-        Some(crate::codex_user_agent::canonical_value().as_str())
+        Some("codex_exec/9.9.9 (Mac OS 15.0.0; arm64) Apple_Terminal")
     );
 
     let (websocket, _) = build_websocket(
@@ -119,7 +119,7 @@ fn codex_openai_profile_replaces_the_complete_client_identity() {
         &ResolvedAuth::OpenAiApiKey {
             token: "offline-profile-key-not-real".to_string(),
         },
-        UpstreamProfile::CodexOpenAi149,
+        UpstreamProfile::ApiKeyPassthrough,
         1024,
     )
     .expect("Codex OpenAI WebSocket request");
@@ -128,20 +128,20 @@ fn codex_openai_profile_replaces_the_complete_client_identity() {
             .headers()
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok()),
-        Some(crate::codex_user_agent::canonical_value().as_str())
+        Some("codex_exec/9.9.9 (Mac OS 15.0.0; arm64) Apple_Terminal")
     );
     assert_eq!(
         websocket
             .headers()
             .get("originator")
             .and_then(|value| value.to_str().ok()),
-        Some(DEFAULT_CODEX_ORIGINATOR)
+        Some("codex_exec")
     );
     assert_eq!(
         websocket
             .headers()
             .get(CODEX_VERSION_HEADER)
             .and_then(|value| value.to_str().ok()),
-        Some(CODEX_COMPATIBILITY_VERSION)
+        Some("caller-version-must-not-survive")
     );
 }

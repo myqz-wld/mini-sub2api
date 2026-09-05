@@ -90,6 +90,7 @@ fn every_persisted_wire_domain_is_owned_by_the_contract() {
     assert_eq!(
         domains,
         BTreeSet::from([
+            WireIdDomain::ContextWindow,
             WireIdDomain::Installation,
             WireIdDomain::Session,
             WireIdDomain::Thread,
@@ -151,13 +152,17 @@ fn turn_metadata_order_and_visibility_are_table_owned() {
             "agent_name",
             "turn_id",
             "window_id",
+            "window_number",
+            "context_window_id",
             "request_kind",
             "forked_from_thread_id",
+            "forked_from_ordinal_exclusive",
             "parent_thread_id",
             "parent_turn_id",
             "root_turn_id",
             "subagent_kind",
             "thread_source",
+            "turn_trigger",
             "sandbox",
             "sandbox_mode",
             "auto_review_enabled",
@@ -166,6 +171,7 @@ fn turn_metadata_order_and_visibility_are_table_owned() {
             "workspaces",
             "tool_namespaces_info",
             "turn_started_at_unix_ms",
+            "history_ingest_requested",
             "compaction",
         ]
     );

@@ -141,6 +141,13 @@ pub(super) const RULES: &[CarrierRule] = &[
         CarrierAction::RelationshipProjection,
         HEADER_VISIBLE | NORMAL_REQUIRED | PREWARM_REQUIRED_STRING,
     ),
+    metadata("window_number", None, CarrierAction::Opaque, HEADER_VISIBLE),
+    metadata(
+        "context_window_id",
+        None,
+        CarrierAction::Opaque,
+        HEADER_VISIBLE,
+    ),
     metadata(
         "request_kind",
         Some(RelationshipCarrier::RequestKind),
@@ -151,6 +158,12 @@ pub(super) const RULES: &[CarrierRule] = &[
         "forked_from_thread_id",
         Some(RelationshipCarrier::ForkedFromThread),
         CarrierAction::RelationshipProjection,
+        HEADER_VISIBLE,
+    ),
+    metadata(
+        "forked_from_ordinal_exclusive",
+        None,
+        CarrierAction::Opaque,
         HEADER_VISIBLE,
     ),
     metadata(
@@ -178,6 +191,7 @@ pub(super) const RULES: &[CarrierRule] = &[
         HEADER_VISIBLE,
     ),
     metadata("thread_source", None, CarrierAction::Opaque, HEADER_VISIBLE),
+    metadata("turn_trigger", None, CarrierAction::Opaque, HEADER_VISIBLE),
     metadata(
         "sandbox",
         None,
@@ -215,6 +229,12 @@ pub(super) const RULES: &[CarrierRule] = &[
         Some(RelationshipCarrier::TurnStartedAt),
         CarrierAction::RelationshipProjection,
         HEADER_VISIBLE | NORMAL_REQUIRED,
+    ),
+    metadata(
+        "history_ingest_requested",
+        None,
+        CarrierAction::Opaque,
+        HEADER_VISIBLE,
     ),
     metadata("compaction", None, CarrierAction::Opaque, HEADER_VISIBLE),
 ];
