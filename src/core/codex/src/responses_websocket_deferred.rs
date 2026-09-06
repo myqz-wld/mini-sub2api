@@ -146,7 +146,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         text
     };
     let mut continuation = ResponsesWebSocketState::new(context.caller, context.profile);
-    let value = match serde_json::from_str::<serde_json::Value>(&text) {
+    let mut value = match serde_json::from_str::<serde_json::Value>(&text) {
         Ok(value) => value,
         Err(_) => {
             let _ = internal.send(internal_close(1002)).await;
@@ -212,20 +212,6 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
     .await
     {
         let _ = internal.send(internal_close(1012)).await;
-        return;
-    }
-    if let (Some(operation), Some(token)) = (
-        &operation,
-        turn_state.as_ref().and_then(|v| v.to_str().ok()),
-    ) && context
-        .state
-        .vault
-        .request_state()
-        .contexts
-        .learn_turn(operation, token)
-        .is_err()
-    {
-        let _ = internal.send(internal_close(1011)).await;
         return;
     }
     if let Some(hidden) = hidden {
@@ -305,8 +291,8 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
     }
     if let Some(operation) = &operation {
         for token in [
-            continuation.setup_turn_state(),
             turn_state.as_ref().and_then(|v| v.to_str().ok()),
+            continuation.setup_turn_state(),
         ]
         .into_iter()
         .flatten()
@@ -330,6 +316,12 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             .contexts
             .turn_token(operation)
             .and_then(|token| token.parse().ok());
+    }
+    // Setup completion can learn routing state after the first request was normalized. Apply
+    // the accepted turn token to the actual first business frame before planning/size checks.
+    if let Some(token) = turn_state.as_ref().and_then(|value| value.to_str().ok()) {
+        value["client_metadata"]["x-codex-turn-state"] =
+            serde_json::Value::String(token.to_string());
     }
     debug_assert!(!continuation.public_create_attempted());
     let text = match plan_public_text_with_state(

@@ -10,22 +10,7 @@ fn accepted_compaction(
     response: &Value,
     active: &crate::subscription_context::Active,
 ) -> bool {
-    if pending.requires_compaction_item && active.output_items_seen > 0 {
-        if active.compaction_items_seen != 1 {
-            return false;
-        }
-        if let Some(output) = response.get("output").and_then(Value::as_array) {
-            let payload = |item: &Value| item.get("encrypted_content").cloned();
-            let compacted =
-                |item: &&Value| item.get("type").and_then(Value::as_str) == Some("compaction");
-            if let Some(observed) = active.output.values().find(compacted)
-                && output.iter().find(compacted).and_then(payload) != payload(observed)
-            {
-                return false;
-            }
-        }
-    }
-    pending.accepts_response(response, Some(&active.output))
+    pending.accepts_response(response, Some(&active.compaction_output))
 }
 
 impl ContextStore {
@@ -108,10 +93,7 @@ impl ContextStore {
         if kind == "response.output_item.done"
             && let Some(item) = event.get("item")
         {
-            active.output_items_seen = active.output_items_seen.saturating_add(1);
-            if item.get("type").and_then(Value::as_str) == Some("compaction") {
-                active.compaction_items_seen = active.compaction_items_seen.saturating_add(1);
-            }
+            active.compaction_output.observe(item);
             let index = event
                 .get("output_index")
                 .and_then(Value::as_u64)

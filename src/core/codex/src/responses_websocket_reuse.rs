@@ -15,6 +15,7 @@ pub(crate) struct RequestSnapshot {
     pub(crate) properties: Map<String, Value>,
     pub(crate) input: Vec<Value>,
     comparison_input: Vec<Value>,
+    thread_id: Option<String>,
 }
 
 pub(crate) struct ReuseBaseline {
@@ -48,6 +49,11 @@ pub(crate) fn request_snapshot(
         properties: project_properties(object),
         input,
         comparison_input,
+        thread_id: object
+            .get("client_metadata")
+            .and_then(|metadata| metadata.get("thread_id"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -77,7 +83,12 @@ pub(crate) fn incremental_input(
     baseline: &ReuseBaseline,
     current: &RequestSnapshot,
 ) -> Option<Vec<Value>> {
-    if baseline.request.properties != current.properties || baseline.response_id.is_empty() {
+    // Native keeps the cached request inside one thread's ModelClient. A gateway socket may
+    // carry several branches; a branch change needs a full request rather than automatic reuse.
+    if baseline.request.thread_id != current.thread_id
+        || baseline.request.properties != current.properties
+        || baseline.response_id.is_empty()
+    {
         return None;
     }
     let prefix_len = baseline
@@ -102,7 +113,8 @@ pub(crate) fn incremental_input(
 
 impl RequestSnapshot {
     pub(crate) fn cost(&self) -> usize {
-        serde_json::to_vec(&self.properties).map_or(0, |v| v.len() * 4)
+        self.thread_id.as_ref().map_or(0, String::len)
+            + serde_json::to_vec(&self.properties).map_or(0, |v| v.len() * 4)
             + self
                 .input
                 .iter()

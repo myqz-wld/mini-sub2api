@@ -204,54 +204,60 @@ mod tests {
 
     #[tokio::test]
     async fn aggregated_terminal_commits_only_when_kind_is_completed() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = RequestStateStore::new(temp.path().to_path_buf());
-        let (pending, thread_id) = store
-            .edit(
-                "namespace-terminal",
-                "acct_terminal",
-                "scope-terminal",
-                |editor| {
-                    let conversation_key = editor.lookup("conversation", "terminal-session");
-                    let marker_key = editor.lookup("compaction", "terminal-operation");
-                    let conversation = editor.conversation(&conversation_key)?;
-                    let target = editor.begin_compaction(&marker_key, &conversation.id)?;
-                    Ok((
-                        PendingCompaction {
-                            marker_key,
-                            thread_id: conversation.id.clone(),
-                            target_window: target,
-                            requires_compaction_item: true,
-                        },
-                        conversation.id,
-                    ))
-                },
-            )
-            .await
-            .expect("pending compaction");
-        let context = ResponseStateContext::new(
-            "acct_terminal",
-            "namespace-terminal",
-            "scope-terminal",
-            &store,
-            None,
-            Some(&pending),
-        );
-        for _ in ["response.failed", "response.incomplete"] {
-            context
-                .translate_terminal_value(
-                    serde_json::json!({"id":"resp_not_completed","output":[]}),
-                    false,
+        for requires_compaction_item in [false, true] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let store = RequestStateStore::new(temp.path().to_path_buf());
+            let (pending, thread_id) = store
+                .edit(
+                    "namespace-terminal",
+                    "acct_terminal",
+                    "scope-terminal",
+                    move |editor| {
+                        let conversation_key = editor.lookup("conversation", "terminal-session");
+                        let marker_key = editor.lookup("compaction", "terminal-operation");
+                        let conversation = editor.conversation(&conversation_key)?;
+                        let target = editor.begin_compaction(&marker_key, &conversation.id)?;
+                        Ok((
+                            PendingCompaction {
+                                marker_key,
+                                thread_id: conversation.id.clone(),
+                                target_window: target,
+                                requires_compaction_item,
+                            },
+                            conversation.id,
+                        ))
+                    },
                 )
                 .await
-                .expect("translate non-completed terminal");
-        }
-        assert_eq!(window(&store, &thread_id).await, 0);
-        context
+                .expect("pending compaction");
+            let context = ResponseStateContext::new(
+                "acct_terminal",
+                "namespace-terminal",
+                "scope-terminal",
+                &store,
+                None,
+                Some(&pending),
+            );
+            for _ in ["response.failed", "response.incomplete"] {
+                context
+                    .translate_terminal_value(
+                        serde_json::json!({"id":"resp_not_completed","output":[]}),
+                        false,
+                    )
+                    .await
+                    .expect("translate non-completed terminal");
+            }
+            assert_eq!(window(&store, &thread_id).await, 0);
+            context
             .translate_terminal_value(serde_json::json!({"id":"resp_completed","output":[{"type":"compaction","encrypted_content":"synthetic"}]}), true)
             .await
             .expect("translate completed terminal");
-        assert_eq!(window(&store, &thread_id).await, 1);
+            // Local summaries can complete without item events. V2 final output alone is not proof.
+            assert_eq!(
+                window(&store, &thread_id).await,
+                u64::from(!requires_compaction_item)
+            );
+        }
     }
 
     async fn window(store: &RequestStateStore, thread_id: &str) -> u64 {

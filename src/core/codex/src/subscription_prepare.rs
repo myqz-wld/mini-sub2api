@@ -12,6 +12,10 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
+#[path = "subscription_lineage.rs"]
+mod lineage;
+pub(crate) use lineage::HistoryLineage;
+
 pub(crate) struct ContextPlan {
     pub(crate) evidence: Evidence,
     pub(crate) session: Option<String>,

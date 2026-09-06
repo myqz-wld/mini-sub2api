@@ -5,6 +5,18 @@ use super::TurnAssignment;
 use super::touch_day;
 
 impl RequestStateEditor<'_> {
+    pub(crate) fn history_thread_allowed(
+        &self,
+        owner: &str,
+        identity: &crate::request_identity_projection::ResolvedRequestIdentity,
+    ) -> bool {
+        self.thread_is_ancestor(owner, &identity.thread_id)
+            || identity
+                .forked_from_thread_id
+                .as_deref()
+                .is_some_and(|source| self.thread_is_ancestor(owner, source))
+    }
+
     /// Historical items can retain their original turn in the current thread or its ancestry.
     /// This lookup never reassigns the historical turn or joins unrelated execution branches.
     pub(crate) fn thread_is_ancestor(&self, ancestor: &str, thread: &str) -> bool {

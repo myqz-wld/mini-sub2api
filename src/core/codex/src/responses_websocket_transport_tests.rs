@@ -257,12 +257,24 @@ async fn subscription_websocket_compaction_commits_only_completed_terminal() {
             .send(DownstreamMessage::Text(frame))
             .await
             .expect("send compaction");
-        let event = socket
-            .next()
-            .await
-            .expect("terminal event")
-            .expect("valid terminal event");
-        assert!(matches!(event, DownstreamMessage::Text(_)));
+        loop {
+            let event = socket
+                .next()
+                .await
+                .expect("response event")
+                .expect("valid response event");
+            let DownstreamMessage::Text(text) = event else {
+                panic!("expected compaction text event")
+            };
+            let event: Value = serde_json::from_str(&text).expect("compaction event JSON");
+            if matches!(
+                event["type"].as_str(),
+                Some("response.completed" | "response.failed")
+            ) {
+                break;
+            }
+            assert_eq!(event["type"], "response.output_item.done");
+        }
     }
     let frames = capture.frames.lock().await;
     let windows = frames

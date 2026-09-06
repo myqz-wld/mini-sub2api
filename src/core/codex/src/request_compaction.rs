@@ -1,5 +1,6 @@
 use serde_json::Map;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::request_identity_evidence::RequestIdentityEvidence;
@@ -17,38 +18,59 @@ impl PendingCompaction {
         self.target_window.saturating_sub(1)
     }
 
-    pub(crate) fn accepts_items(&self, output: &[Value]) -> bool {
-        if !self.requires_compaction_item {
-            // Native local Responses compaction builds an assistant summary, including an empty
-            // fallback. Its completion contract is distinct from remote compaction V2.
-            return true;
-        }
-        let mut compacted = output
-            .iter()
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("compaction"));
-        compacted.next().is_some_and(|item| {
-            item.get("encrypted_content")
-                .and_then(Value::as_str)
-                .is_some()
-        }) && compacted.next().is_none()
-    }
-
     pub(crate) fn accepts_response(
         &self,
         response: &Value,
-        observed: Option<&std::collections::BTreeMap<usize, Value>>,
+        observed: Option<&CompactionOutput>,
     ) -> bool {
-        if let Some(output) = response.get("output") {
-            return output
-                .as_array()
-                .is_some_and(|items| self.accepts_items(items));
+        if !self.requires_compaction_item {
+            // Native local summaries have a distinct completion contract, including empty output.
+            return true;
         }
-        let items: Vec<_> = observed
-            .into_iter()
-            .flat_map(|output| output.values().cloned())
-            .collect();
-        self.accepts_items(&items)
+        let Some(observed) = observed.filter(|output| output.count == 1) else {
+            return false;
+        };
+        let Some(fingerprint) = observed.fingerprint else {
+            return false;
+        };
+        let Some(output) = response.get("output") else {
+            return true;
+        };
+        let Some(items) = output.as_array() else {
+            return false;
+        };
+        let mut compacted = items.iter().filter(|item| is_compaction(item));
+        compacted.next().and_then(compaction_fingerprint) == Some(fingerprint)
+            && compacted.next().is_none()
     }
+}
+
+/// Constant-size proof of actual item-done events, independent of retained output/body budgets.
+#[derive(Default)]
+pub(crate) struct CompactionOutput {
+    count: usize,
+    fingerprint: Option<[u8; 32]>,
+}
+
+impl CompactionOutput {
+    pub(crate) fn observe(&mut self, item: &Value) {
+        if is_compaction(item) {
+            self.count = self.count.saturating_add(1);
+            if self.count == 1 {
+                self.fingerprint = compaction_fingerprint(item);
+            }
+        }
+    }
+}
+
+fn is_compaction(item: &Value) -> bool {
+    item.get("type").and_then(Value::as_str) == Some("compaction")
+}
+
+fn compaction_fingerprint(item: &Value) -> Option<[u8; 32]> {
+    item.get("encrypted_content")
+        .and_then(Value::as_str)
+        .map(|payload| Sha256::digest(payload.as_bytes()).into())
 }
 
 pub(crate) fn requires_compaction_item(object: &Map<String, Value>) -> bool {

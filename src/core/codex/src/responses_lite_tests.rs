@@ -246,3 +246,32 @@ fn filters_documented_tool_variants_without_touching_free_form_containers() {
     );
     assert_eq!(tools[5]["name"], "documented-field-name");
 }
+
+#[test]
+fn mixed_default_namespaces_keep_native_position_order_and_latest_nonblank_description() {
+    let grouped = group_tools(vec![
+        serde_json::json!({"type":"namespace","name":"functions","description":"first","tools":[]}),
+        serde_json::json!({"type":"tool_search","description":"search"}),
+        serde_json::json!({"type":"function","name":"a","parameters":{"const":"opaque"}}),
+        serde_json::json!({"type":"namespace","name":"functions","description":"last","tools":[{"type":"custom","name":"b","format":{"type":"text"}}]}),
+        serde_json::json!({"type":"namespace","name":"functions","description":"  ","tools":[{"type":"function","name":"a"}]}),
+    ]);
+    assert_eq!(grouped.len(), 2);
+    assert_eq!(grouped[0]["description"], "last");
+    assert_eq!(grouped[1]["type"], "tool_search");
+    let tools = grouped[0]["tools"].as_array().unwrap();
+    assert_eq!(
+        tools
+            .iter()
+            .map(|v| v["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["a", "b", "a"]
+    );
+    assert_eq!(tools[0]["parameters"]["const"], "opaque");
+    assert!(
+        group_tools(vec![
+            serde_json::json!({"type":"namespace","name":"functions","tools":[]})
+        ])
+        .is_empty()
+    );
+}

@@ -27,7 +27,7 @@ impl ContextStore {
                 .filter(|op| op.scope == *key)
                 .map(|op| &op.record);
             let records: Vec<_> = retained.chain(active).collect();
-            let sessions: HashSet<_> = records
+            let mut sessions: HashSet<_> = records
                 .iter()
                 .map(|r| r.identity.session_id.as_str())
                 .chain(
@@ -45,7 +45,26 @@ impl ContextStore {
             let turns: HashSet<_> = records
                 .iter()
                 .filter_map(|r| r.identity.turn_id.as_deref())
+                .chain(
+                    records
+                        .iter()
+                        .flat_map(|r| r.lineage.turns.iter().map(String::as_str)),
+                )
                 .collect();
+            // A retained fork can depend on history owned by another root in this same Key scope.
+            // Protect those owners as well as their turn aliases while the live reference is valid.
+            for turn in scope
+                .turns
+                .values()
+                .filter(|turn| turns.contains(turn.id.as_str()))
+            {
+                let session = scope
+                    .child_threads
+                    .values()
+                    .find(|thread| thread.id == turn.thread_id)
+                    .map_or(turn.thread_id.as_str(), |thread| thread.session_id.as_str());
+                sessions.insert(session);
+            }
             let mut ids: HashSet<&str> = records
                 .iter()
                 .flat_map(|r| {

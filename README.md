@@ -172,6 +172,11 @@ declared fork source. Unseen historical IDs reserve aliases until an actual requ
 ownership. Independent root forks retain their own session; fork provenance grants no response
 continuation authority.
 
+Explicit WS references validate the effective history's turn ownership with the same rules as full
+HTTP/WS input. Bounded identity facts survive bulk-history expiry for this check. A previous-only
+continuation restores its own thread's known fork provenance; a new branch supplies its own source
+relationship. Automatic WS optimization also requires the saved and current thread to match.
+
 The first upstream `x-codex-turn-state` from a handshake or `response.metadata` is retained within
 its turn. A new turn starts without the prior token. That token is distinct from the generated or
 mapped UUIDv7 turn ID. Optional v0.153.4 window, fork, trigger and history-ingest metadata is validated
@@ -180,10 +185,15 @@ and forwarded without becoming session identity. Context-window UUIDs receive sc
 A completed native WS startup prewarm can hand its first `response.metadata` routing token to
 the first business turn on that same socket and thread. Failed prewarms, other sockets/threads and
 later turns cannot inherit it. Bulk-history expiry preserves this live startup state.
+Hidden setup also attaches the learned token before encoding the first business frame. Work on
+another thread leaves the waiting owner's startup token available; failed setup and reconnection
+discard unaccepted setup state.
 
-Remote compaction V2 advances a window only after a matching completed response with exactly one
-valid encrypted compaction item. Duplicate, missing or inconsistent compaction output cannot publish
-a usable context. Local Responses compaction retains the native assistant-summary completion rules.
+Remote compaction V2 advances a window only after a matching completed response and exactly one
+valid encrypted compaction item received through `response.output_item.done`. A final output array
+alone cannot establish acceptance. Duplicate, missing or inconsistent compaction output cannot
+publish a usable context or WS baseline. Local Responses compaction retains the native assistant-summary
+completion rules.
 
 HTTP `traceparent` and `tracestate` are preserved across both credential routes. Native WS tracing
 remains in per-frame metadata. Nonreserved string entries in `x-codex-turn-metadata` survive body and
@@ -283,7 +293,14 @@ payload. Existing reversible aliases remain stable for live historical reference
 item IDs continue through the ordinary mapping path. Object serialization order matters to these IDs;
 re-encoding a captured tools object before replay can invalidate its original content-derived ID.
 
+Ordinary-to-Lite tool conversion combines loose functions/custom tools and every default `functions`
+namespace in encounter order, at the first groupable position. It preserves duplicate children and
+uses the last nonblank namespace description, matching the pinned native producer.
+
 ## Administration
+
+Shutdown waits for the owned Core process to exit and for both WS pumps to finish, including
+terminal usage writes, before releasing the corresponding session and storage resources.
 
 ```bash
 # Credentials

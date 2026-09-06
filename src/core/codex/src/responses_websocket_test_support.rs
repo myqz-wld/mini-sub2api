@@ -64,6 +64,13 @@ pub(super) async fn compaction_upstream(
                 relay_capture.frames.lock().await.push(frame.to_string());
                 let value: Value = serde_json::from_str(&frame).expect("compaction frame JSON");
                 let completed = value["model"] == "complete-compaction";
+                if completed {
+                    let done = serde_json::json!({"type":"response.output_item.done","output_index":0,
+                        "item":{"type":"compaction","encrypted_content":"synthetic"}});
+                    if socket.send(InternalMessage::Text(done.to_string().into())).await.is_err() {
+                        return;
+                    }
+                }
                 let event = serde_json::json!({
                     "type": if completed { "response.completed" } else { "response.failed" },
                     "response":{"id": if completed { "resp_completed" } else { "resp_failed" }, "output":[{"type":"compaction","encrypted_content":"synthetic"}]}

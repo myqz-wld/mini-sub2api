@@ -134,6 +134,9 @@ pub(crate) async fn prepare_identity_request(
             context.downstream_scope,
             move |editor| {
                 (|| {
+                    if let Some((plan, _)) = &admission {
+                        plan.inherit_fork_source(editor, &mut evidence)?;
+                    }
                     let mut projection = resolve_and_project(
                         editor,
                         fingerprint_mode,
@@ -159,18 +162,26 @@ pub(crate) async fn prepare_identity_request(
                         &mut prepared_headers,
                         &projection.identity,
                     )?;
+                    let admission = admission
+                        .map(|(plan, format)| {
+                            let lineage =
+                                plan.history_lineage(editor, &projection.identity, &object)?;
+                            Ok::<_, anyhow::Error>((plan, format, lineage))
+                        })
+                        .transpose()?;
                     let encoded = serde_json::to_vec(&Value::Object(object))?;
                     anyhow::ensure!(
                         encoded.len() <= max_bytes_for_edit,
                         "projected request is too large"
                     );
                     let operation = admission
-                        .map(|(plan, format)| {
+                        .map(|(plan, format, lineage)| {
                             cache.admit(
                                 plan,
                                 &projection.identity,
                                 format,
                                 projection.pending_compaction.clone(),
+                                lineage,
                             )
                         })
                         .transpose()?;

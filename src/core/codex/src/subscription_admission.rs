@@ -7,6 +7,7 @@ impl ContextStore {
         identity: &ResolvedRequestIdentity,
         upstream_format: Format,
         compaction: Option<crate::request_compaction::PendingCompaction>,
+        lineage: super::HistoryLineage,
     ) -> Result<Operation, Error> {
         let mut inner = self.inner.lock().map_err(|_| Error::StateUnavailable)?;
         let now = Instant::now();
@@ -37,7 +38,8 @@ impl ContextStore {
             .reservations
             .remove(&plan.admission.0.id)
             .ok_or(Error::StateUnavailable)?
-            .reserved;
+            .reserved
+            .saturating_add(lineage.cost);
         if !inner.make_room(&self.limits, &plan.scope, session, reserved) {
             return Err(Error::StateUnavailable);
         }
@@ -115,6 +117,7 @@ impl ContextStore {
             settings: stored_settings,
             history,
             dependencies: plan.dependencies,
+            lineage,
             socket: plan.socket,
             completed: false,
             startup_token: None,
@@ -132,8 +135,7 @@ impl ContextStore {
                 reserved,
                 output: BTreeMap::new(),
                 observed_items: BTreeMap::new(),
-                compaction_items_seen: 0,
-                output_items_seen: 0,
+                compaction_output: Default::default(),
                 dependencies_available: true,
                 output_bytes: 0,
                 buffer_charge: 0,
@@ -179,10 +181,11 @@ impl ContextStore {
             if let Some(turn) = identity.turn_id.as_deref().filter(|turn| !turn.is_empty()) {
                 let mut startup = None;
                 for record in scope.records.values_mut().filter(|record| {
-                    record.socket.as_deref() == Some(socket.as_str()) && record.completed
+                    record.socket.as_deref() == Some(socket.as_str())
+                        && record.completed
+                        && record.identity.thread_id == identity.thread_id
                 }) {
                     if let Some(token) = record.startup_token.take()
-                        && record.identity.thread_id == identity.thread_id
                         && startup
                             .as_ref()
                             .is_none_or(|(seen, _)| record.last_used < *seen)

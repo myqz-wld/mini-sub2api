@@ -1,10 +1,6 @@
 use crate::request_compaction::PendingCompaction;
 use crate::request_profile::CallerKind;
 use crate::request_profile::UpstreamProfile;
-use crate::responses_websocket_projection::encoded_len_within;
-use crate::responses_websocket_projection::equivalent_items;
-use crate::responses_websocket_projection::output_encoded_len;
-use crate::responses_websocket_projection::reusable_item;
 use crate::responses_websocket_reuse::RequestSnapshot;
 use crate::responses_websocket_reuse::ReuseBaseline;
 use crate::responses_websocket_reuse::has_explicit_state_carrier;
@@ -12,6 +8,10 @@ use crate::responses_websocket_reuse::incremental_input;
 use crate::responses_websocket_reuse::lite_prewarm_prefix;
 use crate::responses_websocket_reuse::request_snapshot;
 use serde_json::Value;
+
+#[path = "responses_websocket_state_output.rs"]
+mod output;
+use output::abandon_output;
 
 #[path = "responses_websocket_state_types.rs"]
 mod types;
@@ -28,6 +28,7 @@ struct ActiveOperation {
     request: Option<RequestSnapshot>,
     output: Vec<Value>,
     output_bytes: usize,
+    compaction_output: crate::request_compaction::CompactionOutput,
     reusable: bool,
     pending_compaction: Option<PendingCompaction>,
 }
@@ -288,6 +289,7 @@ impl ResponsesWebSocketState {
     }
 
     pub(crate) fn reset_for_reconnect(&mut self) {
+        self.setup_turn_state = None;
         self.baseline = None;
         self.planned = None;
         self.active = None;
@@ -300,7 +302,9 @@ impl ResponsesWebSocketState {
     }
 
     pub(crate) fn setup_turn_state(&self) -> Option<&str> {
-        self.setup_turn_state.as_deref()
+        (self.setup_phase == OperationPhase::Completed)
+            .then_some(self.setup_turn_state.as_deref())
+            .flatten()
     }
 
     pub(crate) fn expire_baseline(&mut self) {
@@ -352,6 +356,7 @@ impl ResponsesWebSocketState {
             request: planned.request,
             output: Vec::new(),
             output_bytes: 0,
+            compaction_output: Default::default(),
             reusable: true,
             pending_compaction: planned.pending_compaction,
         });
@@ -359,80 +364,10 @@ impl ResponsesWebSocketState {
         true
     }
 
-    fn observe_output_item(&mut self, event: &Value) {
-        let item = event.as_object().and_then(|object| object.get("item"));
-        let max_output_items = self.max_output_items;
-        let max_output_bytes = self.max_output_bytes;
-        let Some(active) = &mut self.active else {
-            return;
-        };
-        if !active.reusable {
-            return;
-        }
-        let Some(item) = item.filter(|item| reusable_item(item)) else {
-            abandon_output(active);
-            return;
-        };
-        let remaining = max_output_bytes.saturating_sub(active.output_bytes);
-        let Some(encoded) = encoded_len_within(item, remaining) else {
-            abandon_output(active);
-            return;
-        };
-        if active.output.len() >= max_output_items {
-            abandon_output(active);
-            return;
-        }
-        active.output.push(item.clone());
-        active.output_bytes = active.output_bytes.saturating_add(encoded);
-    }
-
-    fn complete_active(&mut self, event: &Value) -> Option<PendingCompaction> {
-        let mut active = self.active.take()?;
-        let response = event
-            .as_object()
-            .and_then(|object| object.get("response"))
-            .and_then(Value::as_object);
-        let response_id = response
-            .and_then(|response| response.get("id"))
-            .and_then(Value::as_str)
-            .filter(|id| !id.is_empty());
-
-        if let Some(output) = response
-            .and_then(|response| response.get("output"))
-            .and_then(Value::as_array)
-        {
-            if !output.iter().all(reusable_item)
-                || output.len() > self.max_output_items
-                || output_encoded_len(output, self.max_output_bytes).is_none()
-            {
-                abandon_output(&mut active);
-            } else if active.output.is_empty() {
-                active.output.clone_from(output);
-            } else if !equivalent_items(&active.output, output) {
-                abandon_output(&mut active);
-            }
-        }
-
-        if active
-            .pending_compaction
-            .as_ref()
-            .is_some_and(|pending| !pending.accepts_items(&active.output))
-        {
-            active.reusable = false;
-        }
-        self.baseline = match (active.reusable, active.request, response_id) {
-            (true, Some(request), Some(response_id)) => Some(ReuseBaseline {
-                request,
-                response_id: response_id.to_string(),
-                output: active.output,
-            }),
-            _ => None,
-        };
-        self.set_phase(active.kind, OperationPhase::Completed);
-        active.pending_compaction
-    }
-
     fn fail_active(&mut self, kind: OperationKind) {
+        if kind == OperationKind::HiddenSetup {
+            self.setup_turn_state = None;
+        }
         self.active = None;
         self.planned = None;
         self.baseline = None;
@@ -440,6 +375,9 @@ impl ResponsesWebSocketState {
     }
 
     fn fail_operation(&mut self, kind: OperationKind) {
+        if kind == OperationKind::HiddenSetup {
+            self.setup_turn_state = None;
+        }
         if self
             .active
             .as_ref()
@@ -477,12 +415,10 @@ impl ResponsesWebSocketState {
     }
 }
 
-fn abandon_output(active: &mut ActiveOperation) {
-    active.output.clear();
-    active.output_bytes = 0;
-    active.reusable = false;
-}
-
 #[cfg(test)]
 #[path = "responses_websocket_state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "responses_websocket_boundary_tests.rs"]
+mod boundary_tests;

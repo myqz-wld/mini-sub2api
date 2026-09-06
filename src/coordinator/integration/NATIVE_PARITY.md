@@ -108,6 +108,38 @@ Core regressions additionally cover unknown history without invented ownership, 
 durable alias reuse after reopen, failed-edit rollback, live prewarm state after history expiry,
 stream-only compaction completion and output-index limits. These changes preserve the user policies.
 
+## Independent follow-up regression coverage
+
+Four independent source/capture rechecks and lead reproduction added 116 leaf checks in
+`native_regression_*_test.go`, bringing the complete suite to **715 leaves**. The additions include
+actual native requests, explicitly labeled ordinary synthetic requests and eight comparator-mutation
+controls. This is not 715 native-generated scenarios or an exhaustive Cartesian product.
+
+| Boundary | Required behavior and regression |
+|---|---|
+| Referenced history ownership | Full HTTP/WS and live WS references enforce the same eligible historical owners. Same-thread/ancestor references and declared fork sources remain supported; unrelated sibling history is rejected. `TestNativePreviousBranchHistory`, `TestNativeReferenceHistoryScope` |
+| V2 item-event acceptance | Final-only output cannot advance a window or publish a usable reference. Actual native HTTP/WS repeated compaction exposes the stored window; ordinary WS tests reference usability. `TestNativeCompactionRequiresItemDone`, `TestNativeRejectedCompactionReference` |
+| Lite namespace semantics | Merge every default namespace with loose functions/custom tools in encounter order before computing the emitted UUIDv5. Repeated/Unicode/empty/changed tools and reconnect preserve the correct setup. `TestNativeOrdinaryLiteNamespaceGrouping`, `TestNativeOrdinaryLiteToolChanges` |
+| Hidden startup routing | The first business frame already carries the completed hidden setup token; tool continuations keep it. Explicit prewarm and API-key controls remain. `TestNativeOrdinaryPrewarmRouting` |
+| Pending startup ownership | An intervening thread neither adopts nor consumes another thread's startup state; the matching thread can still adopt it. `TestNativePrewarmThreadIntervention` |
+| Fingerprints and metadata | Additional reserved-name/lookalike/reset, header-only trace, duplicate-account/two-Key/device-off and API-key compression/marker controls pass. `TestNativeExtraMetadataNamespace`, `TestNativeHeaderOnlyTrace`, `TestNativeAccountDeviceScope`, `TestNativeAPIKeyModeMarkers` |
+| Comparison sensitivity | Added semantic fields, content/order changes, collapsed IDs and unstable aliases fail the strict comparator; the unchanged control passes. `TestNativeTransportProjectionMutationControls` |
+
+Core regressions retain lightweight historical turn facts through bulk expiry, restore known fork
+provenance on previous-only continuation, prevent automatic reuse across threads, and discard failed
+or disconnected hidden setup state. The compaction event proof uses constant-size counts/digests,
+independent of output-body retention.
+
+Two standard Go tests independently check shutdown completion: the supervisor joins its owned
+process, and a WS session waits for both pumps and terminal usage finalization before unregistering.
+The recheck's intermittent directory-cleanup failures were preserved separately from business
+assertions; the first uninstrumented failures were not assigned an invented cause.
+
+Earlier probe corrections remain in the private review evidence: temporary fixtures inside the
+checkout changed native project discovery; a root-return probe did not actually restore its thread;
+flat routing metadata and hidden prewarms were initially overrestricted by worker assertions. The
+corrected probes retain exact owner/socket, all-frame, field and inference-count controls.
+
 Additional measured differences include Lite prefix attribution, HTTP body routing-token replay,
 local turn-start timestamps, token-budget text UUIDs versus scoped metadata UUIDs, and ordinary
 same-thread/different-turn scheduling. Their policy origins and limits are explicit in the user

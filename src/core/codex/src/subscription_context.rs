@@ -63,6 +63,7 @@ pub(crate) struct Record {
     pub(crate) settings: Option<Arc<Value>>,
     pub(crate) history: Option<Arc<History>>,
     pub(crate) dependencies: Dependencies,
+    pub(crate) lineage: crate::subscription_prepare::HistoryLineage,
     pub(crate) socket: Option<String>,
     pub(crate) completed: bool,
     // Startup routing is published only with a completed prewarm and consumed by the first turn
@@ -92,8 +93,7 @@ pub(crate) struct Active {
     pub(crate) reserved: usize,
     pub(crate) output: BTreeMap<usize, Value>,
     pub(crate) observed_items: BTreeMap<usize, [u8; 32]>,
-    pub(crate) compaction_items_seen: usize,
-    pub(crate) output_items_seen: usize,
+    pub(crate) compaction_output: crate::request_compaction::CompactionOutput,
     pub(crate) dependencies_available: bool,
     pub(crate) output_bytes: usize,
     pub(crate) buffer_charge: usize,
@@ -313,6 +313,7 @@ mod retention;
 impl Record {
     pub(crate) fn descriptor_cost(&self) -> usize {
         2048 + self.dependencies.cost()
+            + self.lineage.cost
             + self.socket.as_ref().map_or(0, String::len)
             + self.startup_token.as_ref().map_or(0, String::len)
     }

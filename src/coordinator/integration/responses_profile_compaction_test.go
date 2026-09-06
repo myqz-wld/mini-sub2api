@@ -21,6 +21,10 @@ func TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal(t *testing.T) {
 			eventType := "response.failed"
 			if request["model"] == "complete-compaction" {
 				eventType = "response.completed"
+				_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
+					"type": "response.output_item.done", "output_index": 0,
+					"item": map[string]any{"type": "compaction", "encrypted_content": "synthetic"},
+				}))
 			}
 			_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
 				"type": eventType, "response": map[string]any{"id": responseID, "output": []any{map[string]any{"type": "compaction", "encrypted_content": "synthetic"}}},
@@ -53,8 +57,22 @@ func TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal(t *testing.T) {
 			captures := make([]responsesProfileWebSocketCapture, 0, len(frames))
 			for _, frame := range frames {
 				writeE2EWebSocketText(t, connection, frame)
-				if event := readE2EWebSocketText(t, connection); !strings.Contains(event, "response.") {
-					t.Fatalf("compaction terminal = %q", event)
+				terminal := false
+				for index := 0; index < 2; index++ {
+					var event map[string]any
+					if json.Unmarshal([]byte(readE2EWebSocketText(t, connection)), &event) != nil {
+						t.Fatal("invalid compaction event JSON")
+					}
+					if event["type"] == "response.completed" || event["type"] == "response.failed" {
+						terminal = true
+						break
+					}
+					if event["type"] != "response.output_item.done" {
+						t.Fatal("unexpected compaction event kind")
+					}
+				}
+				if !terminal {
+					t.Fatal("compaction terminal was not delivered")
 				}
 				captures = append(
 					captures,

@@ -119,11 +119,7 @@ fn project_item_turn(
     let key = turn_key_for_raw(editor, raw)?;
     let projected = if let Some(existing) = editor.existing_turn(&key) {
         anyhow::ensure!(
-            editor.thread_is_ancestor(&existing.thread_id, &identity.thread_id)
-                || identity
-                    .forked_from_thread_id
-                    .as_deref()
-                    .is_some_and(|source| editor.thread_is_ancestor(&existing.thread_id, source)),
+            editor.history_thread_allowed(&existing.thread_id, identity),
             "historical turn belongs to an unrelated thread"
         );
         existing.id

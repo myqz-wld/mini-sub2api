@@ -16,39 +16,29 @@ use tools::canonical_tool;
 const DEFAULT_NAMESPACE: &str = "functions";
 
 pub(crate) fn group_tools(tools: Vec<Value>) -> Vec<Value> {
-    let tools = tools.into_iter().map(canonical_tool).collect::<Vec<_>>();
-    if let Some(namespace_index) = tools.iter().position(is_default_namespace) {
-        let mut functions = Vec::new();
-        let mut grouped = Vec::with_capacity(tools.len());
-        for (index, tool) in tools.into_iter().enumerate() {
-            if index != namespace_index && is_groupable_tool(&tool) {
-                functions.push(tool);
-            } else {
-                grouped.push(tool);
-            }
-        }
-        if !functions.is_empty()
-            && let Some(namespace) = grouped.iter_mut().find(|tool| is_default_namespace(tool))
-            && let Some(children) = namespace
-                .as_object_mut()
-                .and_then(|namespace| namespace.get_mut("tools"))
-                .and_then(Value::as_array_mut)
-        {
-            children.extend(functions);
-        }
-        return grouped;
-    }
-
     let mut functions = Vec::new();
     let mut functions_index = None;
+    let mut description = String::new();
     let mut grouped = Vec::new();
-    for tool in tools {
+    for mut tool in tools.into_iter().map(canonical_tool) {
         if is_groupable_tool(&tool) {
-            functions_index.get_or_insert(grouped.len());
             functions.push(tool);
+        } else if is_default_namespace(&tool) {
+            if let Some(value) = tool.get("description").and_then(Value::as_str)
+                && !value.trim().is_empty()
+            {
+                description = value.to_string();
+            }
+            let children = tool
+                .get_mut("tools")
+                .and_then(Value::as_array_mut)
+                .expect("validated default namespace");
+            functions.append(children);
         } else {
             grouped.push(tool);
+            continue;
         }
+        functions_index.get_or_insert(grouped.len());
     }
     if let Some(index) = functions_index.filter(|_| !functions.is_empty()) {
         grouped.insert(
@@ -56,7 +46,7 @@ pub(crate) fn group_tools(tools: Vec<Value>) -> Vec<Value> {
             serde_json::json!({
                 "type": "namespace",
                 "name": DEFAULT_NAMESPACE,
-                "description": "",
+                "description": description,
                 "tools": functions,
             }),
         );

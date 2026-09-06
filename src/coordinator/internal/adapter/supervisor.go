@@ -111,6 +111,12 @@ func (s *Supervisor) monitor(core *runningCore) {
 	for {
 		select {
 		case <-s.ctx.Done():
+			// Close must join the owned process, including a restart published while
+			// cancellation was in flight, before callers can remove its state.
+			if core.command.Process != nil {
+				_ = core.command.Process.Kill()
+			}
+			<-core.exited
 			return
 		case <-core.exited:
 		}

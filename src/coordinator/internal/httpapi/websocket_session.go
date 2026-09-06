@@ -97,8 +97,13 @@ func newWebSocketSession(
 
 func (s *websocketSession) run() {
 	results := make(chan websocketPumpResult, 2)
-	go func() { results <- s.clientPump() }()
-	go func() { results <- s.corePump() }()
+	var pumps sync.WaitGroup
+	pumps.Add(2)
+	go func() { defer pumps.Done(); results <- s.clientPump() }()
+	go func() { defer pumps.Done(); results <- s.corePump() }()
+	// Both pumps may own a taken operation while finalizing usage. Keep the session
+	// registered until those writes finish, before shutdown can close/remove storage.
+	defer pumps.Wait()
 
 	timer := time.NewTimer(s.timeouts.firstFrame)
 	defer timer.Stop()

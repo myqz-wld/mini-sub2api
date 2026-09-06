@@ -296,3 +296,6 @@ async fn invalid_compaction_output_never_commits_identity_or_context_windows() {
         }
     }
 }
+
+#[path = "subscription_lineage_tests.rs"]
+mod lineage_tests;

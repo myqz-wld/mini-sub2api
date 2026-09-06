@@ -94,14 +94,14 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
         other["client_metadata"]["session_id"]
     );
 
-    let failed = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        first.resolved_identity.as_ref(),
-        first.pending_compaction.as_ref(),
-    );
+    let failed = admitted_compaction(&store, request("compact-session-a", "compact-turn-a1")).await;
+    failed
+        .translate_value(
+            serde_json::json!({"type":"response.output_item.done","output_index":0,
+        "item":{"type":"compaction","encrypted_content":"synthetic"}}),
+        )
+        .await
+        .expect("compaction item done");
     failed
         .translate_value(serde_json::json!({
             "type":"response.failed",
@@ -121,14 +121,15 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
             .is_some_and(|window| window.ends_with(":0"))
     );
 
-    let completed = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        after_failure.resolved_identity.as_ref(),
-        after_failure.pending_compaction.as_ref(),
-    );
+    let completed =
+        admitted_compaction(&store, request("compact-session-a", "compact-turn-a1")).await;
+    completed
+        .translate_value(
+            serde_json::json!({"type":"response.output_item.done","output_index":0,
+        "item":{"type":"compaction","encrypted_content":"synthetic"}}),
+        )
+        .await
+        .expect("compaction item done");
     completed
         .translate_value(serde_json::json!({
             "type":"response.completed",
@@ -136,14 +137,15 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
         }))
         .await
         .expect("commit completed terminal");
-    let overlapping_completed = ResponseStateContext::new(
-        ACCOUNT_REF,
-        NAMESPACE,
-        SCOPE,
-        &store,
-        overlapping.resolved_identity.as_ref(),
-        overlapping.pending_compaction.as_ref(),
-    );
+    let overlapping_completed =
+        admitted_compaction(&store, request("compact-session-a", "compact-turn-a2")).await;
+    overlapping_completed
+        .translate_value(
+            serde_json::json!({"type":"response.output_item.done","output_index":0,
+        "item":{"type":"compaction","encrypted_content":"synthetic"}}),
+        )
+        .await
+        .expect("compaction item done");
     overlapping_completed
         .translate_value(serde_json::json!({
             "type":"response.completed",
@@ -180,4 +182,37 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
             .as_str()
             .is_some_and(|window| window.ends_with(":1"))
     );
+}
+
+async fn admitted_compaction(store: &RequestStateStore, body: Value) -> ResponseStateContext {
+    let prepared = prepare_stateful_codex_request(
+        UpstreamProfile::CodexSubscription1534,
+        EmulationTransport::Http,
+        &HeaderMap::new(),
+        Bytes::from(serde_json::to_vec(&body).unwrap()),
+        1024 * 1024,
+        CodexStateContext {
+            force_lite: false,
+            admission: None,
+            binding: None,
+            socket_id: None,
+            account_ref: ACCOUNT_REF,
+            state_namespace: NAMESPACE,
+            downstream_scope: SCOPE,
+            fingerprint_mode: FingerprintMode::Device,
+            store,
+        },
+        false,
+    )
+    .await
+    .expect("admitted compaction request");
+    ResponseStateContext::new(
+        ACCOUNT_REF,
+        NAMESPACE,
+        SCOPE,
+        store,
+        prepared.resolved_identity.as_ref(),
+        prepared.pending_compaction.as_ref(),
+    )
+    .with_operation(prepared.operation)
 }
