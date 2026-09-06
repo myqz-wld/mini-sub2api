@@ -70,7 +70,7 @@ The `native_scenario_*` files add 499 leaf cases to the original 100-case suite.
 worker tasks compared exact source, real native calls and scoped ordinary-client fixtures. The
 table distinguishes native-generated traffic from source-backed synthetic requests. Raw payloads
 remain in memory. A separate policy-provenance task reconciled earlier user decisions in
-[USER_POLICIES.md](../../../USER_POLICIES.md).
+the local, Git-ignored `USER_POLICIES.md`.
 
 | Family | Leaves | Added evidence |
 |---|---:|---|

@@ -378,7 +378,7 @@ captures and ordinary-client replays have separate assertions. Tests marked `KNO
 pin a measured baseline difference; their passing status does not certify full native conformance.
 The suite has a 15-minute aggregate deadline and keeps per-process and capture bounds independent.
 
-[User-selected gateway policies](USER_POLICIES.md) records explicit requirements, approved choices,
+The local, Git-ignored `USER_POLICIES.md` records explicit requirements, approved choices,
 delegated defaults and superseded decisions, including device convergence and the separate retention
 periods for full context, identity details and usage records.
 
