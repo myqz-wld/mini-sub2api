@@ -23,11 +23,13 @@ import (
 const nativeVersion = "codex-cli 0.153.4"
 
 type nativeClient struct {
-	t       *testing.T
-	input   io.WriteCloser
-	events  chan map[string]any
-	id      int
-	pending []map[string]any
+	t           *testing.T
+	input       io.WriteCloser
+	events      chan map[string]any
+	id          int
+	pending     []map[string]any
+	readTimeout time.Duration
+	observe     func(map[string]any)
 }
 
 type nativeOptions struct {
@@ -45,6 +47,8 @@ type nativeOptions struct {
 	threadParams       map[string]any
 	providerName       string
 	traceEndpoint      string
+	deadline           time.Duration
+	observe            func(map[string]any)
 }
 
 func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
@@ -75,6 +79,17 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		t.Fatal("native parity binary version mismatch")
 	}
 	isolated := t.TempDir()
+	deadline := options.deadline
+	if deadline == 0 {
+		deadline = 30 * time.Second
+	}
+	if deadline < 30*time.Second || deadline > 3*time.Minute {
+		t.Fatal("native fixture deadline outside bounded range")
+	}
+	idleMillis := 5000
+	if deadline > 30*time.Second {
+		idleMillis = 60000
+	}
 	isolatedUser := t.TempDir()
 	project := options.project
 	if project == "" {
@@ -109,9 +124,9 @@ requires_openai_auth = true
 supports_websockets = %t
 request_max_retries = 0
 stream_max_retries = 0
-stream_idle_timeout_ms = 5000
+stream_idle_timeout_ms = %d
 websocket_connect_timeout_ms = 3000
-`, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"), metadataEndpoint+"/backend-api", !options.neutralPersonality, providerName, options.endpoint+"/v1", options.ws)
+`, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"), metadataEndpoint+"/backend-api", !options.neutralPersonality, providerName, options.endpoint+"/v1", options.ws, idleMillis)
 	if err := os.WriteFile(filepath.Join(isolated, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal("write native config")
 	}
@@ -126,7 +141,7 @@ websocket_connect_timeout_ms = 3000
 	if err := os.WriteFile(filepath.Join(isolated, "auth.json"), encoded, 0600); err != nil {
 		t.Fatal("write synthetic native auth")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	args := []string{"app-server", "--stdio"}
 	args = append(args, nativeConfigArguments(t, options.configOverrides)...)
 	if options.traceEndpoint != "" {
@@ -167,7 +182,11 @@ websocket_connect_timeout_ms = 3000
 		cancel()
 		t.Fatal("start isolated native test process")
 	}
-	client := &nativeClient{t: t, input: input, events: make(chan map[string]any, 128)}
+	readTimeout := 15 * time.Second
+	if deadline > 30*time.Second {
+		readTimeout = 90 * time.Second
+	}
+	client := &nativeClient{t: t, input: input, events: make(chan map[string]any, 128), readTimeout: readTimeout, observe: options.observe}
 	var reader sync.WaitGroup
 	reader.Add(1)
 	go func() {
@@ -212,12 +231,15 @@ func (c *nativeClient) read() map[string]any {
 			c.t.Fatal("native test process exited before expected control event")
 		}
 		return event
-	case <-time.After(15 * time.Second):
+	case <-time.After(c.readTimeout):
 		c.t.Fatal("native control event deadline")
 	}
 	return nil
 }
 func (c *nativeClient) handle(event map[string]any) {
+	if c.observe != nil {
+		c.observe(event)
+	}
 	if event["method"] == "item/tool/call" {
 		c.send(map[string]any{"id": event["id"], "result": map[string]any{"success": true, "contentItems": []any{map[string]any{"type": "inputText", "text": "synthetic tool result"}}}})
 		return

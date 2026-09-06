@@ -140,6 +140,10 @@ A valid previous response means append semantics: even apparently repeated histo
 input. Earlier-response forks use that response's context. Failed and incomplete responses never
 become completed context baselines. Output item events and final output are reconciled once, and
 response ownership/context is published before the corresponding public event.
+Some upstream completions contain an absent or empty `output` footer after sending completed
+items. Subscription JSON delivery reconstructs those items in output-index order; history and WS
+reuse retain the observed output. A populated final array is used once. SSE/WS clients consume
+the item events normally; the gateway does not add duplicate item events.
 
 Session lookup is scoped by distribution key and upstream account namespace:
 
@@ -194,12 +198,22 @@ valid encrypted compaction item received through `response.output_item.done`. A 
 alone cannot establish acceptance. Duplicate, missing or inconsistent compaction output cannot
 publish a usable context or WS baseline. Local Responses compaction retains the native assistant-summary
 completion rules.
+An absent or empty final footer is allowed after that single valid item-done proof; it does not
+relax the proof requirement.
 
 HTTP `traceparent` and `tracestate` are preserved across both credential routes. Native WS tracing
 remains in per-frame metadata. Nonreserved string entries in `x-codex-turn-metadata` survive body and
 HTTP compatibility-header projection under the existing request/assembly limits. Native app-server
 extras can exceed the separate config-file entry/key/value limits; canonical identity fields still
 receive their scoped projections, and body-only tool namespace metadata stays out of headers.
+
+Ordinary callers may omit workspace, agent and execution context. Core adds no discovered CWD,
+AGENTS, Skills, permission messages or tool definitions. Generated protocol metadata keeps the
+existing root-agent and turn-time defaults; missing `node_repl_auto_review_required` and
+`node_repl_disabled` follow the pinned model catalog (currently Astra requires auto review; all
+11 models default `node_repl_disabled` to false). Explicit valid caller values remain intact. These flags describe
+client policy; the gateway does not run a REPL or enable tools. Subscription still removes the
+established server-unsupported controls, including `max_output_tokens`, `temperature` and `top_p`.
 
 ### Retention and limits
 
@@ -394,6 +408,36 @@ child-thread history, compaction windows, routing-token lifetimes and failure re
 captures and ordinary-client replays have separate assertions. Tests marked `KNOWN` or `OBSERVATION`
 pin a measured baseline difference; their passing status does not certify full native conformance.
 The suite has a 15-minute aggregate deadline and keeps per-process and capture bounds independent.
+
+Actual OpenCode Responses captures use an optional, locally pinned **1.18.29** executable:
+
+```bash
+mise exec -- python scripts/prepare-opencode-tests.py
+bash scripts/test-scaffold-parity.sh
+```
+
+Preparation downloads official binary/source artifacts into `build/third-party/opencode`, verifies
+npm integrity and the pinned source commit, and requires Python with `tarfile` data-filter support.
+It makes no global installation. The test itself is loopback-only, uses the actual `@ai-sdk/openai`
+Responses provider and an in-memory OpenCode database, and exercises text turns, real read-tool
+execution and permission-denial controls. `MINI_SUB2API_OPENCODE_BINARY` overrides the executable
+location; its exact version is still checked.
+
+A separate, explicitly authorized real Subscription check is available:
+
+```bash
+bash scripts/test-live-parity.sh --allow-real-subscription
+```
+
+This is outside every default/loopback suite. It requires the pinned clients and an existing
+ChatGPT login at `$HOME/.codex/auth.json` (or `MINI_SUB2API_LIVE_AUTH_FILE`), imports access credentials
+without a refresh token into temporary gateway state, and checks that the original login is
+unchanged. It sends bounded synthetic tasks to the fixed official Codex endpoint using `gpt-5.5`
+and `gpt-6-astra`; account availability and rate limits can affect results. It tests native Codex,
+bare JSON/SSE/WS callers and OpenCode HTTP, including tools, continuation and structured output.
+Native Astra needs its bundled code-mode host. API-key coverage remains local-only. Captures stay
+in memory; only structural verdicts are retained. Running this script requires authorization for
+real requests; ordinary development validation does not supply that authorization.
 
 The local, Git-ignored `USER_POLICIES.md` records explicit requirements, approved choices,
 delegated defaults and superseded decisions, including device convergence and the separate retention

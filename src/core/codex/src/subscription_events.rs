@@ -177,7 +177,7 @@ impl ContextStore {
             return Ok(());
         }
         let output: Cow<'_, [Value]> =
-            if let Some(output) = response.get("output").and_then(Value::as_array) {
+            if let Some(output) = crate::response_output::populated(response.get("output")) {
                 for (index, item) in &active.output {
                     if output.get(*index).is_none_or(|final_item| {
                         candidate_key(item) != candidate_key(final_item)

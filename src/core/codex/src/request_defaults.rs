@@ -4,13 +4,21 @@ use serde_json::Value;
 #[derive(Clone, Copy)]
 pub(crate) struct ModelProfile {
     pub(crate) responses_lite: bool,
+    pub(crate) node_repl_auto_review_required: bool,
+    pub(crate) node_repl_disabled: bool,
     reasoning_effort: Option<&'static str>,
     reasoning_summary: Option<&'static str>,
     verbosity: Option<&'static str>,
 }
 
 const MODEL_PROFILES: [(&str, ModelProfile); 11] = [
-    ("gpt-6-astra", profile(true, Some("low"), None, Some("low"))),
+    (
+        "gpt-6-astra",
+        ModelProfile {
+            node_repl_auto_review_required: true,
+            ..profile(true, Some("low"), None, Some("low"))
+        },
+    ),
     (
         "gpt-daybreak-blue-latest",
         profile(true, Some("low"), None, Some("low")),
@@ -81,6 +89,8 @@ const fn profile(
 ) -> ModelProfile {
     ModelProfile {
         responses_lite,
+        node_repl_auto_review_required: false,
+        node_repl_disabled: false,
         reasoning_effort,
         reasoning_summary,
         verbosity,

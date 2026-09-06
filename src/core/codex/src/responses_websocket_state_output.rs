@@ -48,9 +48,8 @@ impl ResponsesWebSocketState {
             .and_then(Value::as_str)
             .filter(|id| !id.is_empty());
 
-        if let Some(output) = response
-            .and_then(|response| response.get("output"))
-            .and_then(Value::as_array)
+        if let Some(output) =
+            crate::response_output::populated(response.and_then(|response| response.get("output")))
         {
             if !output.iter().all(reusable_item)
                 || output.len() > self.max_output_items

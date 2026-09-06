@@ -152,6 +152,9 @@ fn resolve_identity(
         &window_id,
         &request_kind,
         context.tool_namespaces_info.as_ref(),
+        crate::request_defaults::model_profile(
+            object.get("model").and_then(Value::as_str).unwrap_or(""),
+        ),
     );
     let body_turn_metadata = body_turn_metadata
         .and_then(|raw| complete_turn_metadata(&raw, &generated))
@@ -194,6 +197,7 @@ fn generated_turn_metadata(
     window_id: &str,
     request_kind: &str,
     tool_namespaces_info: Option<&Value>,
+    model: crate::request_defaults::ModelProfile,
 ) -> String {
     let mut metadata = Map::new();
     metadata.insert("installation_id".to_string(), installation_id.into());
@@ -215,8 +219,14 @@ fn generated_turn_metadata(
         metadata.insert("subagent_kind".to_string(), subagent_kind.into());
     }
     metadata.insert("auto_review_enabled".to_string(), false.into());
-    metadata.insert("node_repl_auto_review_required".to_string(), false.into());
-    metadata.insert("node_repl_disabled".to_string(), false.into());
+    metadata.insert(
+        "node_repl_auto_review_required".to_string(),
+        model.node_repl_auto_review_required.into(),
+    );
+    metadata.insert(
+        "node_repl_disabled".to_string(),
+        model.node_repl_disabled.into(),
+    );
     if let Some(tool_namespaces_info) = tool_namespaces_info {
         metadata.insert(
             "tool_namespaces_info".to_string(),

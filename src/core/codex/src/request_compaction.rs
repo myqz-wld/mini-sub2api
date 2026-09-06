@@ -33,9 +33,10 @@ impl PendingCompaction {
         let Some(fingerprint) = observed.fingerprint else {
             return false;
         };
-        let Some(output) = response.get("output") else {
+        if crate::response_output::metadata_only(response.get("output")) {
             return true;
-        };
+        }
+        let output = response.get("output").expect("nonempty footer is present");
         let Some(items) = output.as_array() else {
             return false;
         };
@@ -121,4 +122,34 @@ pub(crate) fn operation_anchor(
         return previous.as_bytes().to_vec();
     }
     Uuid::now_v7().as_bytes().to_vec()
+}
+
+#[cfg(test)]
+mod footer_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn empty_v2_footer_requires_one_actual_valid_done_event() {
+        let pending = PendingCompaction {
+            marker_key: "marker".into(),
+            thread_id: "thread".into(),
+            target_window: 1,
+            requires_compaction_item: true,
+        };
+        let footer = json!({"output":[]});
+        let item = json!({"type":"compaction","encrypted_content":"opaque-test-payload"});
+        let mut proof = CompactionOutput::default();
+        assert!(!pending.accepts_response(&footer, None));
+        assert!(!pending.accepts_response(&footer, Some(&proof)));
+        proof.observe(&item);
+        assert!(pending.accepts_response(&footer, Some(&proof)));
+        assert!(!pending.accepts_response(&json!({"output":null}), Some(&proof)));
+        assert!(!pending.accepts_response(
+            &json!({"output":[{"type":"compaction","encrypted_content":"different"}]}),
+            Some(&proof)
+        ));
+        proof.observe(&item);
+        assert!(!pending.accepts_response(&footer, Some(&proof)));
+    }
 }

@@ -48,6 +48,8 @@ Native test names live in `native_*_test.go` and require `-tags=nativeparity`.
 | Markers and compression | 6 cases: credentials × absent/invalid/Codex Originator; SDK-style caller headers; zstd bytes survive API-key forwarding, markers cannot bypass Subscription policy | `TestNativeOrdinaryCompressedAndSpoofedMarkers` |
 | Request settings | Ordinary omitted base/tools use current defaults; changed Lite setup requires full reconstruction; unchanged setup remains incremental | `TestNativeOrdinaryOmittedSetupAppliesDefaults`, `TestResponsesProfileWebSocketOrdinarySecondTurnUsesDelta` |
 | Model defaults | All 11 pinned catalog models: exact base text, reasoning/text defaults and Lite shape/IDs, with matched neutral-personality settings | `TestNativeAllCatalogModelDefaults` |
+| Minimal caller metadata | 66 cases: 11 catalog models × API key/Subscription × JSON/SSE/WS; model-owned flags, no invented environment/tools, exact custom base and JSON schema, retained unsupported-control stripping | `TestNativeOrdinaryModelMetadataCatalog` |
+| Metadata-only completion footer | 6 ordinary/Lite × JSON/SSE/WS cases: completed tool item and answer preserved, HTTP full reconstruction, WS reference reuse; Rust rejects inconsistent/gapped done sequences and preserves V2 proof | `TestNativeMetadataOnlyCompletion`, `response_stream::aggregation::output_tests`, `request_compaction::footer_tests` |
 | Caller personality/base | Native pragmatic templates for gpt-5.5/5.4/5.4-mini pass unchanged; whitespace, Unicode and literal placeholders remain exact | `TestNativePragmaticTemplateSurvivesGateway`, `native_lite_prefixes_follow_projected_thread_payload_and_restart` |
 | Deterministic Lite IDs | Independent Go SHA-1 UUIDv5 oracle over raw tools JSON and base bytes; stable same-thread repeats, separate threads, changed/reordered tools and changed base; arbitrary IDs require native proof; legacy mappings survive | `TestNativeLitePrefixContentAndThreadDimensions`, `request_normalizer::state_tests::lite_identity_tests` |
 | Captured fixture continuation | Reuse actual native Lite bytes in memory; previous-only HTTP reconstruction and WS reconnect/full prewarm install valid prefix IDs without replaying a business request | `TestNativeCapturedLiteReconstructionAfterReferenceAndReconnect` |
@@ -170,7 +172,8 @@ policy document. None is automatically justified merely by existing in the imple
   not claimed as observed.
 - The recorded ClientHello comparison was executed on macOS arm64. Remote certificates, HTTP/2/3,
   production rate limits, provider-side retention/retry contracts and real account entitlements are
-  outside this loopback evidence. No real-provider request or paid inference is performed.
+  outside this loopback evidence. The native and scaffold loopback suites perform no real-provider
+  inference; separately authorized live evidence is described below.
 - Active OTEL tests use a bounded discard-only loopback collector with log/metrics exporters and
   user-prompt logging disabled. Rollout-enabled inference-ID generation remains source evidence:
   that native diagnostic path writes request/output artifacts, which this suite forbids.
@@ -190,3 +193,62 @@ Paths below are relative to the pinned Codex checkout:
 
 The user-provided moving sibling checkout was older than this release when tested. Validation uses
 the exact pinned checkout and leaves the sibling checkout unchanged.
+
+## Plan 16: ordinary callers and real Subscription validation
+
+The final native/ordinary loopback race run passed **787/787** leaves with no skips. This includes
+the prior 715 cases, 66 missing-metadata/catalog cases and six empty-footer cases. These are mixed
+actual-client and synthetic boundary tests, not 787 separate native client scenarios. The standard
+suite also passed 333 Core and six protocol tests, Go race/vet, Clippy and formatting.
+
+OpenCode **1.18.29**, source **16747470f976aca3d362ad730bcd3fe82ecc2c9a**, adds **14** passing
+loopback cases: six text and six actual read-tool cases (direct/API-key/Subscription × ordinary/Lite),
+plus two denied-file controls. Tests use its actual `serve` executable and public session API with
+the `@ai-sdk/openai` Responses provider. API-key payloads remain byte-exact; Subscription checks
+preserve ordered message content, tool schemas, caller settings and emitted Lite UUIDv5 identities.
+The scaffold comparator permits only the declared ordinary role/wrapper/base conversions; it does
+not reuse a comparator that assumes every client already supplied native input wrappers.
+
+OpenCode runs with SQLite `:memory:`, snapshots and external services disabled, a task-owned null
+log sink and isolated home/config/project directories. Read execution is permitted only for the
+synthetic fixture file; a neighboring file is explicitly denied. Process cleanup joins only the
+owned test children. No actual OpenCode WS producer is claimed: this provider uses HTTP Responses.
+The verified executable platform is macOS arm64; other package targets have not been executed here.
+
+Separately gated real tests require `nativeparity,scaffoldparity,liveparity` plus
+`MINI_SUB2API_LIVE_SUBSCRIPTION=1`; the public script additionally requires
+`--allow-real-subscription`. The user authorized this delivery's synthetic Subscription requests.
+The fixture copies access credentials without a refresh token, targets the fixed official endpoint,
+and verifies the original login bytes are unchanged. Normal suites have no real-provider fallback.
+
+| Real Subscription scenario | Models | Cells |
+|---|---|---|
+| Bare minimal first request and explicit append | gpt-5.5 / gpt-6-astra × JSON/SSE/WS | 6 |
+| Caller function, result continuation and strict JSON schema | Both models × SSE/WS | 4 |
+| Actual Codex dynamic tool loop and next user turn | Both models × HTTP/WS | 4 |
+| Actual OpenCode two text turns | Both models × HTTP | 2 |
+| Actual OpenCode restricted read, tool result and final answer | Both models × HTTP | 2 |
+
+All **18** distinct live cells have final passing evidence, retaining earlier failed attempts and
+fixture corrections separately. This is consolidated affected-case validation, not a claim that
+the first combined run passed every cell.
+
+Actual native Astra uses its catalog's `code_mode_only` behavior and bundled host to invoke the
+dynamic tool. Turning that host off produced no declared tool in the original fixture. Bare API
+functions work without forcing callers to implement Codex code mode. OpenCode's prompt endpoint
+returns the last assistant message only; tool execution is verified on the captured continuation
+and its matching call/result, not assumed to be present in that last message's parts.
+
+Real service observation exposed one production defect: completed items were present in the
+stream, but the terminal response contained `output: []`. The old JSON aggregation returned empty
+output and lost reconstruction/reuse state. The repair accepts completed item events as the output
+when the footer is empty or absent. Streaming test clients assemble those events as normal; this
+does not assert that the gateway rewrites the terminal streaming footer. Populated final output
+is never concatenated with item events, and native V2 compaction still requires actual done proof.
+
+The initial live matrix had 14/16 passing cells; both native Astra cells passed after the fixture
+correction. Initial model gpt-5.4 was absent from this account's current catalog and returned 400;
+the ordinary live cells use available gpt-5.5 instead. API-key credentials were unavailable, so
+that path has only local evidence. Live checks establish bounded operational outcomes for this
+account and these tasks. Local raw-wire/TLS comparisons do not prove provider-side fingerprint
+classification, retention, retry contracts, every model entitlement or behavior under rate limits.

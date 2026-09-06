@@ -24,8 +24,30 @@ pub(super) struct TerminalResponse {
 
 pub(super) fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalResponse, CoreFailure> {
     let mut terminal = None;
+    let mut output = std::collections::BTreeMap::new();
     for event in events(bytes)? {
         let event = event?;
+        if terminal.is_none()
+            && event.get("type").and_then(serde_json::Value::as_str)
+                == Some("response.output_item.done")
+        {
+            let index = match event.get("output_index") {
+                None => output.len(),
+                Some(value) => value
+                    .as_u64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or(CoreFailure::UpstreamResponseFailed)?,
+            };
+            let item = event
+                .get("item")
+                .filter(|item| item.is_object())
+                .ok_or(CoreFailure::UpstreamResponseFailed)?
+                .clone();
+            if output.get(&index).is_some_and(|previous| previous != &item) {
+                return Err(CoreFailure::UpstreamResponseFailed);
+            }
+            output.insert(index, item);
+        }
         let kind = match event.get("type").and_then(serde_json::Value::as_str) {
             Some("response.completed") => Some(TerminalKind::Completed),
             Some("response.failed") => Some(TerminalKind::Failed),
@@ -41,7 +63,24 @@ pub(super) fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalRespons
             terminal = Some(TerminalResponse { kind, response });
         }
     }
-    terminal.ok_or(CoreFailure::UpstreamResponseFailed)
+    let mut terminal = terminal.ok_or(CoreFailure::UpstreamResponseFailed)?;
+    // Codex's streamed terminal may contain response metadata without repeating output items.
+    // A non-streaming Responses caller still needs the completed items in its JSON response.
+    // A populated final output remains authoritative; never concatenate both representations.
+    if crate::response_output::metadata_only(terminal.response.get("output")) {
+        if !output.keys().copied().eq(0..output.len()) {
+            return Err(CoreFailure::UpstreamResponseFailed);
+        }
+        terminal
+            .response
+            .as_object_mut()
+            .ok_or(CoreFailure::UpstreamResponseFailed)?
+            .insert(
+                "output".into(),
+                serde_json::Value::Array(output.into_values().collect()),
+            );
+    }
+    Ok(terminal)
 }
 
 pub(super) async fn prepare_terminal(
@@ -101,4 +140,68 @@ fn events(
             }
         }
     }))
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn stream(events: Vec<serde_json::Value>) -> Vec<u8> {
+        events
+            .into_iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect::<String>()
+            .into_bytes()
+    }
+
+    #[test]
+    fn json_aggregation_recovers_items_from_metadata_only_completion() {
+        let message = json!({"id":"msg_test","type":"message","role":"assistant","content":[{"type":"output_text","text":"PASS"}]});
+        let reasoning =
+            json!({"id":"rs_test","type":"reasoning","summary":[],"encrypted_content":"opaque"});
+        for footer in [
+            json!({"id":"resp_test","status":"completed"}),
+            json!({"id":"resp_test","status":"completed","output":[]}),
+        ] {
+            let bytes = stream(vec![
+                json!({"type":"response.output_item.done","output_index":1,"item":message}),
+                json!({"type":"response.output_item.done","output_index":0,"item":reasoning}),
+                json!({"type":"response.output_item.done","output_index":1,"item":message}),
+                json!({"type":"response.completed","response":footer}),
+            ]);
+            let result = terminal_response_from_sse(&bytes).unwrap();
+            assert_eq!(result.response["output"], json!([reasoning, message]));
+        }
+    }
+
+    #[test]
+    fn final_output_is_not_duplicated_or_replaced_by_observations() {
+        let final_output = json!([{"type":"message","content":[]}]);
+        let bytes = stream(vec![
+            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"message","content":[]}}),
+            json!({"type":"response.completed","response":{"id":"resp_test","output":final_output}}),
+        ]);
+        assert_eq!(
+            terminal_response_from_sse(&bytes).unwrap().response["output"],
+            final_output
+        );
+    }
+
+    #[test]
+    fn missing_final_output_requires_a_complete_consistent_item_sequence() {
+        for events in [
+            vec![
+                json!({"type":"response.output_item.done","output_index":1,"item":{"type":"message"}}),
+            ],
+            vec![
+                json!({"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}),
+                json!({"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning"}}),
+            ],
+        ] {
+            let mut events = events;
+            events.push(json!({"type":"response.completed","response":{"id":"resp_test"}}));
+            assert!(terminal_response_from_sse(&stream(events)).is_err());
+        }
+    }
 }

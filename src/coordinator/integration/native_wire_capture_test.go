@@ -29,19 +29,24 @@ type nativeWire struct {
 }
 
 type nativeCapture struct {
-	t           *testing.T
-	server      *httptest.Server
-	tap         *nativeTap
-	mu          sync.Mutex
-	requests    []nativeWire
-	connections int
-	business    int
-	bytes       int
+	t                  *testing.T
+	server             *httptest.Server
+	tap                *nativeTap
+	mu                 sync.Mutex
+	requests           []nativeWire
+	connections        int
+	business           int
+	bytes              int
+	metadataOnlyFooter bool
 }
 
 func newNativeCapture(t *testing.T) *nativeCapture {
+	return newNativeCaptureWithFooter(t, false)
+}
+
+func newNativeCaptureWithFooter(t *testing.T, metadataOnly bool) *nativeCapture {
 	t.Helper()
-	capture := &nativeCapture{t: t}
+	capture := &nativeCapture{t: t, metadataOnlyFooter: metadataOnly}
 	capture.server, capture.tap = newNativeTappedServer(t, http.HandlerFunc(capture.serve))
 	assertLoopbackURL(t, capture.server.URL)
 	return capture
@@ -150,7 +155,11 @@ func (c *nativeCapture) capture(r *http.Request, body, encoded []byte, connectio
 	for index, item := range output {
 		events = append(events, map[string]any{"type": "response.output_item.done", "output_index": index, "item": item})
 	}
-	return append(events, map[string]any{"type": "response.completed", "response": map[string]any{"id": id, "output": output, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}})
+	footerOutput := output
+	if c.metadataOnlyFooter {
+		footerOutput = []any{}
+	}
+	return append(events, map[string]any{"type": "response.completed", "response": map[string]any{"id": id, "output": footerOutput, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}})
 }
 func (c *nativeCapture) snapshot() []nativeWire {
 	c.mu.Lock()

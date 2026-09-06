@@ -56,6 +56,7 @@ func (c nativeOrdinaryClient) send(request map[string]any) map[string]any {
 }
 func (c nativeOrdinaryClient) sendEncoded(body []byte) map[string]any {
 	c.t.Helper()
+	output := make(map[int]any)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if c.ws != nil {
@@ -71,8 +72,8 @@ func (c nativeOrdinaryClient) sendEncoded(body []byte) map[string]any {
 			if json.Unmarshal(body, &event) != nil {
 				c.t.Fatal("ordinary response JSON")
 			}
-			if event["type"] == "response.completed" {
-				return event["response"].(map[string]any)
+			if response := collectOrdinaryOutput(c.t, event, output); response != nil {
+				return response
 			}
 			if event["type"] == "error" || event["type"] == "response.failed" {
 				c.t.Fatal("ordinary unexpected terminal error")
@@ -103,12 +104,46 @@ func (c nativeOrdinaryClient) sendEncoded(body []byte) map[string]any {
 			continue
 		}
 		var event map[string]any
-		if json.Unmarshal(line[6:], &event) == nil && event["type"] == "response.completed" {
-			return event["response"].(map[string]any)
+		if json.Unmarshal(line[6:], &event) == nil {
+			if response := collectOrdinaryOutput(c.t, event, output); response != nil {
+				return response
+			}
 		}
 	}
 	c.t.Fatal("ordinary SSE terminal missing")
 	return nil
+}
+
+// Streaming clients consume item events; Codex may send only metadata in the final footer.
+// Keep this consumer assembly separate from checks of the gateway's actual transmitted bytes.
+func collectOrdinaryOutput(t *testing.T, event map[string]any, items map[int]any) map[string]any {
+	t.Helper()
+	if event["type"] == "response.output_item.done" {
+		index, ok := event["output_index"].(float64)
+		if !ok || index < 0 || index != float64(int(index)) || event["item"] == nil {
+			t.Fatal("invalid streamed completed item")
+		}
+		items[int(index)] = event["item"]
+	}
+	if event["type"] != "response.completed" {
+		return nil
+	}
+	response, ok := event["response"].(map[string]any)
+	if !ok {
+		t.Fatal("invalid streamed terminal response")
+	}
+	if output, ok := response["output"].([]any); !ok || len(output) == 0 {
+		output := make([]any, len(items))
+		for index := range output {
+			item, exists := items[index]
+			if !exists {
+				t.Fatal("streamed response item gap")
+			}
+			output[index] = item
+		}
+		response["output"] = output
+	}
+	return response
 }
 func ordinaryInput() []any {
 	return []any{

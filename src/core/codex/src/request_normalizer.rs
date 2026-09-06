@@ -402,6 +402,10 @@ mod message_tests;
 mod defaults_tests;
 
 #[cfg(test)]
+#[path = "request_normalizer_minimal_metadata_tests.rs"]
+mod minimal_metadata_tests;
+
+#[cfg(test)]
 #[path = "request_normalizer_native_ws_tests.rs"]
 mod native_ws_tests;
 
