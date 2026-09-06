@@ -1,14 +1,15 @@
 # mini-sub2api
 
-`mini-sub2api` is a small Responses API gateway. Each downstream `ms2a_…` key maps to one Codex
-subscription or OpenAI API-key credential. It supports:
+A small Responses API gateway with a Go coordinator and Rust Codex adapter. Each downstream key
+binds to one Codex Subscription or OpenAI API-key credential. It supports HTTP JSON/SSE and
+WebSocket `/v1/responses`, with per-key request status, latency and token usage.
 
-- `POST /v1/responses` over JSON or SSE
-- `GET /v1/responses` over sequential Responses WebSockets
-- per-key request status, latency, and token usage
+| Upstream credential | Behavior for every caller |
+|---|---|
+| API key | Pass request/response bodies and valid WS application frames through unchanged. Authentication, admission and response-header policy still apply. |
+| Codex Subscription | Emulate Codex v0.153.4, including request format, defaults and scoped identities. Native Codex, bare API and third-party Responses clients are supported. |
 
-Chat Completions, account pooling, quotas, billing, dashboards, and administration HTTP APIs are
-out of scope.
+There is no account pool, automatic account switching, Chat Completions endpoint or administration HTTP API.
 
 ## Build
 
@@ -17,80 +18,50 @@ Go 1.26.4 and Rust 1.96.0 are pinned through `mise`:
 ```bash
 mise install
 bash scripts/build.sh
-```
-
-Keep the generated package together:
-
-- `build/bin/mini-sub2api`
-- `build/bin/mini-sub2api-core-codex`
-- `build/bin/build-info.json`
-
-```bash
 build/bin/mini-sub2api --version
 build/bin/mini-sub2api --check-installed
 ```
 
-`--check-installed` returns JSON and never fetches a remote repository.
+Deploy all three files together: `mini-sub2api`, `mini-sub2api-core-codex` and `build-info.json`
+from `build/bin/`. The installed check returns JSON and never fetches a remote repository.
 
 ## Quick start
 
-These examples use `./state`. Set `MINI_SUB2API_STATE_DIR` to omit `--state-dir`.
-
-### 1. Add a credential
-
-For a long-running Codex subscription, use the device flow:
+Add a Subscription credential:
 
 ```bash
 build/bin/mini-sub2api --state-dir ./state \
-  credential login codex --name personal-subscription
+  credential login codex --name personal
 ```
 
-Browser PKCE is available with `--flow browser`; on a remote host, forward the printed loopback
-callback port over SSH. To copy a current Codex login without its refresh token:
-
-```bash
-build/bin/mini-sub2api --state-dir ./state \
-  credential import-codex --name personal-subscription \
-  --auth-file ~/.codex/auth.json
-```
-
-For an OpenAI API key:
+Or add an API key through standard input:
 
 ```bash
 build/bin/mini-sub2api --state-dir ./state \
   credential add-api-key codex --name openai-api --secret-stdin
 ```
 
-Secrets are read from standard input and are not stored in arguments, environment variables, or
-SQLite.
-
-### 2. Create a downstream key
+List credentials, then create a downstream key using the returned credential ID:
 
 ```bash
 build/bin/mini-sub2api --state-dir ./state credential list
 build/bin/mini-sub2api --state-dir ./state \
   key create --credential cred_EXAMPLE --name laptop
+build/bin/mini-sub2api --state-dir ./state serve
 ```
 
-The `ms2a_…` value is shown once; only its SHA-256 hash and short prefix are retained.
-
-### 3. Start and call the service
+The `ms2a_…` key is shown once. The default listener is `127.0.0.1:8787`:
 
 ```bash
-build/bin/mini-sub2api --state-dir ./state serve
-
 curl --no-buffer http://127.0.0.1:8787/v1/responses \
-  -H "Authorization: Bearer ms2a_EXAMPLE" \
+  -H 'Authorization: Bearer ms2a_EXAMPLE' \
   -H 'Content-Type: application/json' \
   -d '{"model":"YOUR_CODEX_MODEL","input":"Say hello","stream":true}'
 ```
 
-The default listener is `127.0.0.1:8787`. Request details are retained for seven days; change this
-with `--usage-retention-days N`, or use `0` to disable automatic deletion.
+## Use with Codex
 
-## Codex configuration
-
-Add a custom provider to `~/.codex/config.toml`:
+Add this provider to `~/.codex/config.toml`:
 
 ```toml
 [model_providers.mini-sub2api]
@@ -110,341 +81,52 @@ model_provider = "mini-sub2api"
 MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
 
-Set `supports_websockets = false` when HTTP-only behavior is required.
+Set `supports_websockets = false` for HTTP-only use. Other Responses clients can use the same
+base URL and downstream key. OpenCode's tested Responses provider uses HTTP.
 
-## Behavior
+## Context and instructions
 
-### Credential routing
+- HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history
+  and become full upstream requests. Missing history fails before inference.
+- Full history expires after three idle hours. A full request can rebuild it; valid live WS
+  references may continue without the expired local body. Identity mappings have separate retention.
+- Valid nonblank caller base instructions win verbatim; absent or invalid ordinary bases use model
+  defaults. Developer content, duplicates and order are preserved; Subscription changes system to developer in place.
+- Lite conversion moves tools and the selected base into the input prefix. Native Lite prefixes
+  follow the pinned thread/content UUIDv5 rules. Core does not discover caller workspaces, Skills
+  or tools. Native code mode and ordinary direct tools retain their respective execution protocols.
 
-Each distribution key selects its bound upstream credential. There is no account pool or automatic
-account switching. Caller markers such as `Originator` do not select emulation or authentication.
+See [gateway behavior](docs/BEHAVIOR.md) for session/turn ownership, device convergence, identity
+privacy, limits, compaction and recovery; [operations](docs/OPERATIONS.md) covers authentication,
+administration, retention and deployment.
 
-| Upstream credential | Behavior for every caller |
-|---|---|
-| API key | Request bodies, valid WS application frames and response bodies pass through unchanged, including Codex-marked callers. Authentication, routing, admission, usage accounting and reviewed response-header policy still apply. Identity/cache failures do not affect this route. |
-| Codex subscription | Emulate the supported Codex v0.153.4 request shape, defaults and identity metadata. HTTP uses zstd level 3 upstream; WS application frames remain JSON. |
+## Security
 
-### Context and continuation
-
-HTTP stays HTTP, including SSE/JSON response adaptation. WebSocket stays WebSocket during full
-sending, optimization and recovery. Neither path falls back to the other transport.
-
-| Subscription request | Upstream behavior |
-|---|---|
-| Full HTTP, ordinary or Lite | Send the complete validated request over HTTP. |
-| HTTP with `previous_response_id` | Append all supplied input to that exact completed response's locally materialized context, then send full HTTP without the reference. Missing context fails before inference. |
-| Full WS, ordinary or Lite | Send full WS, or use an eligible completed socket baseline to send a suffix and `previous_response_id`. |
-| WS with `previous_response_id` | Continue through that live upstream socket when ownership, mappings and format permit. Complete local history is needed only when the selected transformation or replacement socket requires full sending. |
-
-A valid previous response means append semantics: even apparently repeated history remains in the
-input. Earlier-response forks use that response's context. Failed and incomplete responses never
-become completed context baselines. Output item events and final output are reconciled once, and
-response ownership/context is published before the corresponding public event.
-Some upstream completions contain an absent or empty `output` footer after sending completed
-items. Subscription JSON delivery reconstructs those items in output-index order; history and WS
-reuse retain the observed output. A populated final array is used once. SSE/WS clients consume
-the item events normally; the gateway does not add duplicate item events.
-
-Session lookup is scoped by distribution key and upstream account namespace:
-
-1. The original HTTP/WS handshake `session-id` header takes priority, followed by
-   `client_metadata.session_id`, then turn metadata `session_id`.
-2. Without an explicit session, a known `previous_response_id` restores its owning session.
-3. Full history can match completed-response prefixes within a known session or the same key's
-   anonymous-only pool. Explicitly identified sessions are excluded from that pool. Structured
-   content, explicit IDs and tool dependencies determine eligibility before the longest match;
-   recency does not resolve conflicting contexts.
-4. A WS connection binds its session on the first request. Later frames inherit it and reject
-   cross-session identities/references. Handshake turn/window fields apply to the first frame;
-   later frames provide current turn evidence. Reconnection performs session lookup again.
-
-`conversation_id`, cache keys, request IDs and thread/window identifiers do not locate a session.
-Existing mapped top-level `conversation` references remain a compatibility boundary, and cannot
-establish complete local history. This service does not provide `/v1/conversations` management.
-
-Turns and responses are separate: valid explicit turn identity is authoritative; otherwise known
-context and tool dependencies determine continuation. New user input after a quiescent completed
-context starts a turn. Tool follow-ups retain their turn. Equivalent anonymous contexts can share
-immutable content while retaining independent execution state. Each branch/turn and physical WS
-allows one inference at a time. Identity edits commit only after admission; cache identity facts
-publish after that commit.
-
-Original first-request headers retain their child-thread lineage and window number. Later WS
-frames inherit the bound branch and supply current window/turn metadata. Historical input keeps
-its original turn and causal parent within the current thread, its ancestors or an explicitly
-declared fork source. Unseen historical IDs reserve aliases until an actual request establishes
-ownership. Independent root forks retain their own session; fork provenance grants no response
-continuation authority.
-
-Explicit WS references validate the effective history's turn ownership with the same rules as full
-HTTP/WS input. Bounded identity facts survive bulk-history expiry for this check. A previous-only
-continuation restores its own thread's known fork provenance; a new branch supplies its own source
-relationship. Automatic WS optimization also requires the saved and current thread to match.
-
-The first upstream `x-codex-turn-state` from a handshake or `response.metadata` is retained within
-its turn. A new turn starts without the prior token. That token is distinct from the generated or
-mapped UUIDv7 turn ID. Optional v0.153.4 window, fork, trigger and history-ingest metadata is validated
-and forwarded without becoming session identity. Context-window UUIDs receive scoped aliases.
-
-A completed native WS startup prewarm can hand its first `response.metadata` routing token to
-the first business turn on that same socket and thread. Failed prewarms, other sockets/threads and
-later turns cannot inherit it. Bulk-history expiry preserves this live startup state.
-Hidden setup also attaches the learned token before encoding the first business frame. Work on
-another thread leaves the waiting owner's startup token available; failed setup and reconnection
-discard unaccepted setup state.
-
-Remote compaction V2 advances a window only after a matching completed response and exactly one
-valid encrypted compaction item received through `response.output_item.done`. A final output array
-alone cannot establish acceptance. Duplicate, missing or inconsistent compaction output cannot
-publish a usable context or WS baseline. Local Responses compaction retains the native assistant-summary
-completion rules.
-An absent or empty final footer is allowed after that single valid item-done proof; it does not
-relax the proof requirement.
-
-HTTP `traceparent` and `tracestate` are preserved across both credential routes. Native WS tracing
-remains in per-frame metadata. Nonreserved string entries in `x-codex-turn-metadata` survive body and
-HTTP compatibility-header projection under the existing request/assembly limits. Native app-server
-extras can exceed the separate config-file entry/key/value limits; canonical identity fields still
-receive their scoped projections, and body-only tool namespace metadata stays out of headers.
-
-Ordinary callers may omit workspace, agent and execution context. Core adds no discovered CWD,
-AGENTS, Skills, permission messages or tool definitions. Generated protocol metadata keeps the
-existing root-agent and turn-time defaults; missing `node_repl_auto_review_required` and
-`node_repl_disabled` follow the pinned model catalog (currently Astra requires auto review; all
-11 models default `node_repl_disabled` to false). Explicit valid caller values remain intact. These flags describe
-client policy; the gateway does not run a REPL or enable tools. Subscription still removes the
-established server-unsupported controls, including `max_output_tokens`, `temperature` and `top_p`.
-
-### Retention and limits
-
-Complete history, comparison snapshots and prefix-index membership expire after **3 hours of business
-inactivity**, checked at lookup and by a 30-second sweep. Active operations are protected. Expiry does
-not disconnect a live WS, rotate required aliases or clear its valid turn token. A full request can
-rebuild materialized history. Expired HTTP increments fail; valid live WS increments may continue
-through upstream history. A remote-only response stays unmaterialized locally until full history is
-actually supplied.
-
-| Resource | Default |
-|---|---:|
-| Accepted request and selected outgoing JSON/frame | 128 MiB |
-| Collected response / WS response frame | 128 MiB |
-| Retained output items per response | 8,192 |
-| Context, index, live metadata and assembly reservations per Core | 2 GiB |
-| Per distribution key | 1 GiB |
-| Per session | 256 MiB |
-| Completed response records per session | 8,192 |
-
-The cache budgets account for retained objects and assembly reservations; they are not a process-RSS
-limit. Protocol buffers have separate request/response bounds. A small WS delta is checked at its
-selected frame size, independently of the expanded history size. Essential capacity is reserved
-before inference. Completed body-retention overflow preserves otherwise valid delivery and marks
-its context unavailable; it never publishes truncated history as usable. Compaction whose replacement
-history depends on client retention choices, and interleaved injection, require a subsequent full
-request to establish reconstruction proof.
-
-[Shared limit defaults](src/protocol/v1/go/limits.json) and the `MINI_SUB2API_LIMITS` JSON environment
-variable apply across Go and Rust. Operators can override individual fields, for example:
-
-```bash
-export MINI_SUB2API_LIMITS='{"requestBytes":134217728,"outputBytes":134217728}'
-```
-
-Values must be positive integers, with `sessionBytes <= keyBytes <= globalBytes`. Unknown fields,
-invalid types and invalid hierarchies are rejected. Caller metadata cannot override these settings.
-Authentication/error-body limits remain separate. Each key may hold eight WS connections; existing
-first-frame, idle and write limits remain 30 seconds, 5 minutes and 120 seconds.
-
-Private identity files retain UUID assignments and reversible schema-owned ID mappings, with no
-request/response bodies or raw distribution keys. They remain schema v1, bounded to 512 MiB per
-account namespace, with inactive detail eligible for pruning after 30 days. Live/retained context
-mappings are protected independently of bulk history. Installation IDs use UUIDv4, session/thread/
-turn IDs use UUIDv7, and generated Lite prefix IDs use native UUIDv5 thread/payload derivation.
-
-### Delivery and recovery
-
-A missing required mapping or context fails as `state_unavailable` before inference. Full WS sending
-on a replacement connection requires complete local history. Automatic WS recovery permits at most one
-additional attempt only while public inference is proven unsent; the upstream rejection retry
-allowlist is empty. An attempted send, uncertain completion or any delivered current-response event
-prevents hidden replay. OAuth handshake/authentication refresh remains bounded to its existing single
-retry. A caller may submit a later full request after a surfaced failure.
-
-Failure metadata exposes `retryAdvice`, `phase` and `deliveryState`. HTTP failed/incomplete/error
-terminals remain valid Responses output and count as upstream errors. Subscription non-2xx bodies
-are bounded gateway errors; API-key bodies stay transparent. Provider response headers are reviewed:
-public request-ID headers use gateway aliases, while one bounded provider ID may be retained in local
-diagnostics. Sandbox names follow the gateway OS, preserving permission meaning and caller workspaces.
-
-See [the v1 protocol reference](src/protocol/v1/README.md) for transport and failure contracts.
-
-### Base and developer instructions
-
-Subscription emulation prefers a nonblank caller `instructions` string verbatim, including whitespace
-and literal template syntax. Missing, null, blank and non-string bases use the selected model default
-only when a base is required.
-
-| Caller shape | Placement |
-|---|---|
-| Ordinary Responses | Selected base stays in top-level `instructions`. |
-| Ordinary converted to Lite | `additional_tools`, one selected-base developer message, then original input. Remove top-level `instructions`. |
-| Already formed Lite | Preserve input instructions. An explicit valid top-level base is inserted after tools; otherwise add no fallback base. |
-| Valid Lite WS delta | Inherit validated caller format and existing setup. Changed setup requires a complete full send when it cannot be represented as the existing delta. |
-
-Developer messages retain content, duplicates and relative order. Subscription converts `system` to
-`developer` in place. Caller format, actual upstream format and setup provenance stay distinct, so
-ordinary-to-Lite conversion does not reclassify future ordinary input as native Lite.
-
-The [offline snapshots and generator](src/core/codex/prompts/codex-0.153.4/README.md) cover all eleven
-catalog models plus generic and experimental fallbacks. Native template variables are rendered;
-literal examples such as `{{connector_id}}` remain unchanged. Caller text is never rendered. Explicit
-supported `access_programs` selection and `sequential_cutoff` summary delivery are forwarded per
-response; the gateway does not synthesize account entitlements.
-
-Lite prefix IDs follow Codex v0.153.4: derive a UUIDv5 namespace from the thread ID and the OID
-namespace, then hash the serialized tools bytes (`at_`) or exact base text bytes (`msg_`). The gateway
-verifies native prefix provenance before regenerating IDs for its scoped upstream thread and final
-payload. Existing reversible aliases remain stable for live historical references. Arbitrary caller
-item IDs continue through the ordinary mapping path. Object serialization order matters to these IDs;
-re-encoding a captured tools object before replay can invalidate its original content-derived ID.
-
-Ordinary-to-Lite tool conversion combines loose functions/custom tools and every default `functions`
-namespace in encounter order, at the first groupable position. It preserves duplicate children and
-uses the last nonblank namespace description, matching the pinned native producer.
-
-## Administration
-
-Shutdown waits for the owned Core process to exit and for both WS pumps to finish, including
-terminal usage writes, before releasing the corresponding session and storage resources.
-
-```bash
-# Credentials
-build/bin/mini-sub2api --state-dir ./state credential list
-build/bin/mini-sub2api --state-dir ./state credential fingerprint cred_EXAMPLE
-build/bin/mini-sub2api --state-dir ./state credential disable cred_EXAMPLE
-build/bin/mini-sub2api --state-dir ./state credential enable cred_EXAMPLE
-build/bin/mini-sub2api --state-dir ./state credential revoke cred_EXAMPLE --yes
-build/bin/mini-sub2api --state-dir ./state credential remove cred_EXAMPLE --yes
-
-# Downstream keys
-build/bin/mini-sub2api --state-dir ./state key list
-build/bin/mini-sub2api --state-dir ./state key revoke key_EXAMPLE --yes
-
-# Usage
-build/bin/mini-sub2api --state-dir ./state \
-  usage history --key key_EXAMPLE --limit 100
-build/bin/mini-sub2api --state-dir ./state \
-  usage stats --key key_EXAMPLE --since 2026-08-01 --until 2026-08-31
-build/bin/mini-sub2api --state-dir ./state \
-  usage prune --before 2026-08-01 --yes
-```
-
-Changing fingerprint mode requires a disabled credential:
-
-```bash
-build/bin/mini-sub2api --state-dir ./state \
-  credential fingerprint cred_EXAMPLE --mode off
-```
-
-`revoke` revokes OAuth upstream before local deletion. `remove` deletes service-side material;
-forcing OAuth removal without upstream revocation requires `--force-service-only --yes`.
-
-## Deployment and security
-
-Plain HTTP may bind only to loopback. A non-loopback listener requires a certificate and private key:
-
-```bash
-build/bin/mini-sub2api --state-dir ./state serve \
-  --listen 192.0.2.20:8787 \
-  --tls-cert ./server.crt \
-  --tls-key ./server.key
-```
-
-A reverse proxy may terminate TLS when it forwards to a deployment-local loopback listener,
-preserves streaming, and supports WebSocket Upgrade without buffering.
-
-Operational boundaries:
-
-- Run one coordinator/core pair per state directory; the service is node-local and not active-active.
-- Stop the service before backing up or restoring the complete state directory.
-- Vault and identity files use private permissions but are not encrypted at rest.
-- Request/response bodies, content, tool arguments, workspaces, and credentials are not persisted in
-  identity state. Only bounded schema-recognized ID pairs are retained for reversible translation.
-- Local request history may retain one visible-ASCII provider request ID for seven days by default;
-  it is never exposed through the public Responses API.
-- Provider HTTP clients refuse redirects. Plain HTTP test overrides are accepted only for literal
-  loopback IPs.
-- Credential deletion remains available when request state is corrupt; the final owner removes the
-  shared state file. Remove/revoke rechecks disabled, key, and in-flight state under one mutation
-  fence before core material is irreversibly removed.
+Plain HTTP may bind only to loopback. Other listeners require native TLS; an optional reverse proxy
+must forward to deployment-local loopback and preserve streaming/WS upgrades. Run one service per
+state directory. Vault and identity files are private but **not encrypted at rest**. Downstream
+keys are hashed; request/response bodies are not persisted.
 
 ## Validation
 
 ```bash
-mise exec -- go test -count=1 ./src/coordinator/...
-bash scripts/test.sh
-bash scripts/build.sh
-```
-
-The direct Go integration suite builds the current debug core when no explicit test binary is set;
-it never silently skips cross-language coverage. `scripts/test.sh` disables Go test-result caching
-so Rust-only changes are exercised through the newly built Core, including race checks.
-
-To capture requests emitted by the real Codex client and compare them through the public gateway:
-
-```bash
-bash scripts/test-native-parity.sh
-```
-
-This optional suite requires `codex-cli 0.153.4` on PATH and the exact source commit
-`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a` at `.ref/sources/codex-v0.153.4`.
-`MINI_SUB2API_NATIVE_CODEX_BINARY` and `MINI_SUB2API_CODEX_SOURCE` override those locations.
-It rebuilds Core, uses isolated ephemeral native clients and synthetic credentials, and captures
-only loopback traffic in bounded memory. It never contacts a provider or installs a CA. Missing or
-wrong prerequisites fail explicitly. See the [capture method and capability matrix](src/coordinator/integration/NATIVE_PARITY.md)
-for observed parity, gateway policies and limits of the evidence.
-
-The scenario tests also exercise instruction precedence, Skills/AGENTS/environment changes,
-child-thread history, compaction windows, routing-token lifetimes and failure recovery. Native
-captures and ordinary-client replays have separate assertions. Tests marked `KNOWN` or `OBSERVATION`
-pin a measured baseline difference; their passing status does not certify full native conformance.
-The suite has a 15-minute aggregate deadline and keeps per-process and capture bounds independent.
-
-Actual OpenCode Responses captures use an optional, locally pinned **1.18.29** executable:
-
-```bash
+bash scripts/test.sh                         # Go/Rust, race, vet, Clippy, formatting
+bash scripts/test-native-parity.sh           # Pinned Codex 0.153.4; loopback captures
 mise exec -- python scripts/prepare-opencode-tests.py
-bash scripts/test-scaffold-parity.sh
+bash scripts/test-scaffold-parity.sh         # Pinned OpenCode 1.18.29; loopback captures
 ```
 
-Preparation downloads official binary/source artifacts into `build/third-party/opencode`, verifies
-npm integrity and the pinned source commit, and requires Python with `tarfile` data-filter support.
-It makes no global installation. The test itself is loopback-only, uses the actual `@ai-sdk/openai`
-Responses provider and an in-memory OpenCode database, and exercises text turns, real read-tool
-execution and permission-denial controls. `MINI_SUB2API_OPENCODE_BINARY` overrides the executable
-location; its exact version is still checked.
+The native suite requires the exact source reference described in the
+[capture method and coverage matrix](src/coordinator/integration/NATIVE_PARITY.md). Prerequisite
+mismatches fail explicitly. Default suites never call real providers. Separately authorized real
+Subscription tests use `bash scripts/test-live-parity.sh --allow-real-subscription`; they send bounded
+synthetic requests and require an existing login. Real API-key validation is not covered.
 
-A separate, explicitly authorized real Subscription check is available:
-
-```bash
-bash scripts/test-live-parity.sh --allow-real-subscription
-```
-
-This is outside every default/loopback suite. It requires the pinned clients and an existing
-ChatGPT login at `$HOME/.codex/auth.json` (or `MINI_SUB2API_LIVE_AUTH_FILE`), imports access credentials
-without a refresh token into temporary gateway state, and checks that the original login is
-unchanged. It sends bounded synthetic tasks to the fixed official Codex endpoint using `gpt-5.5`
-and `gpt-6-astra`; account availability and rate limits can affect results. It tests native Codex,
-bare JSON/SSE/WS callers and OpenCode HTTP, including tools, continuation and structured output.
-Native Astra needs its bundled code-mode host. API-key coverage remains local-only. Captures stay
-in memory; only structural verdicts are retained. Running this script requires authorization for
-real requests; ordinary development validation does not supply that authorization.
-
-The local, Git-ignored `USER_POLICIES.md` records explicit requirements, approved choices,
-delegated defaults and superseded decisions, including device convergence and the separate retention
-periods for full context, identity details and usage records.
+Source: `src/coordinator/` (public service/CLI/storage), `src/core/codex/` (adapter/vault),
+`src/protocol/v1/` (internal contract). Generated artifacts stay in `build/`. The local, Git-ignored
+`USER_POLICIES.md` contains the user's selected policies and sanitized capture examples.
 
 ## Disclaimer
 
 This project is for personal learning and research. It is not an official OpenAI product and is not
-intended for commercial or production use. Users are responsible for applicable laws and service
-terms.
+intended for commercial or production use. Users are responsible for applicable laws and service terms.

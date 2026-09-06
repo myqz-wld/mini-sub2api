@@ -38,6 +38,7 @@ type nativeCapture struct {
 	business           int
 	bytes              int
 	metadataOnlyFooter bool
+	codeModeLoop       bool
 }
 
 func newNativeCapture(t *testing.T) *nativeCapture {
@@ -146,7 +147,11 @@ func (c *nativeCapture) capture(r *http.Request, body, encoded []byte, connectio
 	if !prewarm {
 		c.business++
 		if c.business == 1 {
-			output = append(output, map[string]any{"type": "function_call", "id": "fc_native_probe", "call_id": "call_native_probe", "name": "native_probe", "arguments": "{}"})
+			if c.codeModeLoop {
+				output = append(output, map[string]any{"type": "custom_tool_call", "id": "ctc_native_exec", "call_id": "call_native_exec", "name": "exec", "input": "const result = await tools.native_probe({}); text(result);"})
+			} else {
+				output = append(output, map[string]any{"type": "function_call", "id": "fc_native_probe", "call_id": "call_native_probe", "name": "native_probe", "arguments": "{}"})
+			}
 		} else {
 			output = append(output, map[string]any{"type": "message", "id": fmt.Sprintf("msg_native_%d", c.business), "role": "assistant", "phase": "final_answer", "content": []any{map[string]any{"type": "output_text", "text": "synthetic answer"}}})
 		}

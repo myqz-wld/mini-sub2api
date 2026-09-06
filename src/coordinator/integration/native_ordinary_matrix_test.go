@@ -265,6 +265,7 @@ func TestNativeOrdinaryCallerMatrix(t *testing.T) {
 								}
 							}
 						}
+						saveFinalCapture(t, gateway.tap.packets(t), capture.snapshot())
 					})
 				}
 			}

@@ -56,6 +56,7 @@ func TestOpenCodeReadToolCapture(t *testing.T) {
 					t.Fatal("OpenCode did not execute the supplied read call")
 				}
 				if route == "direct" {
+					saveFinalCapture(t, capture.tap.packets(t), wires)
 					return
 				}
 				packets := gateway.tap.packets(t)
@@ -71,6 +72,7 @@ func TestOpenCodeReadToolCapture(t *testing.T) {
 						assertScaffoldMessageParity(t, packets[i], wire)
 					}
 				}
+				saveFinalCapture(t, packets, wires)
 			})
 		}
 	}

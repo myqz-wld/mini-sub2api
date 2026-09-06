@@ -56,6 +56,7 @@ func TestOpenCodeResponsesCapture(t *testing.T) {
 					}
 				}
 				if route == "direct" {
+					saveFinalCapture(t, capture.tap.packets(t), wires)
 					return
 				}
 				packets := gateway.tap.packets(t)
@@ -77,6 +78,7 @@ func TestOpenCodeResponsesCapture(t *testing.T) {
 						assertNativeLiteIDs(t, wire)
 					}
 				}
+				saveFinalCapture(t, packets, wires)
 			})
 		}
 	}

@@ -11,14 +11,15 @@ model catalog comes from a checkout at **3d2ee51ca2d5db578f328aa75e20aa22c0197c9
 gets isolated temporary user-home and config/auth directories, a controlled project, an ephemeral thread, synthetic
 OAuth tokens, loopback model/metadata endpoints, disabled unrelated services and a deny-only proxy.
 On macOS the created subprocess also receives a sandbox policy denying non-loopback outbound
-connections. A synthetic dynamic tool reply drives a real native tool loop without executing commands.
+connections. Synthetic dynamic-tool callbacks avoid arbitrary shell execution; the dedicated code-mode
+fixture executes only its synthetic JavaScript through the actual native host.
 
 A wrapped TCP listener captures HTTP/1 request bytes and WS upgrade/frame bytes before the test
 server decodes them. A separate parser validates client masking, fragmentation, control frames,
 extended lengths and permessage-deflate context takeover. Comparing its result with the server
 library detects capture/parser mistakes. Raw and decoded captures stay in bounded memory; each tap
 allows at most 64 connections with 64 MiB per connection, and each application capture allows at most
-128 requests and 64 MiB total encoded/decoded payload. No PCAP, request/response dump, native rollout,
+128 requests and 64 MiB total encoded/decoded payload. No PCAP, default request/response dump, native rollout,
 production auth/config change or host-process mutation is part of the workflow. Test failures report
 field names, counts or error codes, never payloads. Temporary synthetic auth is removed by test cleanup.
 
@@ -234,8 +235,11 @@ fixture corrections separately. This is consolidated affected-case validation, n
 the first combined run passed every cell.
 
 Actual native Astra uses its catalog's `code_mode_only` behavior and bundled host to invoke the
-dynamic tool. Turning that host off produced no declared tool in the original fixture. Bare API
-functions work without forcing callers to implement Codex code mode. OpenCode's prompt endpoint
+dynamic tool. Plan 17 corrected the original fixture diagnosis: even with the host disabled, native
+advertises exec/wait and describes the nested dynamic tool. The original prompt also prohibited
+other tools, including the needed exec wrapper. Host availability and model-visible tool planning
+are separate. Bare API functions worked in the bounded live checks; that does not prove equality
+with native's default code-mode execution protocol. OpenCode's prompt endpoint
 returns the last assistant message only; tool execution is verified on the captured continuation
 and its matching call/result, not assumed to be present in that last message's parts.
 
@@ -252,3 +256,58 @@ the ordinary live cells use available gpt-5.5 instead. API-key credentials were 
 that path has only local evidence. Live checks establish bounded operational outcomes for this
 account and these tasks. Local raw-wire/TLS comparisons do not prove provider-side fingerprint
 classification, retention, retry contracts, every model entitlement or behavior under rate limits.
+
+## Plan 17: final capture and memory checks
+
+Fresh loopback race validation passed **841/841** native/ordinary leaves and **14/14** OpenCode
+leaves, with no skips. A separate capture privacy test passed. Standard checks passed **333 Core +
+6 protocol** tests, Go race/vet, Clippy and formatting; all optional tags passed vet and the pinned
+11-model/default snapshot check passed. These counts overlap earlier matrices and must not be added
+to them as independent cases.
+
+| New dimension | Fresh cases | What is checked |
+|---|---:|---|
+| Astra tool exposure | 24 | Actual native × host on/off × direct-only on/off × HTTP/WS × direct/API-key/Subscription; inspect exec/wait, direct tool and nested description separately |
+| Actual code-mode loop | 6 | HTTP/WS × three routes; exec calls a synthetic nested tool, the real host returns custom_tool_call_output, then a new user turn; exactly three business requests |
+| Native environment/personality | 12 | gpt-5.5/Astra × HTTP/WS × none/friendly/pragmatic; initial AGENTS/CWD, changed directory, unchanged follow-up, coherent detected date/timezone/shell and emitted Lite IDs |
+| Ordinary environment text | 12 | Both models × JSON/SSE/WS × Etc/UTC/Asia/Shanghai text; preserve caller text without creating tools/workspaces |
+
+Native environment network blocks are conditional on configured managed network requirements.
+The first environment run incorrectly required one unconditionally and used a fixed responder-ID
+helper against another fixture. Its 16 failures are retained; source-backed corrected validation
+passed 24/24. No host timezone or native project configuration was changed. Ordinary timezone
+cases supply text; they do not claim that the native client detected both host timezones.
+
+The old general native responder scripts a direct dynamic function call even for models that
+normally hide that function behind exec. Those cases remain useful protocol/history stress tests,
+but are not evidence of realistic model tool selection. The new six-case host loop and actual live
+native tool cases cover the real nested execution path. Native direct-only namespaces are supported;
+even that setting retains exec/wait and does not make an ordinary direct-function request identical
+to the complete default native request. Core provides no code-mode execution bridge for ordinary
+clients. This is a measured boundary, not an additional user-selected policy.
+
+The final real Subscription run passed all **18** existing text/tool/schema cells in one run.
+A separate new **18/18** memory matrix passed five turns per cell: bare callers (both models ×
+JSON/SSE/WS × full/reference = 12), actual Codex (both × HTTP/WS = 4), and actual OpenCode HTTP (2).
+Each remembers a random synthetic label and count, updates the count twice, and answers two queries
+that omit the original facts. This establishes actual multi-turn retention/update for those cases,
+not merely successful independent requests. The initial five-turn preflight also passed separately.
+No real API-key credential was available; no real API-key request was made.
+
+The user explicitly authorized a private documentation export for this delivery. An opt-in
+`MINI_SUB2API_CAPTURE_EXCERPTS=1` writes bounded **decoded, sanitized** actual loopback requests
+under `.ref/plans/plan17/captures/`; default runs still persist no bodies. The final export has
+128 cases, including the 104-case transport/caller/tool matrix and 24 environment cases.
+Credentials, routing tokens, private paths, UUIDs and ciphertext are removed or labeled; long
+text is replaced by size/hash. Object key order is reserialized. These are readable excerpts,
+not raw PCAP, byte-equivalent replay files or real-upstream TLS interception. Independent in-memory
+byte and UUID checks run before successful export. The local ignored USER_POLICIES.md contains the
+request matrix and selected actual fields; the private final evidence archive preserves all excerpts.
+
+Pinned logic additionally checked: `core/src/client.rs:941` (UUIDv5 over exact thread/tools/base),
+`core/src/tools/mod.rs:68` and `tools/spec_plan.rs` (catalog-first tool mode/direct-only planning),
+`core/src/context/world_state/environment.rs` (full/delta context and optional network), and
+`core/src/session/turn_context.rs:631` (detected timezone/date). Gateway identity-pruning, context
+expiry, response publication and WS replay tests remain distinct from native producer observations.
+Successful real requests do not establish server fingerprint classification, all account
+entitlements, rate-limit behavior or unobserved upstream retention/retry contracts.

@@ -25,7 +25,14 @@ import (
 // This factory is deliberately separate from the loopback-only native gateway. Both a build tag
 // and explicit runtime opt-in are required. The destination cannot be supplied through the request.
 func newLiveSubscriptionGateway(t *testing.T) nativeGateway {
+	return newLiveSubscriptionGatewayBounded(t, 8)
+}
+
+func newLiveSubscriptionGatewayBounded(t *testing.T, maxHTTP int32) nativeGateway {
 	t.Helper()
+	if maxHTTP < 1 || maxHTTP > 64 {
+		t.Fatal("live fixture HTTP bound must be between 1 and 64")
+	}
 	if os.Getenv("MINI_SUB2API_LIVE_SUBSCRIPTION") != "1" {
 		t.Fatal("live Subscription requires explicit opt-in")
 	}
@@ -89,7 +96,7 @@ func newLiveSubscriptionGateway(t *testing.T) nativeGateway {
 	handler := httpapi.NewHandler(store, supervisor, nil)
 	var calls atomic.Int32
 	guard := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && calls.Add(1) > 8 {
+		if r.Method == http.MethodPost && calls.Add(1) > maxHTTP {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
 		}

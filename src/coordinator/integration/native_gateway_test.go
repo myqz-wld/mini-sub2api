@@ -123,6 +123,7 @@ func TestNativeCodexThroughGateway(t *testing.T) {
 						assertProfileStateFileCount(t, gateway.stateDir, 0)
 					}
 					t.Logf("native gateway captured %d requests; subscription=%t ws=%t model=%s", len(upstream), subscription, ws, model)
+					saveFinalCapture(t, downstream, upstream)
 				})
 			}
 		}

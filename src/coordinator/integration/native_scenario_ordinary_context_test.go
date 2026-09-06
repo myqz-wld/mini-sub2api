@@ -157,6 +157,11 @@ func assertOrdinaryResolvedContent(t *testing.T, expected map[string]any, wire n
 
 func ordinaryResolvedFirst(t *testing.T, wires []nativeWire) nativeWire {
 	t.Helper()
+	return ordinaryResolvedFirstReference(t, wires, "resp_native_1")
+}
+
+func ordinaryResolvedFirstReference(t *testing.T, wires []nativeWire, setupResponse string) nativeWire {
+	t.Helper()
 	for index, wire := range wires {
 		if wire.value["generate"] == false {
 			continue
@@ -164,7 +169,7 @@ func ordinaryResolvedFirst(t *testing.T, wires []nativeWire) nativeWire {
 		if wire.value["previous_response_id"] == nil {
 			return wire
 		}
-		if index != 1 || wires[0].value["generate"] != false || wire.connection != wires[0].connection || wire.value["previous_response_id"] != "resp_native_1" {
+		if index != 1 || wires[0].value["generate"] != false || wire.connection != wires[0].connection || wire.value["previous_response_id"] != setupResponse {
 			t.Fatal("ordinary first increment lacks a completed setup on the same socket")
 		}
 		// Prefix IDs were validated on raw transmitted setup bytes above. Reconstruct only
