@@ -112,8 +112,9 @@ impl RequestIdentityEvidence {
     }
 
     fn with_lineage(mut self) -> Self {
-        self.explicit_thread_lineage |=
-            self.parent_thread.is_some() || self.forked_from_thread.is_some();
+        // Fork provenance can point to an independent root in another conversation. It does
+        // not establish an owning parent or turn lineage for this thread.
+        self.explicit_thread_lineage |= self.parent_thread.is_some();
         self
     }
 

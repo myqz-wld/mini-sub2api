@@ -393,6 +393,7 @@ fn only_completed_public_operation_releases_its_compaction_token() {
         marker_key: "marker-test".to_string(),
         thread_id: "01900000-0000-7000-8000-000000000001".to_string(),
         target_window: 1,
+        requires_compaction_item: true,
     };
     let mut completed = state();
     completed.plan_public_create_with_state(&request, &[], Some(token.clone()));

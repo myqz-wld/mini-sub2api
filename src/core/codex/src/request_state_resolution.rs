@@ -18,6 +18,10 @@ mod items;
 use items::project_items;
 use items::turn_key_for_raw;
 
+#[path = "request_state_resolution_threads.rs"]
+mod threads;
+use threads::{resolve_conversation, resolve_thread};
+
 struct ResolvedTurn {
     turn_id: Option<String>,
     root_turn_id: Option<String>,
@@ -123,7 +127,19 @@ pub(crate) fn resolve_and_project(
         let anchor = turn_anchor(object, evidence);
         editor.derived_lookup("turn-fallback", &[thread_id.as_bytes(), anchor.as_slice()])
     };
-    let resolved_turn = resolve_turn(editor, evidence, &turn_key, &thread_id, &conversation.id)?;
+    let reserved_turn = current_turn_raw
+        .as_deref()
+        .map(|raw| editor.existing_wire_from_downstream(WireIdDomain::Turn, raw))
+        .transpose()?
+        .flatten();
+    let resolved_turn = resolve_turn(
+        editor,
+        evidence,
+        &turn_key,
+        &thread_id,
+        &conversation.id,
+        reserved_turn.as_deref(),
+    )?;
     let turn_id = resolved_turn.turn_id;
     let root_turn_id = resolved_turn.root_turn_id;
     let parent_turn_id = resolved_turn.parent_turn_id;
@@ -174,6 +190,7 @@ pub(crate) fn resolve_and_project(
             marker_key,
             thread_id: thread_id.clone(),
             target_window,
+            requires_compaction_item: crate::request_compaction::requires_compaction_item(object),
         };
         output_window = pending.committed_base();
         Some(pending)
@@ -225,148 +242,13 @@ pub(crate) fn resolve_and_project(
     })
 }
 
-fn resolve_conversation(
-    editor: &mut RequestStateEditor<'_>,
-    raw: &str,
-) -> Result<crate::request_state_editor::ConversationAssignment> {
-    if let Some((_, assignment)) = editor.conversation_by_id(raw) {
-        return Ok(assignment);
-    }
-    if let Some(projected) = editor.existing_wire_from_downstream(WireIdDomain::Session, raw)?
-        && let Some((_, assignment)) = editor.conversation_by_id(&projected)
-    {
-        return Ok(assignment);
-    }
-    let key = editor.lookup("conversation", raw);
-    editor.conversation(&key)
-}
-
-fn resolve_thread(
-    editor: &mut RequestStateEditor<'_>,
-    evidence: &RequestIdentityEvidence,
-    session_id: &str,
-    previous_owner: Option<&WireIdOwner>,
-) -> Result<(String, Option<String>, Option<String>, u64)> {
-    if !evidence.explicit_thread_lineage {
-        if let Some(owner) = previous_owner
-            && owner.thread_id != session_id
-        {
-            let (_, thread) = editor
-                .child_thread_by_id(&owner.thread_id)
-                .ok_or_else(|| anyhow::anyhow!("previous response thread is missing"))?;
-            anyhow::ensure!(
-                thread.session_id == session_id,
-                "previous response thread crosses sessions"
-            );
-            return Ok((
-                thread.id,
-                thread.parent_thread_id,
-                None,
-                thread.window_number,
-            ));
-        }
-        let window = editor
-            .window_number(session_id)
-            .ok_or_else(|| anyhow::anyhow!("root conversation window is missing"))?;
-        return Ok((session_id.to_string(), None, None, window));
-    }
-    let parent_raw = evidence
-        .parent_thread
-        .as_deref()
-        .or(evidence.forked_from_thread.as_deref());
-    let parent = match parent_raw {
-        Some(raw) if evidence.conversation.as_deref() == Some(raw) => session_id.to_string(),
-        Some(raw) => resolve_thread_reference(editor, raw, session_id)?,
-        None => session_id.to_string(),
-    };
-    let child = match evidence.thread.as_deref() {
-        Some(raw) => match resolve_existing_child(editor, raw)? {
-            Some(child) => {
-                anyhow::ensure!(
-                    child.session_id == session_id
-                        && child.parent_thread_id.as_deref() == Some(parent.as_str()),
-                    "child thread relationship changed"
-                );
-                child
-            }
-            None => {
-                let key = editor.lookup("thread", raw);
-                editor.child_thread(&key, session_id, Some(&parent))?
-            }
-        },
-        None => {
-            let key = editor.derived_lookup(
-                "thread-fallback",
-                &[
-                    session_id.as_bytes(),
-                    parent.as_bytes(),
-                    evidence.request_kind.as_bytes(),
-                ],
-            );
-            editor.child_thread(&key, session_id, Some(&parent))?
-        }
-    };
-    let forked = evidence
-        .forked_from_thread
-        .as_deref()
-        .map(|raw| resolve_thread_reference(editor, raw, session_id))
-        .transpose()?;
-    Ok((child.id, Some(parent), forked, child.window_number))
-}
-
-fn resolve_thread_reference(
-    editor: &mut RequestStateEditor<'_>,
-    raw: &str,
-    session_id: &str,
-) -> Result<String> {
-    if raw == session_id {
-        return Ok(session_id.to_string());
-    }
-    if let Some(existing) = resolve_existing_child(editor, raw)? {
-        anyhow::ensure!(
-            existing.session_id == session_id,
-            "thread reference crosses sessions"
-        );
-        return Ok(existing.id);
-    }
-    if let Some(root) = editor.existing_wire_from_downstream(WireIdDomain::Session, raw)? {
-        anyhow::ensure!(root == session_id, "thread reference crosses sessions");
-        return Ok(root);
-    }
-    let key = editor.lookup("thread", raw);
-    if let Some(existing) = editor.existing_child_thread(&key) {
-        anyhow::ensure!(
-            existing.session_id == session_id,
-            "thread reference crosses sessions"
-        );
-        return Ok(existing.id);
-    }
-    editor
-        .child_thread(&key, session_id, Some(session_id))
-        .map(|thread| thread.id)
-}
-
-fn resolve_existing_child(
-    editor: &mut RequestStateEditor<'_>,
-    raw: &str,
-) -> Result<Option<crate::request_state_editor::ThreadAssignment>> {
-    if let Some((_, assignment)) = editor.child_thread_by_id(raw) {
-        return Ok(Some(assignment));
-    }
-    if let Some(projected) = editor.existing_wire_from_downstream(WireIdDomain::Thread, raw)?
-        && let Some((_, assignment)) = editor.child_thread_by_id(&projected)
-    {
-        return Ok(Some(assignment));
-    }
-    Ok(None)
-}
-
 fn resolve_turn(
     editor: &mut RequestStateEditor<'_>,
     evidence: &RequestIdentityEvidence,
     turn_key: &str,
     thread_id: &str,
     root_thread_id: &str,
+    reserved_turn: Option<&str>,
 ) -> Result<ResolvedTurn> {
     if evidence.is_memory() {
         return Ok(ResolvedTurn {
@@ -387,7 +269,7 @@ fn resolve_turn(
     let child_lineage = evidence.parent_turn.is_some()
         || (evidence.explicit_thread_lineage && evidence.root_turn.is_some());
     if !child_lineage {
-        let turn = editor.turn(turn_key, thread_id, None, None)?;
+        let turn = editor.turn_with_id(turn_key, thread_id, None, None, reserved_turn)?;
         return Ok(ResolvedTurn {
             turn_id: Some(turn.id.clone()),
             root_turn_id: Some(turn.id),
@@ -402,7 +284,8 @@ fn resolve_turn(
         .or(evidence.parent_turn.as_deref())
         .unwrap_or(turn_key);
     let root_key = turn_key_for_raw(editor, root_raw)?;
-    let root = editor.turn(&root_key, root_thread_id, None, None)?;
+    let root_alias = editor.existing_wire_from_downstream(WireIdDomain::Turn, root_raw)?;
+    let root = editor.turn_with_id(&root_key, root_thread_id, None, None, root_alias.as_deref())?;
     let parent = evidence
         .parent_turn
         .as_deref()
@@ -413,8 +296,15 @@ fn resolve_turn(
             } else if let Some(existing) = editor.existing_turn(&key) {
                 Ok(existing.id)
             } else {
+                let alias = editor.existing_wire_from_downstream(WireIdDomain::Turn, raw)?;
                 editor
-                    .turn(&key, root_thread_id, Some(&root.id), Some(&root.id))
+                    .turn_with_id(
+                        &key,
+                        root_thread_id,
+                        Some(&root.id),
+                        Some(&root.id),
+                        alias.as_deref(),
+                    )
                     .map(|turn| turn.id)
             }
         })
@@ -427,7 +317,13 @@ fn resolve_turn(
             started_at_unix_ms: Some(root.started_at_unix_ms),
         });
     }
-    let turn = editor.turn(turn_key, thread_id, Some(&root.id), parent.as_deref())?;
+    let turn = editor.turn_with_id(
+        turn_key,
+        thread_id,
+        Some(&root.id),
+        parent.as_deref(),
+        reserved_turn,
+    )?;
     Ok(ResolvedTurn {
         turn_id: Some(turn.id),
         root_turn_id: Some(root.id),

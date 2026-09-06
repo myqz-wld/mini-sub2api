@@ -165,10 +165,31 @@ immutable content while retaining independent execution state. Each branch/turn 
 allows one inference at a time. Identity edits commit only after admission; cache identity facts
 publish after that commit.
 
+Original first-request headers retain their child-thread lineage and window number. Later WS
+frames inherit the bound branch and supply current window/turn metadata. Historical input keeps
+its original turn and causal parent within the current thread, its ancestors or an explicitly
+declared fork source. Unseen historical IDs reserve aliases until an actual request establishes
+ownership. Independent root forks retain their own session; fork provenance grants no response
+continuation authority.
+
 The first upstream `x-codex-turn-state` from a handshake or `response.metadata` is retained within
 its turn. A new turn starts without the prior token. That token is distinct from the generated or
 mapped UUIDv7 turn ID. Optional v0.153.4 window, fork, trigger and history-ingest metadata is validated
 and forwarded without becoming session identity. Context-window UUIDs receive scoped aliases.
+
+A completed native WS startup prewarm can hand its first `response.metadata` routing token to
+the first business turn on that same socket and thread. Failed prewarms, other sockets/threads and
+later turns cannot inherit it. Bulk-history expiry preserves this live startup state.
+
+Remote compaction V2 advances a window only after a matching completed response with exactly one
+valid encrypted compaction item. Duplicate, missing or inconsistent compaction output cannot publish
+a usable context. Local Responses compaction retains the native assistant-summary completion rules.
+
+HTTP `traceparent` and `tracestate` are preserved across both credential routes. Native WS tracing
+remains in per-frame metadata. Nonreserved string entries in `x-codex-turn-metadata` survive body and
+HTTP compatibility-header projection under the existing request/assembly limits. Native app-server
+extras can exceed the separate config-file entry/key/value limits; canonical identity fields still
+receive their scoped projections, and body-only tool namespace metadata stays out of headers.
 
 ### Retention and limits
 

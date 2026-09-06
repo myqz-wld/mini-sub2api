@@ -5,7 +5,48 @@ use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::time::Instant;
 
+fn accepted_compaction(
+    pending: &crate::request_compaction::PendingCompaction,
+    response: &Value,
+    active: &crate::subscription_context::Active,
+) -> bool {
+    if pending.requires_compaction_item && active.output_items_seen > 0 {
+        if active.compaction_items_seen != 1 {
+            return false;
+        }
+        if let Some(output) = response.get("output").and_then(Value::as_array) {
+            let payload = |item: &Value| item.get("encrypted_content").cloned();
+            let compacted =
+                |item: &&Value| item.get("type").and_then(Value::as_str) == Some("compaction");
+            if let Some(observed) = active.output.values().find(compacted)
+                && output.iter().find(compacted).and_then(payload) != payload(observed)
+            {
+                return false;
+            }
+        }
+    }
+    pending.accepts_response(response, Some(&active.output))
+}
+
 impl ContextStore {
+    pub(crate) fn accepts_compaction(
+        &self,
+        operation: Option<&Operation>,
+        pending: &crate::request_compaction::PendingCompaction,
+        event: &Value,
+    ) -> anyhow::Result<bool> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
+        let active = operation.and_then(|operation| inner.operations.get(&operation.0.id));
+        let response = event.get("response").unwrap_or(event);
+        Ok(active.map_or_else(
+            || pending.accepts_response(response, None),
+            |active| accepted_compaction(pending, response, active),
+        ))
+    }
+
     /// Called after alias publication and before any corresponding downstream bytes are yielded.
     pub(crate) fn observe(
         &self,
@@ -67,6 +108,10 @@ impl ContextStore {
         if kind == "response.output_item.done"
             && let Some(item) = event.get("item")
         {
+            active.output_items_seen = active.output_items_seen.saturating_add(1);
+            if item.get("type").and_then(Value::as_str) == Some("compaction") {
+                active.compaction_items_seen = active.compaction_items_seen.saturating_add(1);
+            }
             let index = event
                 .get("output_index")
                 .and_then(Value::as_u64)
@@ -105,11 +150,20 @@ impl ContextStore {
                 active.output_bytes += size;
             }
         }
-        let completed = terminal.or(match kind {
-            "response.completed" => Some(true),
-            "response.failed" | "response.incomplete" | "error" => Some(false),
-            _ => None,
-        });
+        let completed = terminal
+            .or(match kind {
+                "response.completed" => Some(true),
+                "response.failed" | "response.incomplete" | "error" => Some(false),
+                _ => None,
+            })
+            .map(|completed| {
+                completed
+                    && active
+                        .record
+                        .compaction
+                        .as_ref()
+                        .is_none_or(|pending| accepted_compaction(pending, response, active))
+            });
         if completed.is_none() {
             if kind == "response.created"
                 && let Some(id) = &active.response_id
@@ -181,9 +235,8 @@ impl ContextStore {
             .dependencies
             .append_output(&output)
             .map_err(|_| anyhow::anyhow!("invalid output dependencies"))?;
-        if active.record.identity.request_kind == "compaction" {
-            active.record.identity.window_number =
-                active.record.identity.window_number.saturating_add(1);
+        if let Some(compaction) = &active.record.compaction {
+            active.record.identity.window_number = compaction.target_window;
         }
         active.record.completed = true;
         active.record.last_used = Instant::now();

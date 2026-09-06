@@ -324,3 +324,6 @@ mod reference_tests;
 
 #[path = "request_normalizer_lite_identity_tests.rs"]
 mod lite_identity_tests;
+
+#[path = "request_normalizer_identity_repair_tests.rs"]
+mod identity_repair_tests;

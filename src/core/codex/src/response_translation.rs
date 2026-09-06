@@ -126,9 +126,20 @@ impl ResponseStateContext {
                 .find(|(name, _)| name.eq_ignore_ascii_case("x-codex-turn-state"))
                 .and_then(|(_, value)| value.as_str())
         {
-            self.store.contexts.learn_turn(operation, token)?;
+            self.store.contexts.learn_response_turn(operation, token)?;
         }
-        let pending_compaction = pending_compaction.cloned();
+        let pending_compaction = match pending_compaction {
+            Some(pending)
+                if self.store.contexts.accepts_compaction(
+                    operation.as_ref(),
+                    pending,
+                    &value,
+                )? =>
+            {
+                Some(pending.clone())
+            }
+            _ => None,
+        };
         let translated = self
             .store
             .edit(
@@ -210,6 +221,7 @@ mod tests {
                             marker_key,
                             thread_id: conversation.id.clone(),
                             target_window: target,
+                            requires_compaction_item: true,
                         },
                         conversation.id,
                     ))
@@ -236,7 +248,7 @@ mod tests {
         }
         assert_eq!(window(&store, &thread_id).await, 0);
         context
-            .translate_terminal_value(serde_json::json!({"id":"resp_completed","output":[]}), true)
+            .translate_terminal_value(serde_json::json!({"id":"resp_completed","output":[{"type":"compaction","encrypted_content":"synthetic"}]}), true)
             .await
             .expect("translate completed terminal");
         assert_eq!(window(&store, &thread_id).await, 1);

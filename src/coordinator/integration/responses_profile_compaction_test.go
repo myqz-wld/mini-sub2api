@@ -23,7 +23,7 @@ func TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal(t *testing.T) {
 				eventType = "response.completed"
 			}
 			_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(map[string]any{
-				"type": eventType, "response": map[string]any{"id": responseID},
+				"type": eventType, "response": map[string]any{"id": responseID, "output": []any{map[string]any{"type": "compaction", "encrypted_content": "synthetic"}}},
 			}))
 		},
 	)

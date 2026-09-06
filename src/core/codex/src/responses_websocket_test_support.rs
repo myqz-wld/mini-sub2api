@@ -66,7 +66,7 @@ pub(super) async fn compaction_upstream(
                 let completed = value["model"] == "complete-compaction";
                 let event = serde_json::json!({
                     "type": if completed { "response.completed" } else { "response.failed" },
-                    "response":{"id": if completed { "resp_completed" } else { "resp_failed" }}
+                    "response":{"id": if completed { "resp_completed" } else { "resp_failed" }, "output":[{"type":"compaction","encrypted_content":"synthetic"}]}
                 })
                 .to_string();
                 if socket

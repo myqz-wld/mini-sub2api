@@ -196,6 +196,9 @@ func TestWebSocketFailureCloseTracksDeliveryState(t *testing.T) {
 }
 
 func TestWebSocketRejectsInvalidIdleAndOversizedApplicationMessages(t *testing.T) {
+	// Exercise admission before forwarding without making rejection a 128 MiB throughput test.
+	const requestLimit = 4096
+	t.Setenv("MINI_SUB2API_LIMITS", `{"requestBytes":4096}`)
 	var coreMessages atomic.Int64
 	coreServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		connection, err := websocket.Accept(writer, request, nil)
@@ -251,7 +254,7 @@ func TestWebSocketRejectsInvalidIdleAndOversizedApplicationMessages(t *testing.T
 		t.Fatal(err)
 	}
 	payload := []byte(`{"type":"response.create","padding":"` +
-		strings.Repeat("a", maxRequestBytes) + `"}`)
+		strings.Repeat("a", requestLimit) + `"}`)
 	writeContext, cancelWrite := context.WithTimeout(context.Background(), 5*time.Second)
 	writeErr := oversized.Write(writeContext, websocket.MessageText, payload)
 	cancelWrite()

@@ -33,7 +33,7 @@ async fn remote_compaction_v2_uses_ordinary_responses_and_preserves_metadata() {
                         StatusCode::OK,
                         [(http::header::CONTENT_TYPE, "text/event-stream")],
                         "event: response.completed\n\
-                         data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compaction\",\"output\":[]}}\n\n",
+                         data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compaction\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":\"synthetic\"}]}}\n\n",
                     )
                 },
             ),

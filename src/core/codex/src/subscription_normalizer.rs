@@ -128,7 +128,8 @@ pub(crate) async fn prepare_stateful_codex_request(
         .as_ref()
         .map(|base| &base.identity)
         .or(context.binding)
-        && !identity_evidence.explicit_thread_lineage
+        && (!identity_evidence.explicit_thread_lineage
+            || (identity_evidence.parent_thread.is_none() && identity_evidence.thread.is_none()))
         && inherited.thread_id != inherited.session_id
     {
         metadata.insert(
@@ -163,7 +164,8 @@ pub(crate) async fn prepare_stateful_codex_request(
     metadata.remove("x-codex-turn-state");
     let mut clean_headers = headers.clone();
     clean_headers.remove("x-codex-turn-state");
-    // Original header evidence has already been resolved. Use the chosen identity consistently.
+    // Use the selected session, but retain the other original first-request carriers. Bound WS
+    // handshakes have already shed their stale turn/window/branch evidence above.
     clean_headers.remove("session-id");
     let assembly_limit = if transport == EmulationTransport::WebSocket {
         store.limits.session_bytes
@@ -183,7 +185,7 @@ pub(crate) async fn prepare_stateful_codex_request(
         Bytes::from(encoded),
         assembly_limit,
         context,
-        true,
+        false,
     )
     .await?;
     let operation = prepared.operation.as_ref().ok_or(Error::StateUnavailable)?;

@@ -70,6 +70,12 @@ pub(super) const RULES: &[CarrierRule] = &[
     ),
     projection(
         CarrierContainer::ClientMetadata,
+        "x-codex-parent-thread-id",
+        CarrierShape::Scalar,
+        Some(RelationshipCarrier::ParentThread),
+    ),
+    projection(
+        CarrierContainer::ClientMetadata,
         "parent_thread_id",
         CarrierShape::Scalar,
         Some(RelationshipCarrier::ParentThread),

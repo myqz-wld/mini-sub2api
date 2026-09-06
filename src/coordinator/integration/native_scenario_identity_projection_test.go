@@ -119,7 +119,7 @@ func identityCompareGateway(t *testing.T, before, after []nativeWire, subscripti
 	in, out := identityWireGroups(t, before), identityWireGroups(t, after)
 	var relations nativeMetadataRelations
 	differences := map[string]bool{}
-	parentMismatches := 0
+	parentFrames := 0
 	for _, branch := range []string{"root", "child"} {
 		if len(in[branch]) != len(out[branch]) {
 			t.Fatal("gateway added or dropped native branch frames")
@@ -140,17 +140,13 @@ func identityCompareGateway(t *testing.T, before, after []nativeWire, subscripti
 				right[key] = value
 			}
 			if branch == "child" && subscription {
-				// G-A is explicitly asserted as nonconformance, while every remaining
-				// parent placement must still follow the same scoped mapping.
-				if projected["x-codex-parent-thread-id"] != flat["x-codex-parent-thread-id"] || projected["x-codex-parent-thread-id"] == nested["parent_thread_id"] {
-					t.Fatal("G-A baseline changed; reassess native parent conformance")
+				if projected["x-codex-parent-thread-id"] == flat["x-codex-parent-thread-id"] || projected["x-codex-parent-thread-id"] != nested["parent_thread_id"] {
+					t.Fatal("native parent carrier did not use the scoped lineage alias")
 				}
 				if projected["parent_thread_id"] != nested["parent_thread_id"] {
 					t.Fatal("added parent alias conflicts with nested/header lineage")
 				}
-				delete(left, "x-codex-parent-thread-id")
-				delete(right, "x-codex-parent-thread-id")
-				parentMismatches++
+				parentFrames++
 			}
 			for _, difference := range relations.compare(t, "client_metadata", left, right) {
 				differences[difference] = true
@@ -191,8 +187,8 @@ func identityCompareGateway(t *testing.T, before, after []nativeWire, subscripti
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	if subscription && parentMismatches == 0 {
-		t.Fatal("native parent carrier discrepancy was not exercised")
+	if subscription && parentFrames == 0 {
+		t.Fatal("native parent carrier projection was not exercised")
 	}
-	t.Logf("typed_parent_mismatch_frames=%d metadata_relations=%d additional_metadata_differences=%s", parentMismatches, len(relations.forward), strings.Join(paths, ","))
+	t.Logf("typed_parent_projection_frames=%d metadata_relations=%d additional_metadata_differences=%s", parentFrames, len(relations.forward), strings.Join(paths, ","))
 }

@@ -132,7 +132,7 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
     completed
         .translate_value(serde_json::json!({
             "type":"response.completed",
-            "response":{"id":"resp_completed"}
+            "response":{"id":"resp_completed","output":[{"type":"compaction","encrypted_content":"synthetic"}]}
         }))
         .await
         .expect("commit completed terminal");
@@ -147,7 +147,7 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
     overlapping_completed
         .translate_value(serde_json::json!({
             "type":"response.completed",
-            "response":{"id":"resp_overlapping"}
+            "response":{"id":"resp_overlapping","output":[{"type":"compaction","encrypted_content":"synthetic"}]}
         }))
         .await
         .expect("converge overlapping completion");

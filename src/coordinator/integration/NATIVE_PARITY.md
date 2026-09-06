@@ -55,7 +55,7 @@ Native test names live in `native_*_test.go` and require `-tags=nativeparity`.
 | TLS | HTTP and WS ClientHello against native under both credentials, including signature/key-exchange capabilities and ALPN; malformed parser input | `TestNativeTLSClientHelloParity`, `TestNativeHelloParserRejectsMalformedInput` |
 | Scope and identity | Header priority/WS binding conflicts, response ownership after reconnect, key/account isolation, anonymous-only longest eligible prefixes, omitted IDs and independent execution ownership | `TestCodexProfilesRestoreWebSocketResponseOwnershipAfterReconnect`; `server_context_tests`, `subscription_state_tests`, `subscription_index_tests` |
 | History lifecycle | Exact referenced parent/branch/window, duplicate text appended with previous ID, completed-output publication once, 3-hour bulk-history expiry/full rebuild, remote-only live WS and turn-token retention | `server_context_tests`, `responses_websocket_context_tests`, `subscription_state_tests` |
-| Compaction/control | Commit compaction only on completed terminal; inject, control translation and profile filtering; opaque provider references preserved by typed rules | `TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal`, `TestCodexProfilesTranslateTypedWebSocketControlFrames`, `TestResponsesProfileWebSocketInjectUsesProfileFiltering` |
+| Compaction/control | Commit only on completed, accepted compaction output; distinguish V2 from local summaries; inject, control translation and profile filtering | `TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal`, `invalid_compaction_output_never_commits_identity_or_context_windows`, `TestCodexProfilesTranslateTypedWebSocketControlFrames` |
 | Delivery/failure | SSE/JSON, incomplete/failed terminals, response/item reconciliation, non-2xx privacy, mapping/state outage, downstream cancellation, bounded overlap/queues and no ambiguous replay | `responses_profile_http_identity_test.go`, `responses_profile_websocket_terminal_test.go`, `responses_profile_*state_outage_test.go`, `responses_profile_websocket_lifecycle_test.go`; Core transport/policy/delivery suites |
 | Limits/concurrency | Actual 17 MiB HTTP and WS frames under both credentials; operator admission cap; full-frame vs cached-context limits; exclusive active turn and pressure/eviction without partial history publication | `TestResponsesAcceptsActualFramesAboveFormer16MiBLimit`, `TestOperatorRequestLimitAppliesToHTTPAndWebSocketAdmission`; `subscription_state_tests`, `responses_websocket_size_tests` |
 | Credentials/security | Wrong auth, scoped disable/delete/revoke, import/refresh, interrupted cleanup, upstream secret isolation, TLS listener rules, device policy and transport isolation | `e2e_test.go`, `credential_*_test.go`, `responses_profile_credential_deletion_test.go`; coordinator storage/httpapi and Core OAuth/vault/transport suites |
@@ -80,7 +80,7 @@ remain in memory. A separate policy-provenance task reconciled earlier user deci
 | Identity | 104 | Actual fresh children/followup; source-backed header-only/root-fork/copied-history and two-Key controls; unavailable ephemeral fork attempts labeled |
 | Compaction | 68 | Actual V2/local/V1/token-budget paths, empty tools, acceptance versus completion, window/history changes; 8 ordinary reconstruction cases |
 | Failures/scheduling | 93 | 39 actual-native and 54 ordinary scenarios: failed/incomplete/disconnected responses, interruption, recovery, independent work and scope/admission conflicts |
-| Trace/extra metadata | 12 | Actual public JSON-RPC trace parent and turn metadata; active/disabled OTEL, HTTP headers versus WS frame fields, reset and reserved-key rules |
+| Trace/extra metadata | 12 | Actual public JSON-RPC trace parent and turn metadata; active/disabled OTEL, HTTP headers versus WS fields, reset/reserved keys; Unicode keys, more than 16 extras and values over 128 bytes |
 | Lead comparisons | 20 | 8 strict root metadata/lifetime cases and 12 ordinary replays of actual native-resolved rich context, including JSON/SSE/WS and HTTP reconstruction |
 
 Concurrent captures are matched using independent causal barriers and per-thread packet order.
@@ -90,18 +90,23 @@ bytes, and validates typed Subscription relationships.
 
 Tests with `KNOWN`, `OBSERVATION` or `conformance=false` record a baseline discrepancy or a deliberate
 scope/policy difference. A successful runner therefore does not mean every request matches native.
-At the tested runtime baseline `1d8ac55`, these reproduced gaps remain open:
+The following eight gaps found at runtime baseline `1d8ac55` have been repaired. Their former
+observation branches now require the corrected behavior, with API-key/direct-native controls:
 
-| Gap | Demonstrated effect |
+| Repaired gap | Required regression behavior |
 |---|---|
-| Native parent carrier | Flat x-codex-parent-thread-id stays raw while nested/header parent is aliased; actual child capture and two-Key controls reproduce it |
-| Header-only lineage | First HTTP/WS request loses requested child/window metadata when only original headers carry it |
-| Independent root fork | Source-backed new-root fork provenance is rejected; a persisted-native fork capture is not claimed |
-| Historical child turn | Actual Subscription HTTP followup rejects old child-turn history; equivalent native WS suffix continues successfully |
-| Prewarm routing state | Public native prewarm token is discarded instead of being adopted by the first turn |
-| Compaction acceptance | Completed V2 output without a valid compaction item can advance gateway state even though native rejects it |
-| W3C request headers | HTTP traceparent/tracestate are removed by both credential routes; WS per-frame trace fields survive |
-| Native custom metadata | Subscription strips supported nonreserved turn-metadata entries and their HTTP compatibility-header copies |
+| Native parent carrier | Native flat x-codex-parent-thread-id, nested parent and headers share one Key-scoped alias |
+| Header-only lineage | Original HTTP/WS headers retain child/window metadata; a later bound child frame can advance its own window |
+| Independent root fork | Source-backed root forks retain independent session ownership and consistent provenance, including a source appearing later |
+| Historical child turn | Actual HTTP followup and WS suffix both succeed; copied history keeps historical ownership/causality; unrelated owners remain rejected |
+| Prewarm routing state | Completed native startup metadata supplies the first turn's token once; failed prewarm, wrong socket/thread and subsequent turns stay isolated |
+| Compaction acceptance | V2 requires one encrypted compaction output; invalid, duplicated or contradictory output commits neither state layer nor a usable reference |
+| W3C request headers | HTTP traceparent/tracestate survive public coordinator, internal adapter and Core forwarding for both credentials; WS frame placement stays native |
+| Native custom metadata | Nonreserved native string extras survive body/header projection and reset with native turn input; canonical identity and header visibility rules remain enforced |
+
+Core regressions additionally cover unknown history without invented ownership, item-ID omission,
+durable alias reuse after reopen, failed-edit rollback, live prewarm state after history expiry,
+stream-only compaction completion and output-index limits. These changes preserve the user policies.
 
 Additional measured differences include Lite prefix attribution, HTTP body routing-token replay,
 local turn-start timestamps, token-budget text UUIDs versus scoped metadata UUIDs, and ordinary

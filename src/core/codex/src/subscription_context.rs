@@ -65,6 +65,10 @@ pub(crate) struct Record {
     pub(crate) dependencies: Dependencies,
     pub(crate) socket: Option<String>,
     pub(crate) completed: bool,
+    // Startup routing is published only with a completed prewarm and consumed by the first turn
+    // on that same socket/thread. It is live connection metadata, never persisted body history.
+    pub(crate) startup_token: Option<String>,
+    pub(crate) compaction: Option<crate::request_compaction::PendingCompaction>,
     pub(crate) last_used: Instant,
 }
 
@@ -88,6 +92,8 @@ pub(crate) struct Active {
     pub(crate) reserved: usize,
     pub(crate) output: BTreeMap<usize, Value>,
     pub(crate) observed_items: BTreeMap<usize, [u8; 32]>,
+    pub(crate) compaction_items_seen: usize,
+    pub(crate) output_items_seen: usize,
     pub(crate) dependencies_available: bool,
     pub(crate) output_bytes: usize,
     pub(crate) buffer_charge: usize,
@@ -203,6 +209,31 @@ impl ContextStore {
         Ok(())
     }
 
+    pub(crate) fn learn_response_turn(
+        &self,
+        operation: &Operation,
+        token: &str,
+    ) -> anyhow::Result<()> {
+        crate::request_state_types::validate_wire_id(token)?;
+        {
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
+            if let Some(active) = inner.operations.get_mut(&operation.0.id)
+                && active.record.identity.request_kind == "prewarm"
+                && active.record.socket.is_some()
+            {
+                active
+                    .record
+                    .startup_token
+                    .get_or_insert_with(|| token.to_string());
+                return Ok(());
+            }
+        }
+        self.learn_turn(operation, token)
+    }
+
     pub(crate) fn turn_token(&self, operation: &Operation) -> Option<String> {
         let inner = self.inner.lock().ok()?;
         let active = inner.operations.get(&operation.0.id)?;
@@ -264,6 +295,7 @@ impl ContextStore {
                 for record in scope.records.values_mut() {
                     if record.socket.as_deref() == Some(socket) {
                         record.socket = None;
+                        record.startup_token = None;
                     }
                 }
             }
@@ -280,7 +312,9 @@ mod retention;
 
 impl Record {
     pub(crate) fn descriptor_cost(&self) -> usize {
-        2048 + self.dependencies.cost() + self.socket.as_ref().map_or(0, String::len)
+        2048 + self.dependencies.cost()
+            + self.socket.as_ref().map_or(0, String::len)
+            + self.startup_token.as_ref().map_or(0, String::len)
     }
 }
 

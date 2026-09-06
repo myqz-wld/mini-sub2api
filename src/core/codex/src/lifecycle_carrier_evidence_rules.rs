@@ -196,10 +196,18 @@ pub(super) const RULES: &[CarrierRule] = &[
     ),
     evidence(
         CarrierContainer::ClientMetadata,
-        "parent_thread_id",
+        "x-codex-parent-thread-id",
         CarrierShape::Scalar,
         RelationshipCarrier::ParentThread,
         4,
+        0,
+    ),
+    evidence(
+        CarrierContainer::ClientMetadata,
+        "parent_thread_id",
+        CarrierShape::Scalar,
+        RelationshipCarrier::ParentThread,
+        5,
         0,
     ),
     evidence(

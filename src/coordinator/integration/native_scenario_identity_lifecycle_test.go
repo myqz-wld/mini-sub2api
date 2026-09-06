@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestNativeScenarioIdentityChildNextTurnObservedMismatch(t *testing.T) {
+func TestNativeScenarioIdentityChildNextTurn(t *testing.T) {
 	for _, route := range []string{"direct", "api_key", "subscription"} {
 		for _, ws := range []bool{false, true} {
 			for _, model := range []string{"gpt-5.4", "gpt-5.6-sol"} {
@@ -43,13 +43,9 @@ func TestNativeScenarioIdentityChildNextTurnObservedMismatch(t *testing.T) {
 					// app-server resume requires stored child graph metadata even when live.
 					status, _ = identityNativeTurn(client, root)
 					after := len(businessWires(capture.snapshot()))
-					expectedDelta := 4
-					mismatch := route == "subscription" && !ws
-					if mismatch {
-						expectedDelta = 3
-					}
-					if status != "completed" || after != before+expectedDelta {
-						t.Fatal("native child follow-up baseline/control changed")
+
+					if status != "completed" || after != before+4 {
+						t.Fatal("native child follow-up did not reach both branches")
 					}
 					native = capture.snapshot()
 					if route != "direct" {
@@ -80,10 +76,13 @@ func TestNativeScenarioIdentityChildNextTurnObservedMismatch(t *testing.T) {
 						t.Fatal("native child full versus incremental history contract differs")
 					}
 					emittedChildren := len(businessWires(identityWireGroups(t, capture.snapshot())["child"]))
-					if emittedChildren != 2 && !mismatch || emittedChildren != 1 && mismatch {
-						t.Fatal("child rejection was not isolated from its parent execution")
+					if emittedChildren != 2 {
+						t.Fatal("gateway dropped native child follow-up inference")
 					}
-					t.Logf("actual_native_child_next_turn parent_status=%s upstream_inference_delta=%d old_child_turn_items=%d conformance_mismatch=%t", status, after-before, oldItems, mismatch)
+					if route != "direct" {
+						identityCompareGateway(t, native, capture.snapshot(), route == "subscription")
+					}
+					t.Logf("actual_native_child_next_turn parent_status=%s upstream_inference_delta=%d old_child_turn_items=%d", status, after-before, oldItems)
 				})
 			}
 		}
@@ -126,7 +125,7 @@ func TestNativeScenarioIdentityEphemeralForkUnavailable(t *testing.T) {
 	}
 }
 
-func TestNativeScenarioIdentityCopiedHistoryObservedMismatch(t *testing.T) {
+func TestNativeScenarioIdentityCopiedHistory(t *testing.T) {
 	for _, subscription := range []bool{false, true} {
 		for _, ws := range []bool{false, true} {
 			for _, model := range []string{"gpt-5.4", "gpt-5.6-sol"} {
@@ -152,11 +151,10 @@ func TestNativeScenarioIdentityCopiedHistoryObservedMismatch(t *testing.T) {
 						before := len(businessWires(capture.snapshot()))
 						status, terminal := identitySend(t, gateway, ws, nil, identityRequest(model, identityRoot, identityChild, identityForkTurn, identityRoot, "", historical))
 						reached := len(businessWires(capture.snapshot())) > before
-						mismatch := subscription && historical != ""
-						if mismatch && (status != 400 || reached) || !mismatch && (status != 200 || !reached) {
-							t.Fatal("historical turn observation/control changed; reassess conformance")
+						if status != 200 || !reached {
+							t.Fatal("gateway rejected eligible historical turn attribution")
 						}
-						t.Logf("source-backed copied history: status=%d terminal=%s inference_reached=%t conformance_mismatch=%t", status, terminal, reached, mismatch)
+						t.Logf("source-backed copied history: status=%d terminal=%s inference_reached=%t", status, terminal, reached)
 					})
 				}
 			}

@@ -165,7 +165,14 @@ pub(crate) async fn prepare_identity_request(
                         "projected request is too large"
                     );
                     let operation = admission
-                        .map(|(plan, format)| cache.admit(plan, &projection.identity, format))
+                        .map(|(plan, format)| {
+                            cache.admit(
+                                plan,
+                                &projection.identity,
+                                format,
+                                projection.pending_compaction.clone(),
+                            )
+                        })
                         .transpose()?;
                     Ok(PreparedEmulatedRequest {
                         headers: prepared_headers,

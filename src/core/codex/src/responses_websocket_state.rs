@@ -413,6 +413,13 @@ impl ResponsesWebSocketState {
             }
         }
 
+        if active
+            .pending_compaction
+            .as_ref()
+            .is_some_and(|pending| !pending.accepts_items(&active.output))
+        {
+            active.reusable = false;
+        }
         self.baseline = match (active.reusable, active.request, response_id) {
             (true, Some(request), Some(response_id)) => Some(ReuseBaseline {
                 request,

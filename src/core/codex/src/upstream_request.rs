@@ -48,6 +48,8 @@ const COMMON_ALLOWED: &[&str] = &[
     "x-responsesapi-include-timing-metrics",
     "session_id",
     "conversation_id",
+    "traceparent",
+    "tracestate",
 ];
 
 const OPENAI_API_KEY_ALLOWED: &[&str] = &[
@@ -102,6 +104,8 @@ const HTTP_HEADER_ORDER: &[&str] = &[
     "x-stainless-runtime",
     "x-stainless-runtime-version",
     "x-stainless-timeout",
+    "traceparent",
+    "tracestate",
 ];
 
 const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
@@ -140,6 +144,8 @@ const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
     "x-stainless-runtime",
     "x-stainless-runtime-version",
     "x-stainless-timeout",
+    "traceparent",
+    "tracestate",
 ];
 
 const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
@@ -178,6 +184,8 @@ const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
     "x-stainless-runtime",
     "x-stainless-runtime-version",
     "x-stainless-timeout",
+    "traceparent",
+    "tracestate",
 ];
 
 #[derive(Clone)]
@@ -317,6 +325,8 @@ fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMa
     let mut extra_headers = HeaderMap::new();
     copy_header(&mut extra_headers, source, "x-codex-beta-features");
     copy_header(&mut extra_headers, source, "x-client-request-id");
+    copy_header(&mut extra_headers, source, "traceparent");
+    copy_header(&mut extra_headers, source, "tracestate");
 
     let mut session_headers = HeaderMap::new();
     copy_header(&mut session_headers, source, "session-id");

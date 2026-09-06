@@ -56,6 +56,7 @@ pub(crate) struct ThreadAssignment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TurnAssignment {
     pub(crate) id: String,
+    pub(crate) thread_id: String,
     pub(crate) root_turn_id: String,
     pub(crate) parent_turn_id: Option<String>,
     pub(crate) started_at_unix_ms: i64,
@@ -152,6 +153,14 @@ impl<'a> RequestStateEditor<'a> {
     }
 
     pub(crate) fn conversation(&mut self, key: &str) -> Result<ConversationAssignment> {
+        self.conversation_with_id(key, None)
+    }
+
+    pub(crate) fn conversation_with_id(
+        &mut self,
+        key: &str,
+        reserved_id: Option<&str>,
+    ) -> Result<ConversationAssignment> {
         validate_lookup_key(key)?;
         let day = self.day;
         let scope_key = self.scope_key.clone();
@@ -162,11 +171,15 @@ impl<'a> RequestStateEditor<'a> {
                 .conversations
                 .entry(key.to_string())
                 .or_insert_with(|| ConversationEntry {
-                    id: Uuid::now_v7().to_string(),
+                    id: reserved_id.map_or_else(|| Uuid::now_v7().to_string(), str::to_string),
                     window_number: 0,
                     current_turn_id: None,
                     last_seen_day: day,
                 });
+            anyhow::ensure!(
+                reserved_id.is_none_or(|id| entry.id == id),
+                "root thread alias changed"
+            );
             let touched = touch_day(&mut entry.last_seen_day, day);
             (
                 ConversationAssignment {
@@ -189,6 +202,16 @@ impl<'a> RequestStateEditor<'a> {
         session_id: &str,
         parent_thread_id: Option<&str>,
     ) -> Result<ThreadAssignment> {
+        self.child_thread_with_id(key, session_id, parent_thread_id, None)
+    }
+
+    pub(crate) fn child_thread_with_id(
+        &mut self,
+        key: &str,
+        session_id: &str,
+        parent_thread_id: Option<&str>,
+        reserved_id: Option<&str>,
+    ) -> Result<ThreadAssignment> {
         validate_lookup_key(key)?;
         let day = self.day;
         let scope_key = self.scope_key.clone();
@@ -199,7 +222,7 @@ impl<'a> RequestStateEditor<'a> {
                 .child_threads
                 .entry(key.to_string())
                 .or_insert_with(|| ChildThreadEntry {
-                    id: Uuid::now_v7().to_string(),
+                    id: reserved_id.map_or_else(|| Uuid::now_v7().to_string(), str::to_string),
                     session_id: session_id.to_string(),
                     parent_thread_id: parent_thread_id.map(str::to_string),
                     window_number: 0,
@@ -208,7 +231,8 @@ impl<'a> RequestStateEditor<'a> {
                 });
             anyhow::ensure!(
                 entry.session_id == session_id
-                    && entry.parent_thread_id.as_deref() == parent_thread_id,
+                    && entry.parent_thread_id.as_deref() == parent_thread_id
+                    && reserved_id.is_none_or(|id| entry.id == id),
                 "child thread relationship changed"
             );
             let touched = touch_day(&mut entry.last_seen_day, day);
@@ -252,12 +276,24 @@ impl<'a> RequestStateEditor<'a> {
         Some(assignment)
     }
 
+    #[cfg(test)]
     pub(crate) fn turn(
         &mut self,
         key: &str,
         thread_id: &str,
         root_turn_id: Option<&str>,
         parent_turn_id: Option<&str>,
+    ) -> Result<TurnAssignment> {
+        self.turn_with_id(key, thread_id, root_turn_id, parent_turn_id, None)
+    }
+
+    pub(crate) fn turn_with_id(
+        &mut self,
+        key: &str,
+        thread_id: &str,
+        root_turn_id: Option<&str>,
+        parent_turn_id: Option<&str>,
+        reserved_id: Option<&str>,
     ) -> Result<TurnAssignment> {
         validate_lookup_key(key)?;
         let day = self.day;
@@ -267,7 +303,7 @@ impl<'a> RequestStateEditor<'a> {
         let (assignment, touched) = {
             let scope = self.scope_mut();
             let entry = scope.turns.entry(key.to_string()).or_insert_with(|| {
-                let id = Uuid::now_v7().to_string();
+                let id = reserved_id.map_or_else(|| Uuid::now_v7().to_string(), str::to_string);
                 TurnEntry {
                     root_turn_id: root_turn_id.unwrap_or(&id).to_string(),
                     id,
@@ -280,13 +316,15 @@ impl<'a> RequestStateEditor<'a> {
             anyhow::ensure!(
                 entry.thread_id == thread_id
                     && root_turn_id.is_none_or(|root| entry.root_turn_id == root)
-                    && entry.parent_turn_id.as_deref() == parent_turn_id,
+                    && entry.parent_turn_id.as_deref() == parent_turn_id
+                    && reserved_id.is_none_or(|id| entry.id == id),
                 "turn relationship changed"
             );
             let touched = touch_day(&mut entry.last_seen_day, day);
             (
                 TurnAssignment {
                     id: entry.id.clone(),
+                    thread_id: entry.thread_id.clone(),
                     root_turn_id: entry.root_turn_id.clone(),
                     parent_turn_id: entry.parent_turn_id.clone(),
                     started_at_unix_ms: entry.started_at_unix_ms,
@@ -308,6 +346,7 @@ impl<'a> RequestStateEditor<'a> {
             (
                 TurnAssignment {
                     id: entry.id.clone(),
+                    thread_id: entry.thread_id.clone(),
                     root_turn_id: entry.root_turn_id.clone(),
                     parent_turn_id: entry.parent_turn_id.clone(),
                     started_at_unix_ms: entry.started_at_unix_ms,
@@ -344,11 +383,18 @@ impl<'a> RequestStateEditor<'a> {
                     create_time_micros: add_create_time.then_some(now_micros),
                     last_seen_day: day,
                 });
+            // A history-only alias has no owning turn yet. Its content/turn-derived key stays
+            // stable when a subsequent real request supplies the missing ownership assignment.
+            let previous_turn = entry.turn_id.clone();
+            if entry.turn_id.is_none() {
+                entry.turn_id = turn_id.map(str::to_string);
+            }
             anyhow::ensure!(
                 entry.id.starts_with(&format!("{prefix}_")) && entry.turn_id.as_deref() == turn_id,
                 "generated item relationship changed"
             );
-            let touched = touch_day(&mut entry.last_seen_day, day);
+            let touched =
+                touch_day(&mut entry.last_seen_day, day) || previous_turn != entry.turn_id;
             (
                 ItemAssignment {
                     id: entry.id.clone(),

@@ -55,3 +55,24 @@ func TestProviderRequestIDValidationMatchesThePrivateProtocolBound(t *testing.T)
 		t.Fatalf("provider request ID = %#v", got)
 	}
 }
+
+func TestRequestTraceContextPreservesValuesWithoutOpeningPrivateHeaderBoundary(t *testing.T) {
+	source := http.Header{"traceparent": {"00-00000000000000000000000000000001-0000000000000001-01"}, "tracestate": {"fixture=one", "second=two"}, "Authorization": {"synthetic-private"}, "Cookie": {"synthetic-private"}, "X-Forwarded-For": {"synthetic-private"}}
+	projected := allowedRequestHeaders(source)
+	if projected.Get("Traceparent") != source["traceparent"][0] || len(projected.Values("Tracestate")) != 2 {
+		t.Fatal("caller trace context was changed")
+	}
+	for _, name := range []string{"Authorization", "Cookie", "X-Forwarded-For"} {
+		if projected.Get(name) != "" {
+			t.Fatalf("private request header escaped: %s", name)
+		}
+	}
+	if len(allowedRequestHeaders(nil)) != 0 {
+		t.Fatal("trace context was synthesized")
+	}
+	public := make(http.Header)
+	copyResponseHeaders(public, projected, "gateway-request")
+	if public.Get("Traceparent") != "" || public.Get("Tracestate") != "" {
+		t.Fatal("request trace policy opened the response boundary")
+	}
+}

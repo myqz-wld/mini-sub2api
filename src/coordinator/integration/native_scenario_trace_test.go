@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -134,23 +133,37 @@ func nativeScenarioTraceExtra(turn int) map[string]string {
 	if turn == 2 {
 		return nil
 	}
-	return map[string]string{
+	metadata := map[string]string{
 		"scenario_trace_label":   fmt.Sprintf("turn%d", turn+1),
 		"scenario_trace_unicode": "synthetic \u00e9 \U0001f680",
-		"session_id":             "reserved-native-sentinel",
-		"thread_id":              "reserved-native-sentinel",
-		"turn_id":                "reserved-native-sentinel",
-		"window_number":          "reserved-native-sentinel",
-		"workspaces":             "reserved-native-sentinel",
+		"scenario_trace_long":    strings.Repeat("x", 256),
+		"任意 key":                 "native public turn metadata",
+		"session_id":             "reserved-native-sentinel", "thread_id": "reserved-native-sentinel",
+		"turn_id": "reserved-native-sentinel", "window_number": "reserved-native-sentinel", "workspaces": "reserved-native-sentinel",
 	}
+	// Public app-server metadata is not subject to the stricter config.toml entry/key/value limits.
+	for index := 0; index < 17; index++ {
+		metadata[fmt.Sprintf("scenario_extra_%d", index)] = fmt.Sprintf("turn%d", turn+1)
+	}
+	return metadata
 }
 
-func assertNativeScenarioTraceExtra(t *testing.T, value map[string]any, turn int, allowRemoval bool) []string {
+func nativeScenarioTraceExtraFields() []string {
+	var fields []string
+	for field := range nativeScenarioTraceExtra(0) {
+		if strings.HasPrefix(field, "scenario_") || field == "任意 key" {
+			fields = append(fields, field)
+		}
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+func assertNativeScenarioTraceExtra(t *testing.T, value map[string]any, turn int) {
 	t.Helper()
 	flat, nested := nativeScenarioTraceMetadata(t, value)
 	expected := nativeScenarioTraceExtra(turn)
-	var differences []string
-	for _, field := range []string{"scenario_trace_label", "scenario_trace_unicode"} {
+	for _, field := range nativeScenarioTraceExtraFields() {
 		if _, present := flat[field]; present {
 			t.Fatal("native extra metadata leaked into flat client metadata")
 		}
@@ -158,8 +171,7 @@ func assertNativeScenarioTraceExtra(t *testing.T, value map[string]any, turn int
 			if _, present := nested[field]; present {
 				t.Fatal("native extra metadata persisted into a new turn without metadata")
 			}
-		} else if nested[field] == nil && allowRemoval {
-			differences = append(differences, "removed:client_metadata.x-codex-turn-metadata."+field)
+
 		} else if nested[field] != expected[field] {
 			t.Fatalf("native custom metadata changed: %s", field)
 		}
@@ -172,29 +184,25 @@ func assertNativeScenarioTraceExtra(t *testing.T, value map[string]any, turn int
 	if nested["window_number"] == "reserved-native-sentinel" || nested["workspaces"] == "reserved-native-sentinel" {
 		t.Fatal("native reserved metadata override affected context state")
 	}
-	return differences
 }
 
-func assertNativeScenarioTraceHeaderExtra(t *testing.T, headers http.Header, turn int, allowRemoval bool) []string {
+func assertNativeScenarioTraceHeaderExtra(t *testing.T, headers http.Header, turn int) {
 	t.Helper()
 	var nested map[string]any
 	if json.Unmarshal([]byte(headers.Get("X-Codex-Turn-Metadata")), &nested) != nil {
 		t.Fatal("native trace scenario header metadata missing")
 	}
 	expected := nativeScenarioTraceExtra(turn)
-	var differences []string
-	for _, field := range []string{"scenario_trace_label", "scenario_trace_unicode"} {
+	for _, field := range nativeScenarioTraceExtraFields() {
 		if turn == 2 {
 			if _, present := nested[field]; present {
 				t.Fatal("native metadata header inherited prior turn custom fields")
 			}
-		} else if nested[field] == nil && allowRemoval {
-			differences = append(differences, "removed:http.headers.x-codex-turn-metadata."+field)
+
 		} else if nested[field] != expected[field] {
 			t.Fatalf("native custom header metadata changed: %s", field)
 		}
 	}
-	return differences
 }
 
 func TestNativeScenarioTraceMetadata(t *testing.T) {
@@ -230,7 +238,6 @@ func TestNativeScenarioTraceMetadata(t *testing.T) {
 						t.Fatal("native trace metadata sampling sequence changed")
 					}
 					business := 0
-					differences := map[string]bool{}
 					for index, wire := range wires {
 						before := nativeScenarioPacketValue(t, packets[index])
 						if route == "api-key" && !bytes.Equal(packets[index].payload, wire.encodedBody) {
@@ -249,36 +256,26 @@ func TestNativeScenarioTraceMetadata(t *testing.T) {
 							turn = business - 1
 						}
 						business++
-						assertNativeScenarioTraceExtra(t, before, turn, false)
-						for _, difference := range assertNativeScenarioTraceExtra(t, wire.value, turn, route == "subscription") {
-							differences[difference] = true
-						}
+						assertNativeScenarioTraceExtra(t, before, turn)
+						assertNativeScenarioTraceExtra(t, wire.value, turn)
 						headerTurn := turn
 						if ws {
 							// The handshake is the prewarm snapshot; later per-turn
 							// extras must stay in the frame rather than mutate it.
 							headerTurn = 2
 						}
-						assertNativeScenarioTraceHeaderExtra(t, packets[index].headers, headerTurn, false)
-						for _, difference := range assertNativeScenarioTraceHeaderExtra(t, wire.headers, headerTurn, route == "subscription") {
-							differences[difference] = true
-						}
+						assertNativeScenarioTraceHeaderExtra(t, packets[index].headers, headerTurn)
+						assertNativeScenarioTraceHeaderExtra(t, wire.headers, headerTurn)
 						if ws && (before["previous_response_id"] == nil || wire.value["previous_response_id"] == nil) {
 							t.Fatal("metadata-only changes unexpectedly invalidated native WS baseline")
 						}
 						if !ws && (before["previous_response_id"] != nil || wire.value["previous_response_id"] != nil) {
 							t.Fatal("native HTTP metadata scenario was not full context")
 						}
-						for _, difference := range assertNativeScenarioTraceCarrier(t, tracing, ws, route, turn, packets[index], before, wire) {
-							differences[difference] = true
-						}
+						assertNativeScenarioTraceCarrier(t, tracing, ws, turn, packets[index], before, wire)
 					}
-					var fields []string
-					for field := range differences {
-						fields = append(fields, field)
-					}
-					sort.Strings(fields)
-					t.Logf("trace conformance=%t; differing fields=%v; business requests=%d", len(fields) == 0, fields, business)
+
+					t.Logf("trace conformance=true; business requests=%d", business)
 				})
 			}
 		}
@@ -300,11 +297,10 @@ func assertNativeScenarioInferenceTraceAbsent(t *testing.T, headers http.Header,
 	}
 }
 
-func assertNativeScenarioTraceCarrier(t *testing.T, tracing, ws bool, route string, turn int, packet nativePacket, before map[string]any, wire nativeWire) []string {
+func assertNativeScenarioTraceCarrier(t *testing.T, tracing, ws bool, turn int, packet nativePacket, before map[string]any, wire nativeWire) {
 	t.Helper()
 	b, _ := nativeScenarioTraceMetadata(t, before)
 	a, _ := nativeScenarioTraceMetadata(t, wire.value)
-	var differences []string
 	for _, field := range []string{"traceparent", "tracestate"} {
 		frameKey := "ws_request_header_" + field
 		for _, flat := range []map[string]any{b, a} {
@@ -345,16 +341,10 @@ func assertNativeScenarioTraceCarrier(t *testing.T, tracing, ws bool, route stri
 		} else if turn == 2 && original != "" {
 			t.Fatal("native new turn inherited prior request tracestate")
 		}
-		if reflect.DeepEqual(original, projected) {
+		if original == projected {
 			continue
 		}
-		// Existing coordinator allowlist omits both W3C HTTP headers. Record
-		// this exact observed conformance gap, including the API-key control.
-		if !ws && route != "direct" && original != "" && projected == "" {
-			differences = append(differences, "removed:http.headers."+field)
-			continue
-		}
+
 		t.Fatalf("unclassified native trace projection difference: %s", field)
 	}
-	return differences
 }

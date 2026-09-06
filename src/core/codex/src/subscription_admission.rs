@@ -6,6 +6,7 @@ impl ContextStore {
         plan: ContextPlan,
         identity: &ResolvedRequestIdentity,
         upstream_format: Format,
+        compaction: Option<crate::request_compaction::PendingCompaction>,
     ) -> Result<Operation, Error> {
         let mut inner = self.inner.lock().map_err(|_| Error::StateUnavailable)?;
         let now = Instant::now();
@@ -116,6 +117,8 @@ impl ContextStore {
             dependencies: plan.dependencies,
             socket: plan.socket,
             completed: false,
+            startup_token: None,
+            compaction,
             last_used: now,
         };
         let id = plan.admission.0.id.clone();
@@ -129,6 +132,8 @@ impl ContextStore {
                 reserved,
                 output: BTreeMap::new(),
                 observed_items: BTreeMap::new(),
+                compaction_items_seen: 0,
+                output_items_seen: 0,
                 dependencies_available: true,
                 output_bytes: 0,
                 buffer_charge: 0,
@@ -150,10 +155,11 @@ impl ContextStore {
         let Some(publication) = active.publication.take() else {
             return Ok(());
         };
-        let (key, identity, socket) = (
+        let (key, identity, socket, branch) = (
             active.scope.clone(),
             active.record.identity.clone(),
             active.record.socket.clone(),
+            active.record.branch.clone(),
         );
         let session = &identity.session_id;
         let now = Instant::now();
@@ -170,6 +176,27 @@ impl ContextStore {
             scope.aliases.insert(raw, session.clone());
         }
         if let Some(socket) = socket {
+            if let Some(turn) = identity.turn_id.as_deref().filter(|turn| !turn.is_empty()) {
+                let mut startup = None;
+                for record in scope.records.values_mut().filter(|record| {
+                    record.socket.as_deref() == Some(socket.as_str()) && record.completed
+                }) {
+                    if let Some(token) = record.startup_token.take()
+                        && record.identity.thread_id == identity.thread_id
+                        && startup
+                            .as_ref()
+                            .is_none_or(|(seen, _)| record.last_used < *seen)
+                    {
+                        startup = Some((record.last_used, token));
+                    }
+                }
+                if let Some((_, token)) = startup {
+                    scope
+                        .routing
+                        .entry(format!("{branch}:{turn}"))
+                        .or_insert(token);
+                }
+            }
             scope.bindings.insert(socket, session.clone());
         }
         for turn in [publication.raw_turn, identity.turn_id]

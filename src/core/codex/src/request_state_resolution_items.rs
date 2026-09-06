@@ -24,6 +24,11 @@ pub(super) fn project_items(
         .cloned()
         .collect::<BTreeSet<_>>();
     let generated_upstream = BTreeSet::new();
+    let supplied_turns: BTreeSet<_> = evidence
+        .items
+        .iter()
+        .filter_map(|item| item.turn_id.as_deref())
+        .collect();
     let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(generated_upstream);
     };
@@ -40,7 +45,12 @@ pub(super) fn project_items(
         });
         let projected_turn = project_item_turn(
             editor,
-            raw.and_then(|item| item.turn_id.as_deref()),
+            raw.and_then(|item| item.turn_id.as_deref()).or_else(|| {
+                item.get("internal_chat_message_metadata_passthrough")
+                    .and_then(|metadata| metadata.get("turn_id"))
+                    .and_then(Value::as_str)
+                    .filter(|turn| supplied_turns.contains(turn))
+            }),
             current_turn_raw,
             identity,
         )?;
@@ -73,12 +83,10 @@ pub(super) fn project_items(
                 .and_then(Value::as_str)
                 .and_then(crate::responses_lite::item_id_prefix)
                 .unwrap_or("item");
-            let assignment = editor.generated_item(
-                &key,
-                prefix,
-                projected_turn.as_deref().filter(|turn| !turn.is_empty()),
-                add_create_time,
-            )?;
+            let owned_turn = projected_turn
+                .as_deref()
+                .filter(|turn| !turn.is_empty() && editor.turn_by_id(turn).is_some());
+            let assignment = editor.generated_item(&key, prefix, owned_turn, add_create_time)?;
             if is_synthesized {
                 // Ordinary Responses input may omit IDs. Preserve that omission instead of
                 // changing all historical IDs when a new turn is projected.
@@ -109,7 +117,23 @@ fn project_item_turn(
     }
     let raw = raw.expect("checked above");
     let key = turn_key_for_raw(editor, raw)?;
-    let projected = editor.turn(&key, &identity.thread_id, None, None)?.id;
+    let projected = if let Some(existing) = editor.existing_turn(&key) {
+        anyhow::ensure!(
+            editor.thread_is_ancestor(&existing.thread_id, &identity.thread_id)
+                || identity
+                    .forked_from_thread_id
+                    .as_deref()
+                    .is_some_and(|source| editor.thread_is_ancestor(&existing.thread_id, source)),
+            "historical turn belongs to an unrelated thread"
+        );
+        existing.id
+    } else {
+        // Supplied history may predate this gateway. Preserve a reversible alias, but do not
+        // invent its owning thread or causal parent. A later real turn assignment adopts it.
+        editor
+            .existing_wire_from_downstream(WireIdDomain::Turn, raw)?
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string())
+    };
     editor.bind_wire_pair(WireIdDomain::Turn, raw, &projected)?;
     Ok(Some(projected))
 }

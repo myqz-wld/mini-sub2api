@@ -77,16 +77,12 @@ func TestNativeScenarioCompactionRejectedOutput(t *testing.T) {
 						}
 						wantCounter := float64(0)
 						expected := fmt.Sprintf("%s:0", upstreamMeta["thread_id"])
-						if route == "subscription" {
-							wantCounter = 1
-							expected = fmt.Sprintf("%s:1", upstreamMeta["thread_id"])
-							t.Log("KNOWN conformance difference: rejected V2 output commits gateway window; next compact emits window_number=1 while native emits 0")
-						}
+
 						if upstreamMeta["window_number"] != wantCounter {
 							t.Fatalf("rejected compaction observed upstream window_number=%v", upstreamMeta["window_number"])
 						}
 						if upstreamMeta["window_id"] != expected {
-							t.Fatal("rejected compaction baseline observation changed")
+							t.Fatal("rejected compaction advanced the gateway window")
 						}
 					}
 					last := compactionMetadata(t, business[4])

@@ -18,6 +18,8 @@ var forwardedRequestHeaders = map[string]bool{
 	"Originator":                             true,
 	"Session-Id":                             true,
 	"Thread-Id":                              true,
+	"Traceparent":                            true,
+	"Tracestate":                             true,
 	"User-Agent":                             true,
 	"Version":                                true,
 	"Openai-Beta":                            true,

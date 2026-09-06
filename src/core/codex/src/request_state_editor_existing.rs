@@ -5,6 +5,31 @@ use super::TurnAssignment;
 use super::touch_day;
 
 impl RequestStateEditor<'_> {
+    /// Historical items can retain their original turn in the current thread or its ancestry.
+    /// This lookup never reassigns the historical turn or joins unrelated execution branches.
+    pub(crate) fn thread_is_ancestor(&self, ancestor: &str, thread: &str) -> bool {
+        let mut current = thread;
+        let mut visited = std::collections::BTreeSet::new();
+        loop {
+            if current == ancestor {
+                return true;
+            }
+            if !visited.insert(current) {
+                return false;
+            }
+            let Some(parent) = self
+                .scope()
+                .child_threads
+                .values()
+                .find(|entry| entry.id == current)
+                .and_then(|entry| entry.parent_thread_id.as_deref())
+            else {
+                return false;
+            };
+            current = parent;
+        }
+    }
+
     pub(crate) fn current_turn_id(&self, thread_id: &str) -> Option<String> {
         self.scope()
             .conversations

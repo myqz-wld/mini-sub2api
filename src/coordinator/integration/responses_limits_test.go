@@ -84,7 +84,17 @@ func TestResponsesAcceptsActualFramesAboveFormer16MiBLimit(t *testing.T) {
 					t.Fatal("large Subscription WS input changed")
 				}
 			}
-			readResponsesProfileTerminalEvents(t, connection)
+			// The fixture echoes large input in its response too. Use the same size-contract
+			// deadline for response consumption; the small-message helper permits only 2s.
+			for index := 0; index < 3; index++ {
+				kind, payload, err := connection.Read(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if kind != websocket.MessageText || index == 2 && !bytes.Contains(payload, []byte("response.completed")) {
+					t.Fatal("large WebSocket response did not complete")
+				}
+			}
 		})
 	}
 }

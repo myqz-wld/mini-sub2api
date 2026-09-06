@@ -42,9 +42,6 @@ func TestNativeScenarioTransportSocketBoundary(t *testing.T) {
 						client.turn(thread, "synthetic new turn after prewarm adoption")
 						assertTransportPrewarmToken(t, capture.snapshot(), route)
 						tokens := []string{"transport-prewarm-token", "transport-prewarm-token", "transport-prewarm-token", ""}
-						if route == "subscription" {
-							tokens = []string{"", "transport-token-1", "transport-token-1", ""}
-						}
 						assertTransportLifecycle(t, capture.snapshot(), true, tokens...)
 						if route != "direct" {
 							var nativeWires []nativeWire
@@ -52,9 +49,6 @@ func TestNativeScenarioTransportSocketBoundary(t *testing.T) {
 								nativeWires = append(nativeWires, nativeWire{value: transportPacketValue(t, packet)})
 							}
 							assertTransportPrewarmToken(t, nativeWires, "direct")
-							if route == "subscription" {
-								t.Log("KNOWN conformance failure: native prewarm token is removed on first business frame; later sampling token replaces it upstream for the same turn")
-							}
 						}
 						assertTransportMediation(t, gateway, capture, route)
 						return
@@ -146,15 +140,12 @@ func assertTransportPrewarmToken(t *testing.T, all []nativeWire, route string) {
 		t.Fatal("prewarm token fixture request sequence differs")
 	}
 	expected := []any{"transport-prewarm-token", "transport-prewarm-token", "transport-prewarm-token", nil}
-	if route == "subscription" {
-		expected = []any{nil, "transport-token-1", "transport-token-1", nil}
-	}
 	var observed []any
 	for _, wire := range wires {
 		observed = append(observed, transportMetadata(t, wire.value)["x-codex-turn-state"])
 	}
 	if !reflect.DeepEqual(observed, expected) {
-		t.Errorf("prewarm adoption token sequence differs from recorded route baseline: %s", route)
+		t.Errorf("prewarm adoption token sequence differs from native lifetime: %s", route)
 	}
 }
 

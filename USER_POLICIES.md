@@ -186,7 +186,8 @@ The gateway should follow those semantics subject to the explicit policies above
 The Plan 13 captures found unintended differences: prewarm routing-token loss, rejected historical
 child turns, premature compaction-window commit, inconsistent parent carriers, lost header-only
 lineage, independent root-fork rejection, removed W3C HTTP headers and dropped supported custom turn
-metadata. Those are not fixed requirements. Extra Lite-prefix attribution and token-budget text IDs
+metadata. Those are not fixed requirements; the subsequent compatibility repair fixed all eight and
+converted their observations to conformance regressions. Extra Lite-prefix attribution and token-budget text IDs
 versus projected metadata also require explicit evaluation; preserving caller text and typed privacy
 domains does not by itself prove that every resulting native relationship is consistent.
 
@@ -197,7 +198,7 @@ domains does not by itself prove that every resulting native relationship is con
 - **P3**: `ref/plans/recent-month/PLAN_3_credential-device-fingerprint.md`, D1–D16.
 - **P4**: `ref/plans/recent-month/PLAN_4_source-aware-responses-emulation.md`; many routing/filter choices were superseded.
 - **P5/P6**: `ref/plans/recent-week/PLAN_5_request-identity-state.md` and `PLAN_6_request-identity-review-fixes.md`.
-- **P7**: `ref/plans/recent-3-days/PLAN_7_codex-profile-identity-hardening.md`, D1–D12.
+- **P7**: `ref/plans/recent-week/PLAN_7_codex-profile-identity-hardening.md`, D1–D12.
 - **P9/P10**: `ref/plans/recent-3-days/PLAN_9_caller-instruction-preservation.md` and `PLAN_10_http-full-request-continuation.md`.
 - **P10 execution contract**: `ref/architecture/plan-10/plan10-execution-contract.md`; selected defaults and supersession of earlier open recommendations.
 - **C18/C20**: archived `CHANGELOG_18_runtime-codex-transport-identity.md` and `CHANGELOG_20_codex-tui-identity.md`.

@@ -63,12 +63,12 @@ func TestNativeScenarioIdentityDistributionKeyScope(t *testing.T) {
 							if n1["parent_thread_id"] != nr["parent_thread_id"] || (n1["parent_thread_id"] == n2["parent_thread_id"]) == subscription {
 								t.Fatal("parent lineage key scope/stability failed")
 							}
-							if first["x-codex-parent-thread-id"] != second["x-codex-parent-thread-id"] || first["x-codex-parent-thread-id"] != identityRoot {
-								t.Fatal("G-A raw parent control changed")
+							if first["x-codex-parent-thread-id"] != n1["parent_thread_id"] || second["x-codex-parent-thread-id"] != n2["parent_thread_id"] || repeat["x-codex-parent-thread-id"] != nr["parent_thread_id"] {
+								t.Fatal("flat parent carrier escaped its scoped lineage")
 							}
 						}
 					}
-					t.Logf("same_credential_two_distribution_keys scoped_identity_separation=%t repeat_key_stable=true raw_flat_parent_shared=true", subscription)
+					t.Logf("same_credential_two_distribution_keys scoped_identity_separation=%t repeat_key_stable=true flat_parent_matches_scoped_lineage=true", subscription)
 				})
 			}
 		}

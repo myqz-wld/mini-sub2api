@@ -408,6 +408,7 @@ mod tests {
                         marker_key,
                         thread_id: conversation.id,
                         target_window: target,
+                        requires_compaction_item: true,
                     })
                 },
             )
@@ -425,7 +426,7 @@ mod tests {
             .expect("make state directory read-only");
         let upstream: UpstreamByteStream = Box::pin(futures_util::stream::iter(vec![Ok(
             Bytes::from_static(
-                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_write_failure\"}}\n\n",
+                b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_write_failure\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":\"synthetic\"}]}}\n\n",
             ),
         )]));
         let frames = translated_sse_frames(upstream, context, 1024 * 1024)

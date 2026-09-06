@@ -106,7 +106,7 @@ func identityRequest(model, session, thread, turn, parent, fork string, historic
 	return map[string]any{"model": model, "instructions": "synthetic identity base", "tools": []any{}, "input": input, "client_metadata": flat}
 }
 
-func TestNativeScenarioIdentityHeaderOnlyObservedMismatch(t *testing.T) {
+func TestNativeScenarioIdentityHeaderOnly(t *testing.T) {
 	for _, subscription := range []bool{false, true} {
 		for _, ws := range []bool{false, true} {
 			for _, model := range []string{"gpt-5.4", "gpt-5.6-sol"} {
@@ -137,11 +137,14 @@ func TestNativeScenarioIdentityHeaderOnlyObservedMismatch(t *testing.T) {
 						} else {
 							flat, nested := identityMetadata(t, wire)
 							window, _ := nested["window_id"].(string)
-							if flat["session_id"] != flat["thread_id"] || nested["parent_thread_id"] != nil || !strings.HasSuffix(window, ":0") || wire.headers.Get("X-Codex-Parent-Thread-Id") != "" {
-								t.Fatal("G-B baseline behavior changed; reassess conformance")
+							if (flat["session_id"] != flat["thread_id"]) != child || !strings.HasSuffix(window, ":9") || wire.headers.Get("X-Codex-Window-Id") != window {
+								t.Fatal("original handshake window or branch was lost")
+							}
+							if child && (nested["parent_thread_id"] != flat["session_id"] || flat["x-codex-parent-thread-id"] != flat["session_id"] || wire.headers.Get("X-Codex-Parent-Thread-Id") != flat["session_id"]) || !child && (nested["parent_thread_id"] != nil || wire.headers.Get("X-Codex-Parent-Thread-Id") != "") {
+								t.Fatal("original handshake parent lineage was lost")
 							}
 						}
-						t.Logf("G-B source-backed ordinary case: accepted=true requested_window=9 emitted_window_preserved=%t requested_child=%t child_preserved=%t", !subscription, child, child && !subscription)
+						t.Logf("source-backed original handshake: window=9 preserved=true child=%t", child)
 					})
 				}
 			}
@@ -149,7 +152,7 @@ func TestNativeScenarioIdentityHeaderOnlyObservedMismatch(t *testing.T) {
 	}
 }
 
-func TestNativeScenarioIdentityRootForkObservedMismatch(t *testing.T) {
+func TestNativeScenarioIdentityRootFork(t *testing.T) {
 	for _, subscription := range []bool{false, true} {
 		for _, ws := range []bool{false, true} {
 			for _, model := range []string{"gpt-5.4", "gpt-5.6-sol"} {
@@ -170,11 +173,38 @@ func TestNativeScenarioIdentityRootForkObservedMismatch(t *testing.T) {
 						}
 						status, terminal := identitySend(t, gateway, ws, nil, identityRequest(model, identityFork, identityFork, identityForkTurn, "", source, ""))
 						reached := len(businessWires(capture.snapshot())) > before
-						mismatch := subscription && source != ""
-						if mismatch && (status != 400 || reached) || !mismatch && (status != 200 || !reached) {
-							t.Fatal("G-C baseline/control changed; reassess conformance")
+						if status != 200 || !reached {
+							t.Fatal("independent root fork was rejected")
 						}
-						t.Logf("G-C source-backed root fork: status=%d terminal=%s inference_reached=%t conformance_mismatch=%t", status, terminal, reached, mismatch)
+						wires := businessWires(capture.snapshot())
+						flat, nested := identityMetadata(t, wires[len(wires)-1])
+						if flat["session_id"] != flat["thread_id"] || nested["parent_thread_id"] != nil {
+							t.Fatal("fork provenance created an owning parent")
+						}
+						if source != "" {
+							alias, _ := nested["forked_from_thread_id"].(string)
+							if !isUUIDVersion(alias, '7') || alias == flat["thread_id"] || (alias == source) == subscription {
+								t.Fatal("fork source projection differs")
+							}
+							if mode == "unseen" {
+								status, _ = identitySend(t, gateway, ws, nil, identityRequest(model, identityRoot, identityRoot, identityRootTurn, "", "", ""))
+								if status != 200 {
+									t.Fatal("late fork source rejected")
+								}
+								wires = businessWires(capture.snapshot())
+							}
+							sourceIndex := 0
+							if mode == "unseen" {
+								sourceIndex = len(wires) - 1
+							}
+							origin, _ := identityMetadata(t, wires[sourceIndex])
+							if alias != origin["thread_id"] {
+								t.Fatal("fork source alias changed when its owner appeared")
+							}
+						} else if nested["forked_from_thread_id"] != nil {
+							t.Fatal("unforked root gained provenance")
+						}
+						t.Logf("source-backed root fork: status=%d terminal=%s inference_reached=%t", status, terminal, reached)
 					})
 				}
 			}
