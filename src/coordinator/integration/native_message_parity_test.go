@@ -85,9 +85,6 @@ func assertNativeMessageParity(t *testing.T, packet nativePacket, wire nativeWir
 		if slices.Contains([]string{"client_metadata", "input", "prompt_cache_key", "previous_response_id"}, field) {
 			continue
 		}
-		if field == "instructions" && expected == "" && wire.value[field] == nil {
-			continue
-		} // Empty native Lite carrier is removed.
 		if !reflect.DeepEqual(expected, wire.value[field]) {
 			t.Errorf("native message setting differs: %s", field)
 		}

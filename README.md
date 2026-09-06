@@ -351,6 +351,16 @@ only loopback traffic in bounded memory. It never contacts a provider or install
 wrong prerequisites fail explicitly. See the [capture method and capability matrix](src/coordinator/integration/NATIVE_PARITY.md)
 for observed parity, gateway policies and limits of the evidence.
 
+The scenario tests also exercise instruction precedence, Skills/AGENTS/environment changes,
+child-thread history, compaction windows, routing-token lifetimes and failure recovery. Native
+captures and ordinary-client replays have separate assertions. Tests marked `KNOWN` or `OBSERVATION`
+pin a measured baseline difference; their passing status does not certify full native conformance.
+The suite has a 15-minute aggregate deadline and keeps per-process and capture bounds independent.
+
+[User-selected gateway policies](USER_POLICIES.md) records explicit requirements, approved choices,
+delegated defaults and superseded decisions, including device convergence and the separate retention
+periods for full context, identity details and usage records.
+
 ## Disclaimer
 
 This project is for personal learning and research. It is not an official OpenAI product and is not

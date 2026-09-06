@@ -40,6 +40,11 @@ type nativeOptions struct {
 	metadataEndpoint   string
 	tools              []any
 	neutralPersonality bool
+	configOverrides    map[string]string
+	homeFiles          map[string]string
+	threadParams       map[string]any
+	providerName       string
+	traceEndpoint      string
 }
 
 func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
@@ -50,6 +55,13 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		metadataEndpoint = options.endpoint
 	}
 	assertLoopbackURL(t, metadataEndpoint)
+	providerName := options.providerName
+	if providerName == "" {
+		providerName = "OpenAI"
+	}
+	if providerName != "OpenAI" && providerName != "Native Local Capture" {
+		t.Fatal("native fixture provider capability name is not allowlisted")
+	}
 	binary := os.Getenv("MINI_SUB2API_NATIVE_CODEX_BINARY")
 	if binary == "" {
 		var err error
@@ -63,6 +75,7 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		t.Fatal("native parity binary version mismatch")
 	}
 	isolated := t.TempDir()
+	isolatedUser := t.TempDir()
 	project := options.project
 	if project == "" {
 		project = t.TempDir()
@@ -89,7 +102,7 @@ recommended_plugins = false
 code_mode = false
 code_mode_host = false
 [model_providers.native_capture]
-name = "OpenAI"
+name = %q
 base_url = %q
 wire_api = "responses"
 requires_openai_auth = true
@@ -98,10 +111,11 @@ request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 5000
 websocket_connect_timeout_ms = 3000
-`, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"), metadataEndpoint+"/backend-api", !options.neutralPersonality, options.endpoint+"/v1", options.ws)
+`, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"), metadataEndpoint+"/backend-api", !options.neutralPersonality, providerName, options.endpoint+"/v1", options.ws)
 	if err := os.WriteFile(filepath.Join(isolated, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal("write native config")
 	}
+	writeNativeHomeFixtures(t, isolated, options.homeFiles)
 	account := "native-loopback-account"
 	bearer := options.bearer
 	if bearer == "" {
@@ -114,6 +128,13 @@ websocket_connect_timeout_ms = 3000
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	args := []string{"app-server", "--stdio"}
+	args = append(args, nativeConfigArguments(t, options.configOverrides)...)
+	if options.traceEndpoint != "" {
+		assertLoopbackURL(t, options.traceEndpoint)
+		args = append(args,
+			"-c", fmt.Sprintf(`otel.trace_exporter={otlp-http={endpoint=%q,protocol="json"}}`, options.traceEndpoint),
+			"-c", `otel.exporter="none"`, "-c", `otel.metrics_exporter="none"`, "-c", "otel.log_user_prompt=false")
+	}
 	executable := binary
 	if runtime.GOOS == "darwin" {
 		executable = "/usr/bin/sandbox-exec"
@@ -122,12 +143,12 @@ websocket_connect_timeout_ms = 3000
 	command := exec.CommandContext(ctx, executable, args...)
 	command.Dir = project
 	// Override documented configuration only in this child; never change the parent environment.
-	for _, key := range []string{"PATH", "HOME", "TMPDIR", "USER", "LOGNAME", "SHELL"} {
+	for _, key := range []string{"PATH", "TMPDIR", "USER", "LOGNAME", "SHELL"} {
 		if value := os.Getenv(key); value != "" {
 			command.Env = append(command.Env, key+"="+value)
 		}
 	}
-	command.Env = append(command.Env, "CODEX_HOME="+isolated, "RUST_LOG=off", "TERM=dumb", "TERM_PROGRAM=native-parity", "TERM_PROGRAM_VERSION=1", "NO_PROXY=127.0.0.1,::1", "no_proxy=127.0.0.1,::1")
+	command.Env = append(command.Env, "HOME="+isolatedUser, "CODEX_HOME="+isolated, "RUST_LOG=off", "TERM=dumb", "TERM_PROGRAM=native-parity", "TERM_PROGRAM_VERSION=1", "NO_PROXY=127.0.0.1,::1", "no_proxy=127.0.0.1,::1")
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
 		command.Env = append(command.Env, key+"="+denied.URL)
 	}
@@ -243,6 +264,10 @@ func (c *nativeClient) thread(options nativeOptions) string {
 	if options.base != "" {
 		params["baseInstructions"] = options.base
 	}
+	for key, value := range options.threadParams {
+		params[key] = value
+	}
+	validateNativeThreadParams(c.t, params)
 	result := c.call("thread/start", params)
 	thread, ok := result["thread"].(map[string]any)
 	if !ok {
@@ -258,8 +283,17 @@ func (c *nativeClient) thread(options nativeOptions) string {
 	return id
 }
 func (c *nativeClient) turn(thread, text string) {
+	c.turnWith(thread, map[string]any{"input": []any{map[string]any{"type": "text", "text": text}}})
+}
+
+func (c *nativeClient) turnWith(thread string, params map[string]any) {
 	c.t.Helper()
-	c.call("turn/start", map[string]any{"threadId": thread, "input": []any{map[string]any{"type": "text", "text": text}}})
+	request := make(map[string]any, len(params)+1)
+	for key, value := range params {
+		request[key] = value
+	}
+	request["threadId"] = thread
+	c.call("turn/start", request)
 	for {
 		if len(c.pending) > 0 {
 			event := c.pending[0]

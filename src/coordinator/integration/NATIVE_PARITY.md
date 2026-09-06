@@ -8,7 +8,7 @@ installation through `bash scripts/test.sh`. Neither suite requires a real provi
 
 The native suite executes the real **codex-cli 0.153.4** app-server and verifies its version. Its
 model catalog comes from a checkout at **3d2ee51ca2d5db578f328aa75e20aa22c0197c9a**. Each subprocess
-gets an isolated temporary config/auth directory, an empty project, an ephemeral thread, synthetic
+gets isolated temporary user-home and config/auth directories, a controlled project, an ephemeral thread, synthetic
 OAuth tokens, loopback model/metadata endpoints, disabled unrelated services and a deny-only proxy.
 On macOS the created subprocess also receives a sandbox policy denying non-loopback outbound
 connections. A synthetic dynamic tool reply drives a real native tool loop without executing commands.
@@ -64,6 +64,50 @@ Large-frame tests use a bounded 45-second write/capture deadline. The former gen
 small-frame helper could fail under race instrumentation despite accepting and delivering the frame.
 The test checks admission and exact payload/meaning, not a throughput service-level objective.
 
+## Scenario and internal lifecycle comparisons
+
+The `native_scenario_*` files add 499 leaf cases to the original 100-case suite. Seven ordinary
+worker tasks compared exact source, real native calls and scoped ordinary-client fixtures. The
+table distinguishes native-generated traffic from source-backed synthetic requests. Raw payloads
+remain in memory. A separate policy-provenance task reconciled earlier user decisions in
+[USER_POLICIES.md](../../../USER_POLICIES.md).
+
+| Family | Leaves | Added evidence |
+|---|---:|---|
+| Base/Lite | 124 | Typed/file/inline precedence, empty/blank choices, developer grouping, personality updates; independent tools/base/order UUIDv5 changes |
+| Environment | 42 | Controlled AGENTS precedence and budgets; all 11 Skills routes, explicit selection/toggles, permission/mode/directory/catalog updates |
+| Transport | 36 | Reasoning/encrypted history, two tool continuations, distinct routing tokens, startup adoption, actual WS reconnect and native-owned HTTP fallback |
+| Identity | 104 | Actual fresh children/followup; source-backed header-only/root-fork/copied-history and two-Key controls; unavailable ephemeral fork attempts labeled |
+| Compaction | 68 | Actual V2/local/V1/token-budget paths, empty tools, acceptance versus completion, window/history changes; 8 ordinary reconstruction cases |
+| Failures/scheduling | 93 | 39 actual-native and 54 ordinary scenarios: failed/incomplete/disconnected responses, interruption, recovery, independent work and scope/admission conflicts |
+| Trace/extra metadata | 12 | Actual public JSON-RPC trace parent and turn metadata; active/disabled OTEL, HTTP headers versus WS frame fields, reset and reserved-key rules |
+| Lead comparisons | 20 | 8 strict root metadata/lifetime cases and 12 ordinary replays of actual native-resolved rich context, including JSON/SSE/WS and HTTP reconstruction |
+
+Concurrent captures are matched using independent causal barriers and per-thread packet order.
+Physical connection enumeration is not global arrival order. An initial race run exposed that
+test-oracle assumption; the corrected comparator still consumes every frame, checks exact API-key
+bytes, and validates typed Subscription relationships.
+
+Tests with `KNOWN`, `OBSERVATION` or `conformance=false` record a baseline discrepancy or a deliberate
+scope/policy difference. A successful runner therefore does not mean every request matches native.
+At the tested runtime baseline `1d8ac55`, these reproduced gaps remain open:
+
+| Gap | Demonstrated effect |
+|---|---|
+| Native parent carrier | Flat x-codex-parent-thread-id stays raw while nested/header parent is aliased; actual child capture and two-Key controls reproduce it |
+| Header-only lineage | First HTTP/WS request loses requested child/window metadata when only original headers carry it |
+| Independent root fork | Source-backed new-root fork provenance is rejected; a persisted-native fork capture is not claimed |
+| Historical child turn | Actual Subscription HTTP followup rejects old child-turn history; equivalent native WS suffix continues successfully |
+| Prewarm routing state | Public native prewarm token is discarded instead of being adopted by the first turn |
+| Compaction acceptance | Completed V2 output without a valid compaction item can advance gateway state even though native rejects it |
+| W3C request headers | HTTP traceparent/tracestate are removed by both credential routes; WS per-frame trace fields survive |
+| Native custom metadata | Subscription strips supported nonreserved turn-metadata entries and their HTTP compatibility-header copies |
+
+Additional measured differences include Lite prefix attribution, HTTP body routing-token replay,
+local turn-start timestamps, token-budget text UUIDs versus scoped metadata UUIDs, and ordinary
+same-thread/different-turn scheduling. Their policy origins and limits are explicit in the user
+policy document. None is automatically justified merely by existing in the implementation.
+
 ## Intentional differences and evidence limits
 
 - Subscription pins `Version: 0.153.4` in addition to the native UA/Originator, even when the native
@@ -79,8 +123,9 @@ The test checks admission and exact payload/meaning, not a throughput service-le
 - The native default personality feature selects pragmatic text for some models. Gateway fallback
   uses catalog default text. The defaults test disables native personality for a like-for-like
   comparison; a separate real-native test verifies that caller pragmatic text is preserved.
-- Native Lite uses an empty top-level `instructions` carrier; emulation may remove it. Formed input
-  instructions remain exact. Ordinary settings are evaluated for each request, including increments;
+- Native Lite omits top-level `instructions` and `tools` during serialization. Its builder's empty
+  instructions field is not a present empty wire member. Formed input instructions remain exact.
+  Ordinary settings are evaluated for each request, including increments;
   omission does not inherit a prior ordinary caller base. Native Lite setup belongs to its prefix.
 - Native ephemeral threads cannot be forked/resumed from a persisted rollout in v0.153.4. The test
   asserts native fork rejection and creates no rollout fixture. Gateway branch/restart behavior is
@@ -89,6 +134,12 @@ The test checks admission and exact payload/meaning, not a throughput service-le
 - The recorded ClientHello comparison was executed on macOS arm64. Remote certificates, HTTP/2/3,
   production rate limits, provider-side retention/retry contracts and real account entitlements are
   outside this loopback evidence. No real-provider request or paid inference is performed.
+- Active OTEL tests use a bounded discard-only loopback collector with log/metrics exporters and
+  user-prompt logging disabled. Rollout-enabled inference-ID generation remains source evidence:
+  that native diagnostic path writes request/output artifacts, which this suite forbids.
+- Environment tests do not certify every remote executor, Skills authority, permission profile or
+  product-config extension. The gateway preserves resolved client context; it does not discover
+  an unknown client's local environment or run the client's tools.
 
 ## Pinned source anchors
 
