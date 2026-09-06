@@ -121,6 +121,31 @@ impl RequestStateEditor<'_> {
         )
     }
 
+    /// Read an existing inverse without allocating a new alias for absent evidence.
+    pub(crate) fn existing_wire_from_upstream(
+        &mut self,
+        domain: WireIdDomain,
+        upstream_id: &str,
+    ) -> Result<Option<String>> {
+        validate_wire_id(upstream_id)?;
+        let lookup = self.keys.wire_upstream(domain, upstream_id);
+        let Some(downstream_lookup) = self.scope().wire_upstream_index.get(&lookup).cloned() else {
+            return Ok(None);
+        };
+        let entry = self
+            .scope()
+            .wire_ids
+            .get(&downstream_lookup)
+            .ok_or_else(|| anyhow::anyhow!("wire ID inverse is missing"))?;
+        anyhow::ensure!(
+            entry.domain == domain && entry.upstream_id == upstream_id,
+            "wire ID inverse collision"
+        );
+        let downstream_id = entry.downstream_id.clone();
+        self.touch_wire(&downstream_lookup)?;
+        Ok(Some(downstream_id))
+    }
+
     pub(crate) fn wire_from_upstream(
         &mut self,
         domain: WireIdDomain,

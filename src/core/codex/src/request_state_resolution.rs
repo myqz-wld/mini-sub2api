@@ -31,15 +31,25 @@ pub(crate) struct ResolvedProjection {
     pub(crate) pending_compaction: Option<PendingCompaction>,
 }
 
+pub(crate) struct InputProjection<'a> {
+    pub(crate) synthesized_item_ids: &'a [String],
+    pub(crate) lite_prefixes: &'a [usize],
+    pub(crate) native_prefixes: &'a [crate::lite_prefix_identity::NativePrefix],
+}
+
 pub(crate) fn resolve_and_project(
     editor: &mut RequestStateEditor<'_>,
     fingerprint_mode: FingerprintMode,
     evidence: &RequestIdentityEvidence,
     headers: &mut http::HeaderMap,
     object: &mut Map<String, Value>,
-    synthesized_item_ids: &[String],
-    lite_prefixes: &[usize],
+    input: InputProjection<'_>,
 ) -> Result<ResolvedProjection> {
+    let InputProjection {
+        synthesized_item_ids,
+        lite_prefixes,
+        native_prefixes,
+    } = input;
     let installation_lookup = evidence
         .installation
         .as_deref()
@@ -199,6 +209,13 @@ pub(crate) fn resolve_and_project(
         object,
         &identity.thread_id,
         lite_prefixes,
+    )?);
+    generated_upstream_ids.extend(crate::lite_prefix_identity::project_native(
+        editor,
+        object,
+        &identity.thread_id,
+        evidence.thread.as_deref(),
+        native_prefixes,
     )?);
     translate_request_ids(editor, object, &generated_upstream_ids)?;
     Ok(ResolvedProjection {

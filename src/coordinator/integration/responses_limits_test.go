@@ -43,22 +43,50 @@ func TestResponsesAcceptsActualFramesAboveFormer16MiBLimit(t *testing.T) {
 			t.Fatal("large Subscription input changed")
 		}
 	})
-	t.Run("WS", func(t *testing.T) {
-		fixture := newResponsesProfileWebSocketFixture(t)
-		connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.apiKey, http.Header{"Originator": {"codex_exec"}})
-		defer connection.CloseNow()
-		body := mustRequestJSON(t, map[string]any{"type": "response.create", "model": "gpt-5.4", "input": large})
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := connection.Write(ctx, websocket.MessageText, body); err != nil {
-			t.Fatal(err)
+	for _, subscription := range []bool{false, true} {
+		name := "WS"
+		if subscription {
+			name = "SubscriptionWS"
 		}
-		captures := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)
-		if !bytes.Equal(captures[0].Frame, body) {
-			t.Fatal("large API-key WS frame changed")
-		}
-		readResponsesProfileTerminalEvents(t, connection)
-	})
+		t.Run(name, func(t *testing.T) {
+			fixture := newResponsesProfileWebSocketFixture(t)
+			key := fixture.apiKey
+			if subscription {
+				key = fixture.subscriptionKey
+			}
+			connection := dialResponsesProfileWebSocket(t, fixture.public, key, http.Header{"Originator": {"codex_exec"}})
+			defer connection.CloseNow()
+			body := mustRequestJSON(t, map[string]any{"type": "response.create", "model": "gpt-5.4", "input": large})
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			if err := connection.Write(ctx, websocket.MessageText, body); err != nil {
+				t.Fatal(err)
+			}
+			// This is a size-admission contract, not a two-second throughput requirement.
+			// Race instrumentation can spend longer than the small-frame fixture deadline.
+			var captured responsesProfileWebSocketCapture
+			select {
+			case captured = <-fixture.captures:
+			case <-ctx.Done():
+				t.Fatal("large WS capture deadline")
+			}
+			if !subscription && !bytes.Equal(captured.Frame, body) {
+				t.Fatal("large API-key WS frame changed")
+			}
+			if subscription {
+				value := decodeRequestObject(t, captured.Frame)
+				items, _ := value["input"].([]any)
+				if len(items) != 1 {
+					t.Fatal("large Subscription WS input shape")
+				}
+				content, _ := items[0].(map[string]any)["content"].([]any)
+				if len(content) != 1 || content[0].(map[string]any)["text"] != large {
+					t.Fatal("large Subscription WS input changed")
+				}
+			}
+			readResponsesProfileTerminalEvents(t, connection)
+		})
+	}
 }
 
 func TestOperatorRequestLimitAppliesToHTTPAndWebSocketAdmission(t *testing.T) {

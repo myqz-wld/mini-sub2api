@@ -255,6 +255,13 @@ literal examples such as `{{connector_id}}` remain unchanged. Caller text is nev
 supported `access_programs` selection and `sequential_cutoff` summary delivery are forwarded per
 response; the gateway does not synthesize account entitlements.
 
+Lite prefix IDs follow Codex v0.153.4: derive a UUIDv5 namespace from the thread ID and the OID
+namespace, then hash the serialized tools bytes (`at_`) or exact base text bytes (`msg_`). The gateway
+verifies native prefix provenance before regenerating IDs for its scoped upstream thread and final
+payload. Existing reversible aliases remain stable for live historical references. Arbitrary caller
+item IDs continue through the ordinary mapping path. Object serialization order matters to these IDs;
+re-encoding a captured tools object before replay can invalidate its original content-derived ID.
+
 ## Administration
 
 ```bash
@@ -329,6 +336,20 @@ bash scripts/build.sh
 The direct Go integration suite builds the current debug core when no explicit test binary is set;
 it never silently skips cross-language coverage. `scripts/test.sh` disables Go test-result caching
 so Rust-only changes are exercised through the newly built Core, including race checks.
+
+To capture requests emitted by the real Codex client and compare them through the public gateway:
+
+```bash
+bash scripts/test-native-parity.sh
+```
+
+This optional suite requires `codex-cli 0.153.4` on PATH and the exact source commit
+`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a` at `.ref/sources/codex-v0.153.4`.
+`MINI_SUB2API_NATIVE_CODEX_BINARY` and `MINI_SUB2API_CODEX_SOURCE` override those locations.
+It rebuilds Core, uses isolated ephemeral native clients and synthetic credentials, and captures
+only loopback traffic in bounded memory. It never contacts a provider or installs a CA. Missing or
+wrong prerequisites fail explicitly. See the [capture method and capability matrix](src/coordinator/integration/NATIVE_PARITY.md)
+for observed parity, gateway policies and limits of the evidence.
 
 ## Disclaimer
 

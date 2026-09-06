@@ -45,3 +45,118 @@ pub(crate) fn apply(
     }
     Ok(ids)
 }
+
+/// Only the two prompt-prefix positions are eligible. Keep the pre-overlay bytes for proof;
+/// schema ordering may change afterward. These witnesses are temporary and never persisted.
+pub(crate) struct NativePrefix {
+    id: String,
+    kind: &'static str,
+    payload: Vec<u8>,
+}
+
+pub(crate) fn capture_native(object: &Map<String, Value>) -> Vec<NativePrefix> {
+    let Some(input) = object.get("input").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    if input
+        .first()
+        .and_then(|i| i.get("type"))
+        .and_then(Value::as_str)
+        != Some("additional_tools")
+    {
+        return Vec::new();
+    }
+    let mut prefixes = Vec::new();
+    if let (Some(id), Some(tools)) = (
+        input[0].get("id").and_then(Value::as_str),
+        input[0].get("tools"),
+    ) && let Ok(payload) = serde_json::to_vec(tools)
+    {
+        prefixes.push(NativePrefix {
+            id: id.to_string(),
+            kind: "at",
+            payload,
+        });
+    }
+    if let Some(base) = input.get(1)
+        && base.get("type").and_then(Value::as_str) == Some("message")
+        && base.get("role").and_then(Value::as_str) == Some("developer")
+        && let (Some(id), Some(content)) = (
+            base.get("id").and_then(Value::as_str),
+            base.get("content").and_then(Value::as_array),
+        )
+        && content.len() == 1
+        && content[0].get("type").and_then(Value::as_str) == Some("input_text")
+        && let Some(text) = content[0].get("text").and_then(Value::as_str)
+        && !text.is_empty()
+    {
+        prefixes.push(NativePrefix {
+            id: id.to_string(),
+            kind: "msg",
+            payload: text.as_bytes().to_vec(),
+        });
+    }
+    prefixes
+}
+
+pub(crate) fn project_native(
+    editor: &mut crate::request_state_editor::RequestStateEditor<'_>,
+    object: &mut Map<String, Value>,
+    thread: &str,
+    caller_thread: Option<&str>,
+    prefixes: &[NativePrefix],
+) -> anyhow::Result<BTreeSet<String>> {
+    use crate::request_state_types::WireIdDomain;
+    let mut generated = BTreeSet::new();
+    if prefixes.is_empty() {
+        return Ok(generated);
+    }
+    let inverse = editor.existing_wire_from_upstream(WireIdDomain::Thread, thread)?;
+    let candidates: BTreeSet<&str> = caller_thread
+        .into_iter()
+        .chain(inverse.as_deref())
+        .chain([thread])
+        .collect();
+    for prefix in prefixes {
+        let proven = candidates.iter().any(|candidate| {
+            let namespace = Uuid::new_v5(&Uuid::NAMESPACE_OID, candidate.as_bytes());
+            prefix.id
+                == format!(
+                    "{}_{}",
+                    prefix.kind,
+                    Uuid::new_v5(&namespace, &prefix.payload)
+                )
+        });
+        if !proven {
+            continue;
+        }
+        let Some(index) = object
+            .get("input")
+            .and_then(Value::as_array)
+            .and_then(|items| {
+                items
+                    .iter()
+                    .position(|item| item.get("id").and_then(Value::as_str) == Some(&prefix.id))
+            })
+        else {
+            continue;
+        };
+        // Existing reversible bindings may be used by live upstream contexts created by older
+        // versions. Preserve them; silently rotating one would break valid historical references.
+        if let Some(existing) =
+            editor.existing_wire_from_downstream(WireIdDomain::Item, &prefix.id)?
+        {
+            object["input"][index]["id"] = Value::String(existing.clone());
+            generated.insert(existing);
+            continue;
+        }
+        let ids = apply(object, thread, &[index])?;
+        let projected = ids
+            .iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("native prefix projection missing"))?;
+        editor.bind_wire_pair(WireIdDomain::Item, &prefix.id, projected)?;
+        generated.extend(ids);
+    }
+    Ok(generated)
+}

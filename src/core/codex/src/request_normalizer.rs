@@ -96,6 +96,7 @@ pub(crate) async fn prepare_identity_request(
         .as_object()
         .ok_or(StatefulPrepareError::InvalidRequest)?;
     validate_serialized_identity(caller, headers, headers_already_projected)?;
+    let native_prefixes = crate::lite_prefix_identity::capture_native(caller);
     let native = crate::request_native_metadata::NativeMetadata::read(caller, headers)
         .map_err(|_| StatefulPrepareError::InvalidRequest)?;
     let mut evidence =
@@ -139,8 +140,11 @@ pub(crate) async fn prepare_identity_request(
                         &evidence,
                         &mut prepared_headers,
                         &mut object,
-                        &synthesized_item_ids,
-                        &lite_prefixes,
+                        crate::request_state_resolution::InputProjection {
+                            synthesized_item_ids: &synthesized_item_ids,
+                            lite_prefixes: &lite_prefixes,
+                            native_prefixes: &native_prefixes,
+                        },
                     )?;
                     projection.identity.connection_id = connection_id;
                     if binding_session

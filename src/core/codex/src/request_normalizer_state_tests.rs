@@ -321,3 +321,6 @@ mod compaction_tests;
 
 #[path = "request_normalizer_reference_tests.rs"]
 mod reference_tests;
+
+#[path = "request_normalizer_lite_identity_tests.rs"]
+mod lite_identity_tests;
