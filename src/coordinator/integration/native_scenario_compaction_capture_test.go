@@ -130,16 +130,18 @@ func (c *nativeCompactionCapture) recordCompaction(r *http.Request, body, raw []
 	prewarm := value["generate"] == false
 	c.mu.Lock()
 	fail := c.fail
-	c.mu.Unlock()
-	if isCompact && !prewarm {
-		c.mu.Lock()
+	inBand := c.mode == "in-band" && c.compactRequests == 0 && !prewarm
+	if (isCompact || inBand) && !prewarm {
 		c.compactRequests++
-		c.mu.Unlock()
 	}
+	c.mu.Unlock()
 	n := len(c.snapshot())
 	id := fmt.Sprintf("resp_compaction_%d", n)
 	output := []any{}
 	if !prewarm {
+		if inBand {
+			output = append(output, map[string]any{"type": "compaction", "id": "cmp_inline_fixture", "encrypted_content": "synthetic_inline_state"})
+		}
 		if isCompact && c.mode != "local" && !fail {
 			output = append(output, map[string]any{"type": "compaction", "id": "cmp_compaction_fixture", "encrypted_content": "synthetic_compacted_state"})
 		} else {

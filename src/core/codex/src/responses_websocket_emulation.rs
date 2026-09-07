@@ -43,6 +43,7 @@ pub(crate) struct PreparedClientText {
     pub(crate) synthesized_item_ids: Vec<String>,
     pub(crate) pending_compaction: Option<PendingCompaction>,
     pub(crate) operation: Option<crate::subscription_context::Operation>,
+    pub(crate) rebuilt_reference: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -124,6 +125,7 @@ pub(crate) async fn prepare_client_text(
                 synthesized_item_ids: Vec::new(),
                 pending_compaction: None,
                 operation: None,
+                rebuilt_reference: false,
             });
         }
         let text = responses_websocket_inject::prepare(
@@ -138,6 +140,7 @@ pub(crate) async fn prepare_client_text(
             synthesized_item_ids: Vec::new(),
             pending_compaction: None,
             operation: None,
+            rebuilt_reference: false,
         });
     }
     if message_type != "response.create" {
@@ -178,6 +181,7 @@ pub(crate) async fn prepare_client_text(
                 synthesized_item_ids: Vec::new(),
                 pending_compaction: None,
                 operation: None,
+                rebuilt_reference: false,
             });
         }
         return Ok(PreparedClientText {
@@ -186,6 +190,7 @@ pub(crate) async fn prepare_client_text(
             synthesized_item_ids: Vec::new(),
             pending_compaction: None,
             operation: None,
+            rebuilt_reference: false,
         });
     }
     if profile == UpstreamProfile::ApiKeyPassthrough {
@@ -195,9 +200,10 @@ pub(crate) async fn prepare_client_text(
             synthesized_item_ids: Vec::new(),
             pending_compaction: None,
             operation: None,
+            rebuilt_reference: false,
         });
     }
-    let (prepared, synthesized_item_ids, pending_compaction, operation) = {
+    let (prepared, synthesized_item_ids, pending_compaction, operation, rebuilt_reference) = {
         let prepared = if profile.uses_identity_state() {
             let state_namespace = state_namespace.ok_or(())?;
             prepare_stateful_codex_request(
@@ -244,6 +250,7 @@ pub(crate) async fn prepare_client_text(
             synthesized_item_ids,
             pending_compaction,
             prepared.operation,
+            prepared.rebuilt_reference,
         )
     };
     let prepared = if fingerprint.mode() == FingerprintMode::Device && profile.uses_identity_state()
@@ -269,6 +276,7 @@ pub(crate) async fn prepare_client_text(
         synthesized_item_ids,
         pending_compaction,
         operation,
+        rebuilt_reference,
     })
 }
 

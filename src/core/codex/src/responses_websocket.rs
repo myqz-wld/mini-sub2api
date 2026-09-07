@@ -299,6 +299,7 @@ pub(crate) async fn relay(
                                 }
                                 let planned = if let Some(value) = prepared.create_value.as_ref() {
                                     let mut continuation = continuation_guard(&client_continuation);
+                                    continuation.mark_rebuilt_reference(prepared.rebuilt_reference);
                                     if profile == UpstreamProfile::ApiKeyPassthrough {
                                         continuation.plan_public_create(value);
                                         Ok(prepared.text)

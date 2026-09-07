@@ -188,6 +188,7 @@ pub(crate) async fn prepare_stateful_codex_request(
         false,
     )
     .await?;
+    prepared.rebuilt_reference = explicit_delta && full_send;
     let operation = prepared.operation.as_ref().ok_or(Error::StateUnavailable)?;
     if let Some(token) = store.turn_token(operation) {
         let mut value: Value =

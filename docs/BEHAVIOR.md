@@ -99,7 +99,8 @@ Core provides no JavaScript bridge or claim of full default-native code-mode equ
 Full history/settings/comparisons expire after **3 business-idle hours**, checked on lookup and a
 30-second sweep; capacity may evict sooner, active work is protected. Live WS facts/tokens survive
 bulk expiry. Remote continuation does not restore missing local bodies; full input can. Compaction
-or interleaved injection may require client replacement history before HTTP reconstruction.
+windows use the same limits and expiry; unsupported compaction or interleaved injection may still
+require client replacement history before HTTP reconstruction.
 
 | Resource | Default |
 |---|---:|
@@ -129,6 +130,23 @@ Publish valid context before public completion. Reconcile item-done/final output
 uses completed items for JSON/history, without duplicate stream events. Failed/incomplete responses
 are not baselines. V2 compaction requires matching success and exactly one valid encrypted item-done;
 a final array alone is insufficient. Overlapping same-base commits advance once.
+
+When complete source history and a single matching observed compaction item are available, Core
+stores a replacement window under that response ID before completion is delivered:
+
+- Explicit V2 with a final compaction_trigger retains caller user/system/developer messages and
+  formed Lite setup, preserving content/order. The actual compaction item replaces old assistant,
+  reasoning, tool and compaction items; the trigger is removed.
+- In-band generation keeps the compaction item and subsequent output. Formed Lite also retains its
+  leading tools/developer setup; ordinary-to-Lite setup still comes from each request's settings.
+
+Later HTTP increments and required full WS sends reconstruct from this exact window. Full-history
+matching cannot revive item references removed by compaction. The original explicit-reference
+intent survives full WS reconstruction and disables extra hidden prewarm/automatic incrementality.
+No opaque content is decrypted, no bodies are persisted, and Core does not discover fresh client
+environment or apply untransmitted client truncation settings. Local text summaries, multiple or
+unobserved checkpoints, unsupported explicit input kinds and unresolved dropped tool calls require
+a client-supplied replacement. A complete window supplied by the client remains authoritative.
 
 At most one extra attempt is allowed while business inference is proven unsent; the rejection retry
 allowlist is empty. Attempted/uncertain send or delivered events prevent hidden replay. OAuth refresh

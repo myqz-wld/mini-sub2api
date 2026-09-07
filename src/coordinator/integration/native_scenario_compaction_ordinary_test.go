@@ -32,21 +32,20 @@ func TestNativeScenarioCompactionOrdinaryRebuild(t *testing.T) {
 					}
 					next := map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "synthetic ordinary postcompaction user"}}}
 					delta := ordinaryCompactionRequest(model, []any{next}, compacted["id"])
+					client.send(delta)
+					continued := businessWires(capture.snapshot())
+					lastDelta := continued[len(continued)-1]
 					if subscription && !ws {
-						before := len(capture.snapshot())
-						status, code := compactionHTTPError(t, gateway, delta)
-						if status != 503 || code != "state_unavailable" || len(capture.snapshot()) != before {
-							t.Fatalf("HTTP compaction reference boundary status=%d code=%s", status, code)
+						types, texts := compactionItemCounts(lastDelta)
+						if lastDelta.value["previous_response_id"] != nil || types["compaction"] != 1 || types["compaction_trigger"] != 0 || texts["synthetic ordinary compaction seed"] != 1 || texts["synthetic ordinary postcompaction user"] != 1 {
+							t.Fatal("HTTP compaction reference did not reconstruct its replacement window")
 						}
 					} else {
-						client.send(delta)
-						wires := businessWires(capture.snapshot())
-						if wires[len(wires)-1].value["previous_response_id"] == nil {
+						if lastDelta.value["previous_response_id"] == nil {
 							t.Fatal("valid upstream continuation was unnecessarily expanded")
 						}
 					}
-					// A supplied replacement establishes exactly what the client retained, without
-					// guessing remote compaction's retention policy from the prior response alone.
+					// A caller remains free to install its own complete replacement window.
 					full := ordinaryCompactionRequest(model, []any{seed, output[0], next}, nil)
 					full["client_metadata"] = map[string]any{"session_id": "ordinary-compaction-session"}
 					rebuilt := client.send(full)

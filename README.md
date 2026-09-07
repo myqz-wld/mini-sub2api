@@ -71,6 +71,8 @@ its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHA
 ## Main rules
 
 - HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history.
+- Accepted compaction can publish a replacement window under its response ID, allowing later HTTP
+  increments without resending history. Unsupported or incomplete windows still require full input.
 - Full history expires after three idle hours; full input can rebuild it, and valid live WS references
   can outlive local bodies. Identity retention is separate.
 - Preserve valid caller base instructions verbatim; never insert a model-default base. Preserve

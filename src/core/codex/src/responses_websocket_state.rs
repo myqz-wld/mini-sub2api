@@ -43,6 +43,7 @@ pub(crate) struct ResponsesWebSocketState {
     active: Option<ActiveOperation>,
     setup_phase: OperationPhase,
     public_phase: OperationPhase,
+    rebuilt_reference: bool,
     max_output_items: usize,
     max_output_bytes: usize,
 }
@@ -58,6 +59,7 @@ impl ResponsesWebSocketState {
             active: None,
             setup_phase: OperationPhase::Idle,
             public_phase: OperationPhase::Idle,
+            rebuilt_reference: false,
             max_output_items: crate::inference_limits::get().output_items,
             max_output_bytes: crate::inference_limits::get().output_bytes,
         }
@@ -83,6 +85,10 @@ impl ResponsesWebSocketState {
 
     pub(crate) fn public_phase(&self) -> OperationPhase {
         self.public_phase
+    }
+
+    pub(crate) fn mark_rebuilt_reference(&mut self, reconstructed: bool) {
+        self.rebuilt_reference = reconstructed;
     }
 
     pub(crate) fn public_create_attempted(&self) -> bool {
@@ -111,6 +117,7 @@ impl ResponsesWebSocketState {
         synthesized_item_ids: &[String],
     ) -> Option<HiddenSetupPlan> {
         if !self.automatic_reuse_enabled()
+            || self.rebuilt_reference
             || self.setup_phase != OperationPhase::Idle
             || self.baseline.is_some()
             || self.planned.is_some()
@@ -161,7 +168,8 @@ impl ResponsesWebSocketState {
         pending_compaction: Option<PendingCompaction>,
     ) -> PublicCreatePlan {
         self.abandon_pending_operation();
-        let explicit_state = has_explicit_state_carrier(request);
+        let explicit_state =
+            std::mem::take(&mut self.rebuilt_reference) || has_explicit_state_carrier(request);
         let automatic = self.automatic_reuse_enabled() && !explicit_state;
         let request_snapshot = automatic
             .then(|| request_snapshot(request, synthesized_item_ids))
@@ -289,6 +297,7 @@ impl ResponsesWebSocketState {
     }
 
     pub(crate) fn reset_for_reconnect(&mut self) {
+        self.rebuilt_reference = false;
         self.setup_turn_state = None;
         self.baseline = None;
         self.planned = None;

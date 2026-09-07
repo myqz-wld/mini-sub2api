@@ -54,6 +54,12 @@ pub(crate) struct CompactionOutput {
 }
 
 impl CompactionOutput {
+    pub(crate) fn matches_single(&self, item: &Value) -> bool {
+        self.count == 1
+            && self.fingerprint.is_some()
+            && self.fingerprint == compaction_fingerprint(item)
+    }
+
     pub(crate) fn observe(&mut self, item: &Value) {
         if is_compaction(item) {
             self.count = self.count.saturating_add(1);

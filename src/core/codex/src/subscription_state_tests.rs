@@ -19,6 +19,9 @@ mod repair_tests;
 #[path = "subscription_history_tests.rs"]
 mod history_tests;
 
+#[path = "subscription_compaction_tests.rs"]
+mod compaction_tests;
+
 const NAMESPACE: &str = "context-admission";
 const OWNER: &str = "acct_context_tests";
 const KEY: &str = "isolated-key";

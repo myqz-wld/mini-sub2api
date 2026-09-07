@@ -26,6 +26,35 @@ fn automatic_reuse_never_carries_another_threads_baseline() {
 }
 
 #[test]
+fn reconstructed_explicit_reference_disables_hidden_setup_and_automatic_reuse_once() {
+    let mut state =
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+    let full = request("thread", json!([]));
+    state.mark_rebuilt_reference(true);
+    assert!(
+        state
+            .plan_hidden_setup(&full, PrewarmMode::Ordinary)
+            .is_none()
+    );
+    let plan = state.plan_public_create(&full);
+    assert_eq!(plan.mode, PublicCreateMode::ExplicitState);
+    assert!(plan.frame.get("previous_response_id").is_none());
+    assert!(state.mark_public_create_attempted());
+    state.observe_server_event(
+        &json!({"type":"response.completed","response":{"id":"rebuilt","output":[]}}),
+    );
+    assert_eq!(state.plan_public_create(&full).mode, PublicCreateMode::Full);
+    assert!(state.mark_public_create_attempted());
+    state.observe_server_event(
+        &json!({"type":"response.completed","response":{"id":"ordinary","output":[]}}),
+    );
+    assert_eq!(
+        state.plan_public_create(&full).mode,
+        PublicCreateMode::Incremental
+    );
+}
+
+#[test]
 fn hidden_setup_token_requires_completion_and_does_not_survive_failure_or_reconnect() {
     for outcome in [
         "response.failed",

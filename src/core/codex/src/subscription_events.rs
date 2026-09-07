@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::time::Instant;
 
+#[path = "subscription_compaction.rs"]
+mod compaction;
+
 fn accepted_compaction(
     pending: &crate::request_compaction::PendingCompaction,
     response: &Value,
@@ -223,15 +226,23 @@ impl ContextStore {
         active.record.completed = true;
         active.record.last_used = Instant::now();
         let session = active.record.identity.session_id.clone();
-        let retain_cost = output_bytes
-            .saturating_mul(6)
-            .saturating_add(active.record.descriptor_cost());
-        // Native compaction also depends on client retention/truncation choices. Keep the actual
-        // item untouched and require that client-supplied replacement history before HTTP expansion.
-        let compaction = active.record.identity.request_kind == "compaction"
+        let replaces_history = active.record.identity.request_kind == "compaction"
             || output
                 .iter()
                 .any(|item| item.get("type").and_then(Value::as_str) == Some("compaction"));
+        let retain_cost = output_bytes
+            .saturating_mul(6)
+            .saturating_add(active.record.descriptor_cost())
+            .saturating_add(
+                active
+                    .record
+                    .history
+                    .as_ref()
+                    .filter(|_| replaces_history)
+                    .map_or(0, |history| {
+                        history.len.saturating_mul(3 * std::mem::size_of::<usize>())
+                    }),
+            );
         // The operation was taken out for terminal assembly. Keep its capacity and session pinned
         // until publication, so pressure cannot prune its created record/aliases or ignore assembly.
         inner.reservations.insert(
@@ -242,21 +253,38 @@ impl ContextStore {
                 reserved: active.reserved,
             },
         );
-        let can_retain = !compaction
-            && active.output_available
+        let can_retain = active.output_available
             && inner.make_room(&self.limits, &active.scope, &session, retain_cost);
         let scope = inner.scopes.entry(active.scope.clone()).or_default();
         if can_retain {
-            if let Some(parent) = active.record.history.take() {
-                let items = output
-                    .iter()
-                    .cloned()
-                    .map(|item| scope.interner.intern(item))
-                    .collect();
-                active.record.history = Some(History::extend(Some(parent), items));
-            }
+            let window = compaction::select(&active.record, &active.compaction_output, &output);
+            active.record.history = match window {
+                compaction::Window::Append => active.record.history.take().map(|parent| {
+                    let items = output
+                        .iter()
+                        .cloned()
+                        .map(|item| scope.interner.intern(item))
+                        .collect();
+                    History::extend(Some(parent), items)
+                }),
+                compaction::Window::Replace {
+                    mut input,
+                    output: range,
+                } => {
+                    input.extend(
+                        output[range]
+                            .iter()
+                            .cloned()
+                            .map(|item| scope.interner.intern(item)),
+                    );
+                    Some(History::extend(None, input))
+                }
+                compaction::Window::Unavailable => None,
+            };
         } else {
             active.record.history = None;
+        }
+        if active.record.history.is_none() {
             active.record.settings = None;
         }
         if let Some(session) = scope.sessions.get_mut(&session) {

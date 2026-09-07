@@ -153,15 +153,16 @@ invent an entitlement. HTTP removes WS-only `type`, `generate` and `stream_id`; 
 and `reasoning.context: all_turns`.
 
 Nonblank top-level base instructions are preserved verbatim, including surrounding whitespace and
-caller template syntax. Missing, null, blank or non-string bases use the selected default when a
-base is required. Ordinary Responses keeps the base at top level. Ordinary-to-Lite conversion emits
-`additional_tools`, one base developer message, then original input, removing top-level instructions.
+caller template syntax. Missing, null, blank or non-string bases are omitted; no model-default base
+is inserted. Ordinary Responses keeps a valid caller base at top level. Ordinary-to-Lite conversion
+emits `additional_tools`, an optional valid caller-base developer message, then original input,
+removing top-level instructions.
 Already formed native Lite preserves input instructions and adds no fallback base; an explicit valid
 top-level base goes after tools. Validated Lite WS increments can inherit their upstream prefix.
 Developer messages and duplicates retain content and relative order. Subscription changes `system`
 to `developer` in place; historical assistant strings use `output_text`. Non-Lite absent image detail
 defaults to `high`; Lite leaves it absent. All eleven catalog models and both fallback sources are
-snapshotted offline under native literal/template-variable rendering rules.
+snapshotted offline under native literal/template-variable rendering rules for comparisons/tests only.
 
 Caller inline IDs are projected through scoped mappings; omitted ordinary message IDs remain
 omitted. Schema references must resolve their required mapping. Generated Lite prefix IDs use the
@@ -392,6 +393,16 @@ delivery. Failed, incomplete, error, non-2xx, and disconnected operations do not
 Different pending operations from one committed base converge when the first completes, and later
 same-base completions are idempotent. Accessing a marker refreshes its retention timestamp and
 protects it from pruning or capacity eviction during that edit.
+
+Accepted compaction can also publish a memory-only replacement history under its response ID.
+Explicit V2 retains visible caller user/system/developer context and formed Lite setup, replacing
+covered outputs and the trigger with the actual encrypted item. In-band compaction retains that
+item and subsequent output, plus formed Lite's leading setup. Full reconstruction validates
+references against retained items; complete source history, matching observed output and cache
+capacity are required. Client-local summaries and ambiguous windows remain unreconstructable.
+Original explicit-reference intent survives WS full reconstruction as internal state, so removing
+the upstream reference does not enable hidden prewarm or automatic incrementality for that request.
+These facts add no public/internal wire field and do not persist request/response bodies.
 
 Successful internal API-key upgrades use the same strict response-header policy and may additionally
 carry the private provider request-ID header. Deferred Codex handshakes instead send a reserved

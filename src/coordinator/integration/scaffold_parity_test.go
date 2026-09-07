@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -74,9 +75,6 @@ func TestOpenCodeResponsesCapture(t *testing.T) {
 					assertScaffoldMessageParity(t, packets[i], wire)
 					if wire.value["previous_response_id"] != nil {
 						t.Fatal("OpenCode Subscription HTTP sent an incremental reference")
-					}
-					if model == "gpt-6-astra" {
-						assertNativeLiteIDs(t, wire)
 					}
 				}
 				if route == "subscription" {
@@ -148,14 +146,29 @@ func assertScaffoldMessageParity(t *testing.T, packet nativePacket, wire nativeW
 	if !ok {
 		t.Fatal("scaffold input array absent")
 	}
+	base, _ := caller["instructions"].(string)
+	if strings.TrimSpace(base) == "" {
+		base = ""
+	}
 	after, _ := wire.value["input"].([]any)
 	tools, _ := wire.value["tools"].([]any)
-	if len(after) > 0 && after[0].(map[string]any)["type"] == "additional_tools" {
+	lite := len(after) > 0 && after[0].(map[string]any)["type"] == "additional_tools"
+	if lite != (caller["model"] == "gpt-6-astra") {
+		t.Fatal("scaffold selected an unexpected upstream format")
+	}
+	if lite {
 		tools, _ = after[0].(map[string]any)["tools"].([]any)
-		if len(after) < 2 || after[1].(map[string]any)["role"] != "developer" {
-			t.Fatal("scaffold Lite base carrier missing")
+		prefixLength := 1
+		if base != "" {
+			prefixLength++
 		}
-		after = after[2:]
+		if len(after) < prefixLength {
+			t.Fatal("scaffold Lite setup missing")
+		}
+		assertScenarioBaseValue(t, wire, true, base)
+		after = after[prefixLength:]
+	} else {
+		assertScenarioBaseValue(t, wire, false, base)
 	}
 	if len(before) != len(after) {
 		t.Fatal("scaffold business message count changed")
@@ -213,9 +226,6 @@ func assertScaffoldMessageParity(t *testing.T, packet nativePacket, wire nativeW
 				t.Fatalf("scaffold tool %d field %s changed", i, field)
 			}
 		}
-	}
-	if base, ok := caller["instructions"].(string); ok && base != "" && capturedBase(t, wire) != base {
-		t.Fatal("scaffold caller base changed")
 	}
 	for _, field := range []string{"model", "tool_choice", "text", "reasoning"} {
 		if original, ok := caller[field].(map[string]any); ok {

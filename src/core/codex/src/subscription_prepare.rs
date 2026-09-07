@@ -115,7 +115,7 @@ impl ContextStore {
                 if record.settings.as_deref() != Some(&current_settings) {
                     continue;
                 }
-                let mut dependencies = record.dependencies.clone();
+                let mut dependencies = local_dependencies(record);
                 if dependencies.append(&evidence.input[length..]).is_err() {
                     continue;
                 }
@@ -197,7 +197,13 @@ impl ContextStore {
         let mut dependencies = if explicit_delta || matched_len > 0 {
             baseline
                 .as_ref()
-                .map(|r| r.dependencies.clone())
+                .map(|r| {
+                    if explicit_delta {
+                        r.dependencies.clone()
+                    } else {
+                        local_dependencies(r)
+                    }
+                })
                 .unwrap_or_default()
         } else {
             Dependencies::default()
@@ -328,6 +334,28 @@ impl ContextStore {
 #[path = "subscription_admission.rs"]
 mod admission;
 
+fn local_dependencies(record: &Record) -> Dependencies {
+    let mut dependencies = record.dependencies.clone();
+    // A content-matched caller may omit non-reference IDs; the verified saved items still supply
+    // them. Remote-only IDs removed by compaction must not qualify a full-history candidate.
+    dependencies.items = record
+        .history
+        .as_ref()
+        .map_or_else(Default::default, |history| {
+            history
+                .items()
+                .iter()
+                .filter_map(|item| {
+                    item.value
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .collect()
+        });
+    dependencies
+}
+
 impl ContextPlan {
     pub(crate) fn full_input(&self, store: &ContextStore) -> Result<Vec<Value>, Error> {
         if self.evidence.previous.is_none() {
@@ -356,6 +384,11 @@ impl ContextPlan {
             .reserved += extra;
         drop(inner);
         let mut full = history.values();
+        // Lightweight live-WS dependencies may outlive items discarded by compaction. Full
+        // sending must prove references against the actual replacement window, not those facts.
+        let mut dependencies = Dependencies::default();
+        dependencies.append(&full)?;
+        dependencies.append(&self.evidence.input)?;
         full.extend(self.evidence.input.clone());
         Ok(full)
     }

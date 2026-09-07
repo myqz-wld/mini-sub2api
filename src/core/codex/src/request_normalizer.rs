@@ -27,6 +27,7 @@ pub struct PreparedEmulatedRequest {
     pub(crate) resolved_identity: Option<ResolvedRequestIdentity>,
     pub(crate) pending_compaction: Option<PendingCompaction>,
     pub(crate) operation: Option<crate::subscription_context::Operation>,
+    pub(crate) rebuilt_reference: bool,
 }
 
 pub(crate) struct CodexStateContext<'a> {
@@ -194,6 +195,7 @@ pub(crate) async fn prepare_identity_request(
                         resolved_identity: Some(projection.identity),
                         pending_compaction: projection.pending_compaction,
                         operation,
+                        rebuilt_reference: false,
                     })
                 })()
                 .map_err(classify_projection_error)
@@ -283,6 +285,7 @@ fn prepare_codex_overlay(
         resolved_identity: None,
         pending_compaction: None,
         operation: None,
+        rebuilt_reference: false,
     })
 }
 

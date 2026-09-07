@@ -46,6 +46,7 @@ Standard suites need no provider account and never fall back to real endpoints.
 | Identity/privacy | Key isolation, device modes/shared account, branches/forks/history ownership, explicit conflicts, restart/corruption and required references |
 | Cache/completion | Publication ordering, item/footer reconciliation, failed/incomplete responses, expiry/pressure, exact interning and tool consumption |
 | WS/compaction | Socket reuse/reconnect, first routing token, hidden prewarm, uncertain-send fences, V2 item-done proof and window commits |
+| Compaction continuation | 36 credential/transport/format cases: explicit and in-band windows, two HTTP deltas, full WS recovery, caller Lite setup, unavailable-window errors and exact API-key packets |
 | Tools | Actual native nested host callback; bare/OpenCode direct calls; schema order/duplicates and deterministic prefixes |
 
 Anonymous bare WS reconnects before every submission, so socket binding cannot mask a failed match.
