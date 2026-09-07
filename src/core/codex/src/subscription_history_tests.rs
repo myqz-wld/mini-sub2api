@@ -35,6 +35,61 @@ fn plan(
 }
 
 #[tokio::test]
+async fn baseless_anonymous_history_and_explicit_reconstruction_stay_baseless() {
+    for model in ["gpt-5.4", "gpt-5.6-sol"] {
+        let (_temp, store) = store();
+        let first = json!({"model":model,"input":[input("first")],"tools":[]});
+        let prepared = prepare(&store, first.clone()).await.unwrap();
+        let identity = prepared.resolved_identity.as_ref().unwrap().clone();
+        let emitted: Value = serde_json::from_slice(&prepared.body).unwrap();
+        let prefix = usize::from(model == "gpt-5.6-sol");
+        assert_eq!(emitted["input"].as_array().unwrap().len(), 1 + prefix);
+        assert!(emitted["input"][prefix]["role"] == "user");
+        let response = publish(
+            &store,
+            prepared,
+            "resp_baseless_first",
+            json!([assistant()]),
+        )
+        .await;
+        let mut next = first.clone();
+        next["instructions"] = Value::Null;
+        next["input"] = json!([
+            input("first"),
+            caller_copy(response["output"][0].clone()),
+            input("second")
+        ]);
+        assert!(plan(&store, &next, KEY).unwrap().baseline.is_some());
+        let prepared = prepare(&store, next).await.unwrap();
+        assert_eq!(
+            prepared.resolved_identity.as_ref().unwrap().session_id,
+            identity.session_id
+        );
+        let response = publish(&store, prepared, "resp_baseless_second", json!([])).await;
+        let mut delta = first;
+        delta["previous_response_id"] = response["id"].clone();
+        delta["input"] = json!([input("third")]);
+        let prepared = prepare(&store, delta).await.unwrap();
+        let full: Value = serde_json::from_slice(&prepared.body).unwrap();
+        assert!(full.get("previous_response_id").is_none());
+        assert!(
+            full["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["type"] != "message" || item["role"] != "developer")
+        );
+        assert_eq!(full["input"].as_array().unwrap().len(), 4 + prefix);
+        if prefix == 1 {
+            assert!(full.get("instructions").is_none());
+            assert!(full["input"][0]["id"] == emitted["input"][0]["id"]);
+        } else {
+            assert!(full.get("instructions").is_none());
+        }
+    }
+}
+
+#[tokio::test]
 async fn simplified_text_history_keeps_session_and_materializes_the_callers_actual_input() {
     for model in ["gpt-5.4", "gpt-6-astra"] {
         let (_temp, store) = store();

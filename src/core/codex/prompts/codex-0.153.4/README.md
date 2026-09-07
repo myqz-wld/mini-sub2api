@@ -1,4 +1,7 @@
-# Codex 0.153.4 base instructions
+# Codex 0.153.4 instruction reference snapshots
+
+These files are offline comparison/test fixtures. Core never injects model-default instructions;
+production normalization uses only valid caller base text. The Rust snapshot module is test-only.
 
 These effective default instructions are copied from OpenAI Codex `rust-v0.153.4`, commit
 `3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`. The source Apache-2.0 LICENSE and NOTICE accompany them.

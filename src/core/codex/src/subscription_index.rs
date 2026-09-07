@@ -303,19 +303,11 @@ pub(crate) fn settings_for_format(
     let mut profile = crate::request_defaults::model_profile(model);
     profile.responses_lite |= lite;
     crate::request_defaults::merge_request_defaults(&mut result, profile, false);
-    if !lite && !crate::codex_instructions::has_valid_instructions(&result) {
-        result.insert(
-            "instructions".into(),
-            Value::String(crate::codex_instructions::for_model(model).to_string()),
-        );
-    }
+    crate::codex_instructions::normalize_base(&mut result);
     if !lite {
         result
             .entry("tools")
             .or_insert_with(|| Value::Array(Vec::new()));
-    }
-    if lite && !crate::codex_instructions::has_valid_instructions(&result) {
-        result.remove("instructions");
     }
     result.retain(|key, _| {
         !matches!(

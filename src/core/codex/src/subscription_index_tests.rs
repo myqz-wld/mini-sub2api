@@ -2,6 +2,46 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn absent_bases_share_effective_settings_without_matching_catalog_text() {
+    use crate::request_normalizer::EmulationTransport::{Http, WebSocket};
+    use crate::subscription_request::Format;
+    for transport in [Http, WebSocket] {
+        for model in ["gpt-5.4", "gpt-5.6-sol"] {
+            for format in [Format::Responses, Format::Lite] {
+                let request = json!({"model":model,"tools":[]});
+                let expected = settings_for_format(request.as_object().unwrap(), format, transport);
+                assert!(expected.get("instructions").is_none());
+                for invalid in [
+                    Value::Null,
+                    json!(""),
+                    json!(" \n"),
+                    json!(42),
+                    json!(false),
+                    json!([]),
+                    json!({}),
+                ] {
+                    let mut request = request.clone();
+                    request["instructions"] = invalid;
+                    assert!(
+                        settings_for_format(request.as_object().unwrap(), format, transport)
+                            == expected
+                    );
+                }
+                let mut supplied = request.clone();
+                supplied["instructions"] = crate::codex_instructions::for_model(model).into();
+                let explicit =
+                    settings_for_format(supplied.as_object().unwrap(), format, transport);
+                assert!(
+                    explicit != expected,
+                    "omitted base matched explicit catalog text"
+                );
+                assert!(setup_hash(&explicit) != setup_hash(&expected));
+            }
+        }
+    }
+}
+
+#[test]
 fn compressed_terminals_match_a_reference_scan_under_divergence_and_interior_insertions() {
     let mut trie = Radix::default();
     let mut entries = Vec::new();

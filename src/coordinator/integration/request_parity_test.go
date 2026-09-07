@@ -179,8 +179,8 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 		t.Fatalf("metadata/header mismatch: metadata=%#v headers=%#v", clientMetadata, capture.Headers)
 	}
 	input, ok := normalized["input"].([]any)
-	if !ok || len(input) != 4 {
-		t.Fatalf("normalized input count = %d, want 4", len(input))
+	if !ok || len(input) != 3 {
+		t.Fatalf("normalized input count = %d, want 3", len(input))
 	}
 	additional := input[0].(map[string]any)
 	if additional["type"] != "additional_tools" {
@@ -189,8 +189,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 	if !strings.HasPrefix(stringValue(additional["id"]), "at_") || !jsonEqual(additional["tools"], canonicalExpectedLiteTools(tools)) {
 		t.Fatalf("normalized tools = %#v, want %#v", additional["tools"], tools)
 	}
-	assertCodexBaseDeveloperMessage(t, input, "gpt-5.6-sol")
-	assertNormalizedMessages(t, input[2:], []any{
+	assertNormalizedMessages(t, input[1:], []any{
 		map[string]any{
 			"type": "message", "role": "developer",
 			"content": []any{map[string]any{"type": "input_text", "text": "Follow system rules"}},

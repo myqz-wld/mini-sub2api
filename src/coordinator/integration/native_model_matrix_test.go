@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -61,13 +62,14 @@ func TestNativeAllCatalogModelDefaults(t *testing.T) {
 			upstream := newNativeCapture(t)
 			gateway := newNativeGateway(t, upstream.server.URL, true)
 			client := ordinaryClient(t, gateway, false, false, nil)
-			client.send(map[string]any{"model": model.Slug, "input": "synthetic default probe"})
+			// Native defaults remain caller-owned: preserve them only when explicitly supplied.
+			client.send(map[string]any{"model": model.Slug, "input": "synthetic default probe", "instructions": expected})
 			emitted := upstream.snapshot()
 			if len(emitted) != 1 {
 				t.Fatal("ordinary default count")
 			}
 			if capturedBase(t, emitted[0]) != expected {
-				t.Fatal("ordinary default base differs from actual pinned native client")
+				t.Fatal("explicit native catalog base changed")
 			}
 			for _, wire := range []nativeWire{actual[0], emitted[0]} {
 				input, _ := wire.value["input"].([]any)
@@ -83,6 +85,23 @@ func TestNativeAllCatalogModelDefaults(t *testing.T) {
 				if string(a) != string(b) {
 					t.Errorf("model default field differs: %s", field)
 				}
+			}
+			client.send(map[string]any{"model": model.Slug, "input": "synthetic omitted base probe"})
+			emitted = upstream.snapshot()
+			if len(emitted) != 2 {
+				t.Fatal("omitted catalog base request count changed")
+			}
+			missing := emitted[1]
+			if _, present := missing.value["instructions"]; present {
+				t.Fatal("catalog base was inserted for an ordinary caller")
+			}
+			items, _ := missing.value["input"].([]any)
+			if len(items) > 0 && items[0].(map[string]any)["type"] == "additional_tools" {
+				assertScenarioBaseValue(t, missing, true, "")
+				items = items[1:]
+			}
+			if len(items) != 1 || items[0].(map[string]any)["role"] != "user" {
+				t.Fatal("omitted catalog base acquired an instruction message")
 			}
 		})
 	}
@@ -155,7 +174,7 @@ func TestNativeLitePrefixContentAndThreadDimensions(t *testing.T) {
 	}
 }
 
-func TestNativeOrdinaryOmittedSetupAppliesDefaults(t *testing.T) {
+func TestNativeOrdinaryOmittedSetupDoesNotRestoreBase(t *testing.T) {
 	for _, ws := range []bool{false, true} {
 		for _, format := range []string{"ordinary", "converted-lite"} {
 			t.Run(fmt.Sprintf("ws=%t/%s", ws, format), func(t *testing.T) {
@@ -173,8 +192,24 @@ func TestNativeOrdinaryOmittedSetupAppliesDefaults(t *testing.T) {
 				if format == "converted-lite" && wires[1].value["previous_response_id"] != nil {
 					t.Fatal("changed Lite setup reused stale prefix")
 				}
-				if capturedBase(t, wires[1]) == first["instructions"] {
-					t.Fatal("ordinary omitted base incorrectly inherited caller base")
+				if _, present := wires[1].value["instructions"]; present {
+					t.Fatal("ordinary omitted base incorrectly restored instructions")
+				}
+				if format == "converted-lite" {
+					assertScenarioBaseValue(t, wires[1], true, "")
+				}
+				developers := []string{}
+				for _, item := range wires[1].value["input"].([]any) {
+					if text, ok := developerMessageText(item); ok {
+						developers = append(developers, text)
+					}
+				}
+				want := []string{}
+				if wires[1].value["previous_response_id"] == nil {
+					want = []string{"system fixture", "duplicate developer", "duplicate developer"}
+				}
+				if !reflect.DeepEqual(developers, want) {
+					t.Fatal("ordinary reconstruction invented or removed developer instructions")
 				}
 			})
 		}

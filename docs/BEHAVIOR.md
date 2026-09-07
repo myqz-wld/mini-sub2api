@@ -69,14 +69,16 @@ Core does not implement a memory-writing service.
 
 | Caller format | Base and tools |
 |---|---|
-| Ordinary | Nonblank top-level instructions stays verbatim; missing/null/blank/nonstring uses model default. Top-level tools. |
-| Ordinary → Lite | additional_tools, one selected-base developer message, original input; remove top-level base/tools. |
+| Ordinary | Nonblank top-level instructions stays verbatim; omit missing/null/blank/nonstring bases. No model-default insertion. Top-level tools. |
+| Ordinary → Lite | additional_tools, optional valid caller-base developer message, original input; remove top-level base/tools. |
 | Formed Lite | Preserve input instructions. Insert an explicit valid top-level base after tools; otherwise no fallback. |
 | Inherited Lite increment | Validate the referenced caller format/setup; do not repeat its prefix. |
 
 Caller/upstream formats stay distinct. Developer content/order/duplicates survive; Subscription
-system→developer happens in place. Only gateway defaults are rendered; caller placeholders stay literal.
-[Snapshots](../src/core/codex/prompts/codex-0.153.4/README.md) cover 11 catalog models and fallbacks.
+system→developer happens in place. Caller placeholders stay literal. Effective history settings use
+the same no-default base policy; ordinary continuation does not restore an omitted prior base.
+[Snapshots](../src/core/codex/prompts/codex-0.153.4/README.md) cover 11 catalog models and fallbacks
+for offline comparisons/tests only; production requests never load these prompt defaults.
 
 Lite UUIDv5 derives a namespace from OID + thread UTF-8, then hashes exact tools bytes (at_) or base
 text (msg_). Regenerate only Core-owned/proven native prefixes; preserve existing aliases. Group loose

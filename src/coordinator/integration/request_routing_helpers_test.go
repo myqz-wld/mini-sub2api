@@ -2,7 +2,6 @@ package integration
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -181,38 +180,6 @@ func assertRuntimeCodexUserAgent(t *testing.T, value string) {
 	}
 }
 
-func assertCodexBaseInstructions(t *testing.T, value any, model string) {
-	t.Helper()
-	instructions, ok := value.(string)
-	if !ok {
-		t.Fatalf("Codex base instructions are not text for model %q", model)
-	}
-	got := fmt.Sprintf("%x", sha256.Sum256([]byte(instructions)))
-	if want := expectedCodexInstructionsHash(model); got != want {
-		t.Fatalf("Codex base instructions hash for %q = %s, want %s", model, got, want)
-	}
-}
-
-func assertCodexBaseDeveloperMessage(t *testing.T, input any, model string) {
-	t.Helper()
-	items, ok := input.([]any)
-	if !ok {
-		t.Fatalf("Codex input is not an array for model %q", model)
-	}
-	matches := 0
-	for _, item := range items {
-		if text, ok := developerMessageText(item); ok {
-			hash := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
-			if hash == expectedCodexInstructionsHash(model) {
-				matches++
-			}
-		}
-	}
-	if matches != 1 {
-		t.Fatalf("Codex base developer message count for %q = %d, want 1", model, matches)
-	}
-}
-
 func assertDeveloperMessageText(t *testing.T, item any, want string) {
 	t.Helper()
 	got, ok := developerMessageText(item)
@@ -236,46 +203,6 @@ func developerMessageText(item any) (string, bool) {
 	}
 	text, ok := part["text"].(string)
 	return text, ok
-}
-
-func expectedCodexInstructionsHash(model string) string {
-	if slash := strings.IndexByte(model, '/'); slash >= 0 {
-		namespace, suffix := model[:slash], model[slash+1:]
-		validNamespace := namespace != "" && !strings.Contains(suffix, "/")
-		for _, character := range namespace {
-			validNamespace = validNamespace && (character >= 'a' && character <= 'z' ||
-				character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' ||
-				character == '_' || character == '-')
-		}
-		if validNamespace {
-			model = suffix
-		}
-	}
-	switch {
-	case strings.HasPrefix(model, "gpt-6-astra"):
-		return "152dfaeeb552876190962be1c12c93d426840ff12691f648261554a7675a6698"
-	case strings.HasPrefix(model, "gpt-daybreak-blue-latest"), strings.HasPrefix(model, "codex-auto-review"):
-		return "ebd0d5854abd07dc38300a71e027204eb028e9fa443c59d18e36fcc24289e818"
-	case strings.HasPrefix(model, "gpt-daybreak-red-latest"):
-		return "40a1232c8bd01a87dc2283e5ae3c75f2b054dc2a12cf04e5a279c26e5c541b9b"
-
-	case strings.HasPrefix(model, "gpt-5.6-sol"),
-		strings.HasPrefix(model, "gpt-5.6-terra"),
-		strings.HasPrefix(model, "gpt-5.6-luna"):
-		return "cbefa6b0bede0e332d957fca70ccacf9f12f4c0ecdf81b819e5cbe1a3b16e265"
-	case strings.HasPrefix(model, "gpt-5.5"):
-		return "e58c21f9377e946e2e10f886fcbf6f030e1c6fd9067241c637a56e9e998d3c31"
-	case strings.HasPrefix(model, "gpt-5.4-mini"):
-		return "9109777dc7f3bc9ee9a0d187982b13538c53e0572de2959300f7226e9c59855e"
-	case strings.HasPrefix(model, "gpt-5.4"):
-		return "9721f7a86edc261996e628fe14fade8d66ec60e6cc727274a8da6a03e15464de"
-	case strings.HasPrefix(model, "gpt-5.2"):
-		return "c9b2fa097ac69cae82c3d2ae12271083890a96521c55ad8dc14cae5168ad3f39"
-	case model == "exp-codex-personality":
-		return "4cf5dd6317a9920b3f0398f6fa7ca49310b57961f6dd076eb2141acd4f963843"
-	default:
-		return "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807"
-	}
 }
 
 func assertLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []any) {

@@ -115,7 +115,7 @@ async fn http_full_delta_normal_and_lite_reconstruct_exact_parent_and_reconcile_
                         .iter()
                         .filter(|i| i["role"] == "developer" && i["type"] == "message")
                         .count(),
-                    if native_lite { 2 } else { 1 }
+                    if native_lite { 2 } else { 0 }
                 );
             }
         }

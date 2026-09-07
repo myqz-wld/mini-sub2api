@@ -91,7 +91,7 @@ pub(super) fn apply(
     } else {
         normalize_input(object)
     };
-    codex_instructions::apply(object, model_profile.responses_lite, already_lite)?;
+    codex_instructions::apply(object, model_profile.responses_lite)?;
     if model_profile.responses_lite {
         if !already_lite {
             relocate_lite_tools(object);
@@ -139,7 +139,7 @@ pub(super) fn apply(
         if input[0].get("id").is_none() {
             prefixes.push(0);
         }
-        if !already_lite || caller_base {
+        if caller_base {
             prefixes.push(1);
         }
     }

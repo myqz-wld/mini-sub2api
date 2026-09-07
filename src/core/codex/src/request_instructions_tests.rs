@@ -10,7 +10,7 @@ const TRANSPORTS: [EmulationTransport; 2] =
     [EmulationTransport::Http, EmulationTransport::WebSocket];
 
 #[test]
-fn normal_and_converted_lite_select_one_base_and_preserve_caller_history() {
+fn normal_and_converted_lite_only_use_caller_base_and_preserve_history() {
     for profile in PROFILES {
         for transport in TRANSPORTS {
             for (model, lite) in [("gpt-5.4", false), ("gpt-5.6-sol", true)] {
@@ -23,17 +23,23 @@ fn normal_and_converted_lite_select_one_base_and_preserve_caller_history() {
                     set_instructions(&mut caller, instructions);
                     let normalized =
                         prepare(profile, caller, transport).expect("normalized request");
-                    let expected = expected
-                        .unwrap_or_else(|| codex_instructions::for_model(model).to_string());
                     let input = normalized["input"].as_array().expect("input");
                     let offset = if lite {
                         assert!(normalized.get("instructions").is_none());
                         assert!(normalized.get("tools").is_none());
                         assert_eq!(input[0]["type"], "additional_tools");
-                        assert_developer_text(&input[1], &expected);
-                        2
+                        if let Some(base) = &expected {
+                            assert_developer_text(&input[1], base);
+                            2
+                        } else {
+                            1
+                        }
                     } else {
-                        assert_eq!(normalized["instructions"], expected);
+                        if let Some(expected) = expected {
+                            assert_eq!(normalized["instructions"], expected);
+                        } else {
+                            assert!(normalized.get("instructions").is_none());
+                        }
                         0
                     };
                     assert_history(&input[offset..], &history, profile);
@@ -106,7 +112,7 @@ fn lite_incremental_websocket_ignores_all_absent_or_invalid_top_level_bases() {
 }
 
 #[test]
-fn lite_base_is_inserted_when_any_incremental_condition_is_not_met() {
+fn lite_base_is_only_inserted_for_explicit_valid_instructions() {
     for profile in PROFILES {
         for (transport, previous, tools, instructions, expected) in [
             (EmulationTransport::Http, true, false, Value::Null, None),
@@ -139,18 +145,17 @@ fn lite_base_is_inserted_when_any_incremental_condition_is_not_met() {
             let normalized = prepare(profile, caller, transport).expect("normalized request");
             assert!(normalized.get("instructions").is_none());
             let input = normalized["input"].as_array().expect("input");
-            assert_eq!(input.len(), 2);
+            assert_eq!(input.len(), 1 + usize::from(expected.is_some()));
             assert_eq!(input[0]["type"], "additional_tools");
-            assert_developer_text(
-                &input[1],
-                expected.unwrap_or_else(|| codex_instructions::for_model("gpt-5.6-luna")),
-            );
+            if let Some(expected) = expected {
+                assert_developer_text(&input[1], expected);
+            }
         }
     }
 }
 
 #[test]
-fn normal_responses_continuation_still_fills_missing_base() {
+fn normal_responses_continuation_omits_missing_base() {
     for profile in PROFILES {
         let normalized = prepare(
             profile,
@@ -161,10 +166,7 @@ fn normal_responses_continuation_still_fills_missing_base() {
             EmulationTransport::WebSocket,
         )
         .expect("normalized request");
-        assert_eq!(
-            normalized["instructions"],
-            codex_instructions::for_model("gpt-5.4")
-        );
+        assert!(normalized.get("instructions").is_none());
         assert_eq!(normalized["input"], serde_json::json!([]));
     }
 }
@@ -205,7 +207,7 @@ fn base_selection_handles_missing_and_string_input_without_extra_developer_messa
 }
 
 #[test]
-fn invalid_input_still_fails_closed_and_fallback_respects_request_size_limit() {
+fn invalid_input_still_fails_closed_and_caller_base_respects_request_size_limit() {
     for model in ["gpt-5.4", "gpt-5.6-sol"] {
         assert!(
             prepare(
@@ -217,13 +219,15 @@ fn invalid_input_still_fails_closed_and_fallback_respects_request_size_limit() {
             )
             .is_err()
         );
-        let caller = serde_json::json!({"model":model,"input":[]});
+        let caller = serde_json::json!({
+            "model":model,"input":[],"instructions":"caller base".repeat(128)
+        });
         let result = prepare_codex_overlay_for_test(
             UpstreamProfile::CodexSubscription1534,
             EmulationTransport::Http,
             &HeaderMap::new(),
             Bytes::from(serde_json::to_vec(&caller).expect("caller JSON")),
-            codex_instructions::for_model(model).len() / 2,
+            512,
         );
         assert!(result.is_err());
     }

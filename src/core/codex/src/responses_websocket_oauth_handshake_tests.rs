@@ -331,18 +331,10 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
             .as_str()
             .is_some_and(|id| id.starts_with("at_"))
     );
+    assert_eq!(value["input"].as_array().expect("input").len(), 2);
+    assert!(value["input"][1].get("id").is_none());
     assert_eq!(
-        value["input"][1]["content"][0]["text"],
-        crate::codex_instructions::for_model("gpt-5.6-sol")
-    );
-    assert!(
-        value["input"][1]["id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("msg_"))
-    );
-    assert!(value["input"][2].get("id").is_none());
-    assert_eq!(
-        value["input"][2]["internal_chat_message_metadata_passthrough"]["turn_id"],
+        value["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"],
         turn_id
     );
     assert!(value.get("max_output_tokens").is_none());

@@ -195,13 +195,8 @@ func TestNativeScenarioBasePrecedence(t *testing.T) {
 						for i := range in {
 							assertScenarioBaseValue(t, in[i], lite, expected)
 							if route == "subscription" && !lite && strings.TrimSpace(expected) == "" {
-								// Selected gateway policy: invalid/blank ordinary base gets a model
-								// default, even when native explicitly selected an empty base.
-								base, _ := out[i].value["instructions"].(string)
-								fallback := scenarioBaseExpectedPersonality(scenarioBaseCatalog(t, model), "feature-off")
-								if base != fallback || base == expected {
-									t.Fatal("ordinary Subscription blank-base fallback policy changed")
-								}
+								// Blank caller bases carry no gateway-owned prompt text.
+								assertScenarioBaseValue(t, out[i], false, "")
 								continue
 							}
 							assertScenarioBaseValue(t, out[i], lite, expected)
@@ -211,9 +206,6 @@ func TestNativeScenarioBasePrecedence(t *testing.T) {
 									t.Fatal("Subscription did not namespace native deterministic tools ID")
 								}
 							}
-						}
-						if route == "subscription" && !lite && strings.TrimSpace(expected) == "" {
-							t.Log("OBSERVATION: native blank-base intent replaced by selected ordinary fallback policy")
 						}
 					})
 				}

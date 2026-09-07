@@ -73,8 +73,9 @@ its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHA
 - HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history.
 - Full history expires after three idle hours; full input can rebuild it, and valid live WS references
   can outlive local bodies. Identity retention is separate.
-- Valid caller base instructions win verbatim. Preserve developer order/duplicates; Subscription
-  system→developer stays in place. Lite moves tools/base into its prefix with scoped deterministic IDs.
+- Preserve valid caller base instructions verbatim; never insert a model-default base. Preserve
+  developer order/duplicates and Subscription system→developer in place. Lite prefixes contain tools
+  and an optional caller base with scoped deterministic IDs.
 - Core does not discover client workspaces/Skills/tools or execute them. Native code mode and
   ordinary direct tools keep their respective protocols.
 
