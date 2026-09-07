@@ -66,7 +66,7 @@ impl ContextStore {
             return Err(Error::InvalidRequest);
         }
         let mut session = binding.map(|b| b.session_id.clone()).or(selected);
-        let current_settings = settings(object);
+        let current_settings = settings(object, evidence.transport);
         let mut matched_len = 0;
         let mut independent_branch = false;
         let mut baseline = if let Some(previous) = &evidence.previous {
@@ -222,8 +222,11 @@ impl ContextStore {
         {
             return Err(Error::InvalidRequest);
         }
-        let mut effective_settings =
-            crate::subscription_index::settings_for_format(object, caller_format);
+        let mut effective_settings = crate::subscription_index::settings_for_format(
+            object,
+            caller_format,
+            evidence.transport,
+        );
         // Native Lite setup belongs to its input prefix. Ordinary callers keep their own format
         // and apply current caller-first defaults, even if the earlier upstream format was Lite.
         if explicit_delta

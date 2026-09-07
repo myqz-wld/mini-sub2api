@@ -20,13 +20,17 @@ import (
 	"time"
 )
 
-type openCodeClient struct{ endpoint, model, project string }
+type openCodeClient struct{ endpoint, model, project, provider string }
 
 func startOpenCode(t *testing.T, endpoint, secret, model string) openCodeClient {
 	return startOpenCodeWithRead(t, endpoint, secret, model, false)
 }
 
 func startOpenCodeWithRead(t *testing.T, endpoint, secret, model string, allowRead bool) openCodeClient {
+	return startOpenCodeProvider(t, endpoint, secret, model, "capture", allowRead)
+}
+
+func startOpenCodeProvider(t *testing.T, endpoint, secret, model, provider string, allowRead bool) openCodeClient {
 	t.Helper()
 	assertLoopbackURL(t, endpoint)
 	binary := os.Getenv("MINI_SUB2API_OPENCODE_BINARY")
@@ -52,10 +56,10 @@ func startOpenCodeWithRead(t *testing.T, endpoint, secret, model string, allowRe
 	}
 	config := map[string]any{
 		"autoupdate": false, "share": "disabled", "snapshot": false,
-		"enabled_providers": []string{"capture"}, "model": "capture/" + model, "small_model": "capture/" + model,
+		"enabled_providers": []string{provider}, "model": provider + "/" + model, "small_model": provider + "/" + model,
 		"permission": map[string]string{"*": "deny"},
 		"agent":      map[string]any{"probe": map[string]any{"mode": "primary", "prompt": "Return a short answer to the supplied synthetic task.", "tools": map[string]bool{"*": false}}},
-		"provider": map[string]any{"capture": map[string]any{
+		"provider": map[string]any{provider: map[string]any{
 			"npm": "@ai-sdk/openai", "name": "Isolated Responses capture",
 			"options": map[string]any{"baseURL": endpoint + "/v1", "apiKey": secret, "timeout": 60000},
 			"models":  map[string]any{model: map[string]any{"name": model, "limit": map[string]int{"context": 128000, "output": 256}}},
@@ -83,11 +87,17 @@ func startOpenCodeWithRead(t *testing.T, endpoint, secret, model string, allowRe
 	}
 	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
 	t.Cleanup(denied.Close)
+	disablePlugins := "1"
+	if provider == "openai" {
+		// The explicit-header control needs the built-in Codex hook. It still uses the isolated
+		// config/home, synthetic API key, disabled model fetch and loopback-only network boundary.
+		disablePlugins = "0"
+	}
 	environment := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + root, "OPENCODE_TEST_HOME=" + root,
 		"XDG_DATA_HOME=" + data, "XDG_CACHE_HOME=" + filepath.Join(root, "cache"), "XDG_CONFIG_HOME=" + filepath.Join(root, "config"), "XDG_STATE_HOME=" + filepath.Join(root, "state"), "TMPDIR=" + root,
 		"OPENCODE_CONFIG=" + configPath, "OPENCODE_DB=:memory:", "OPENCODE_LOG_LEVEL=ERROR",
 		"OPENCODE_DISABLE_AUTOUPDATE=1", "OPENCODE_DISABLE_MODELS_FETCH=1", "OPENCODE_DISABLE_SHARE=1",
-		"OPENCODE_DISABLE_DEFAULT_PLUGINS=1", "OPENCODE_DISABLE_EXTERNAL_SKILLS=1", "OPENCODE_DISABLE_CLAUDE_CODE=1",
+		"OPENCODE_DISABLE_DEFAULT_PLUGINS=" + disablePlugins, "OPENCODE_DISABLE_EXTERNAL_SKILLS=1", "OPENCODE_DISABLE_CLAUDE_CODE=1",
 		"OPENCODE_DISABLE_LSP_DOWNLOAD=1", "OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER=1", "OPENCODE_DISABLE_FFF=1",
 		"NO_PROXY=127.0.0.1,::1", "no_proxy=127.0.0.1,::1", "TERM=dumb"}
 	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
@@ -145,7 +155,7 @@ func startOpenCodeWithRead(t *testing.T, endpoint, secret, model string, allowRe
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
 			if response.StatusCode == 200 {
-				return openCodeClient{endpoint: url, model: model, project: project}
+				return openCodeClient{endpoint: url, model: model, project: project, provider: provider}
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -178,5 +188,5 @@ func (c openCodeClient) call(t *testing.T, path string, value any) map[string]an
 }
 
 func (c openCodeClient) turn(t *testing.T, session, text string) map[string]any {
-	return c.call(t, "/session/"+session+"/message", map[string]any{"agent": "probe", "model": map[string]string{"providerID": "capture", "modelID": c.model}, "parts": []any{map[string]any{"type": "text", "text": text}}})
+	return c.call(t, "/session/"+session+"/message", map[string]any{"agent": "probe", "model": map[string]string{"providerID": c.provider, "modelID": c.model}, "parts": []any{map[string]any{"type": "text", "text": text}}})
 }

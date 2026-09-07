@@ -4,6 +4,10 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Weak};
 
+#[path = "subscription_history_match.rs"]
+mod history_match;
+pub(crate) use history_match::{candidate_key, completion_items_compatible, ids_compatible};
+
 pub(crate) fn canonical(value: &Value) -> Vec<u8> {
     fn sorted(value: &Value) -> Value {
         match value {
@@ -21,32 +25,6 @@ pub(crate) fn canonical(value: &Value) -> Vec<u8> {
         }
     }
     serde_json::to_vec(&sorted(value)).expect("JSON value encoding")
-}
-
-pub(crate) fn candidate_key(item: &Value) -> Vec<u8> {
-    let mut item = item.clone();
-    if let Some(object) = item.as_object_mut() {
-        object.remove("internal_chat_message_metadata_passthrough");
-        if object.get("type").and_then(Value::as_str) == Some("message") {
-            object.remove("id");
-            if object.get("status").and_then(Value::as_str) == Some("completed") {
-                object.remove("status");
-            }
-        }
-    }
-    canonical(&item)
-}
-
-pub(crate) fn ids_compatible(request: &Value, saved: &Value) -> bool {
-    if request.get("type").and_then(Value::as_str) == Some("message") {
-        match (request.get("id"), saved.get("id")) {
-            (Some(left), Some(right)) => left == right,
-            (Some(_), None) => false,
-            _ => true,
-        }
-    } else {
-        request.get("id") == saved.get("id")
-    }
 }
 
 pub(crate) struct Key {
@@ -291,7 +269,10 @@ impl History {
     }
 }
 
-pub(crate) fn settings(object: &Map<String, Value>) -> Value {
+pub(crate) fn settings(
+    object: &Map<String, Value>,
+    transport: crate::request_normalizer::EmulationTransport,
+) -> Value {
     let lite = object
         .get("input")
         .and_then(Value::as_array)
@@ -306,21 +287,22 @@ pub(crate) fn settings(object: &Map<String, Value>) -> Value {
         } else {
             crate::subscription_request::Format::Responses
         },
+        transport,
     )
 }
 
 pub(crate) fn settings_for_format(
     object: &Map<String, Value>,
     format: crate::subscription_request::Format,
+    transport: crate::request_normalizer::EmulationTransport,
 ) -> Value {
     let mut result = object.clone();
+    crate::request_normalizer::filter_subscription_fields(&mut result, transport);
     let lite = format == crate::subscription_request::Format::Lite;
     let model = object.get("model").and_then(Value::as_str).unwrap_or("");
-    crate::request_defaults::merge_request_defaults(
-        &mut result,
-        crate::request_defaults::model_profile(model),
-        false,
-    );
+    let mut profile = crate::request_defaults::model_profile(model);
+    profile.responses_lite |= lite;
+    crate::request_defaults::merge_request_defaults(&mut result, profile, false);
     if !lite && !crate::codex_instructions::has_valid_instructions(&result) {
         result.insert(
             "instructions".into(),

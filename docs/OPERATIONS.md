@@ -1,85 +1,54 @@
 # Operations
 
-[Setup and usage](../README.md) · [Gateway behavior](BEHAVIOR.md)
+[Setup](../README.md) · [Behavior and limits](BEHAVIOR.md)
 
-## Authentication options
+## Authentication
 
-Device login is the default for a long-running Subscription. Browser PKCE is available with
-`credential login codex --name personal --flow browser`; on a remote host, forward the printed
-loopback callback port over SSH. To copy the current Codex login without its refresh token:
+Device login is preferred remotely. Browser PKCE uses `credential login codex --flow browser`;
+forward its printed loopback callback port over SSH. Importing excludes the existing refresh token:
 
 ```bash
-build/bin/mini-sub2api --state-dir ./state \
-  credential import-codex --name personal --auth-file ~/.codex/auth.json
+export MINI_SUB2API_STATE_DIR=./state
+build/bin/mini-sub2api credential import-codex --name personal --auth-file ~/.codex/auth.json
 ```
 
-Set `MINI_SUB2API_STATE_DIR` to omit `--state-dir`. Request details default to seven days;
-`serve --usage-retention-days N` changes this, and `0` disables automatic detail pruning.
-Daily aggregates are retained separately.
+Core serializes refresh. Vault files are private, but not encrypted at rest.
 
 ## Administration
 
-
-Shutdown waits for the owned Core process to exit and for both WS pumps to finish, including
-terminal usage writes, before releasing the corresponding session and storage resources.
-
 ```bash
-# Credentials
-build/bin/mini-sub2api --state-dir ./state credential list
-build/bin/mini-sub2api --state-dir ./state credential fingerprint cred_EXAMPLE
-build/bin/mini-sub2api --state-dir ./state credential disable cred_EXAMPLE
-build/bin/mini-sub2api --state-dir ./state credential enable cred_EXAMPLE
-build/bin/mini-sub2api --state-dir ./state credential revoke cred_EXAMPLE --yes
-build/bin/mini-sub2api --state-dir ./state credential remove cred_EXAMPLE --yes
-
-# Downstream keys
-build/bin/mini-sub2api --state-dir ./state key list
-build/bin/mini-sub2api --state-dir ./state key revoke key_EXAMPLE --yes
-
-# Usage
-build/bin/mini-sub2api --state-dir ./state \
-  usage history --key key_EXAMPLE --limit 100
-build/bin/mini-sub2api --state-dir ./state \
-  usage stats --key key_EXAMPLE --since 2026-08-01 --until 2026-08-31
-build/bin/mini-sub2api --state-dir ./state \
-  usage prune --before 2026-08-01 --yes
+build/bin/mini-sub2api credential list
+build/bin/mini-sub2api credential disable cred_EXAMPLE
+build/bin/mini-sub2api credential fingerprint cred_EXAMPLE --mode off
+build/bin/mini-sub2api credential enable cred_EXAMPLE
+build/bin/mini-sub2api credential revoke cred_EXAMPLE --yes
+build/bin/mini-sub2api key list
+build/bin/mini-sub2api key revoke key_EXAMPLE --yes
+build/bin/mini-sub2api usage history --key key_EXAMPLE --limit 100
+build/bin/mini-sub2api usage stats --key key_EXAMPLE --since 2026-08-01 --until 2026-08-31
+build/bin/mini-sub2api usage prune --before 2026-08-01 --yes
 ```
 
-Changing fingerprint mode requires a disabled credential:
+Mode changes require disabled/drained credentials. `revoke` revokes OAuth upstream before deletion;
+`remove` deletes local service material. Forced removal without revocation requires
+`--force-service-only --yes`. Deletion rechecks keys/in-flight work, remains available for corrupt
+identity state and removes shared state after its final owner.
+
+Usage belongs to the Key. Details default to seven days; `serve --usage-retention-days N` changes this,
+and `0` disables automatic pruning. Daily aggregates survive. A bounded provider request ID may be
+retained in private diagnostics, never exposed publicly.
+
+## Deployment
+
+Ship both binaries and build-info.json together. Plain HTTP binds only loopback; other listeners need TLS:
 
 ```bash
-build/bin/mini-sub2api --state-dir ./state \
-  credential fingerprint cred_EXAMPLE --mode off
+build/bin/mini-sub2api serve --listen 192.0.2.20:8787 --tls-cert ./server.crt --tls-key ./server.key
 ```
 
-`revoke` revokes OAuth upstream before local deletion. `remove` deletes service-side material;
-forcing OAuth removal without upstream revocation requires `--force-service-only --yes`.
+An optional TLS proxy must forward to local loopback and preserve streaming/WS upgrades. Run one
+service per state directory; no active-active operation. Stop it before copying/restoring state.
+Shutdown joins Core and both WS pumps, including terminal usage writes.
 
-## Deployment and security
-
-Plain HTTP may bind only to loopback. A non-loopback listener requires a certificate and private key:
-
-```bash
-build/bin/mini-sub2api --state-dir ./state serve \
-  --listen 192.0.2.20:8787 \
-  --tls-cert ./server.crt \
-  --tls-key ./server.key
-```
-
-A reverse proxy may terminate TLS when it forwards to a deployment-local loopback listener,
-preserves streaming, and supports WebSocket Upgrade without buffering.
-
-Operational boundaries:
-
-- Run one coordinator/core pair per state directory; the service is node-local and not active-active.
-- Stop the service before backing up or restoring the complete state directory.
-- Vault and identity files use private permissions but are not encrypted at rest.
-- Request/response bodies, content, tool arguments, workspaces, and credentials are not persisted in
-  identity state. Only bounded schema-recognized ID pairs are retained for reversible translation.
-- Local request history may retain one visible-ASCII provider request ID for seven days by default;
-  it is never exposed through the public Responses API.
-- Provider HTTP clients refuse redirects. Plain HTTP test overrides are accepted only for literal
-  loopback IPs.
-- Credential deletion remains available when request state is corrupt; the final owner removes the
-  shared state file. Remove/revoke rechecks disabled, key, and in-flight state under one mutation
-  fence before core material is irreversibly removed.
+Bodies and raw Keys are not persisted. Identity files keep bounded typed ID pairs; protect them like
+the vault. Provider clients reject redirects; plain-HTTP test overrides accept literal loopback IPs only.

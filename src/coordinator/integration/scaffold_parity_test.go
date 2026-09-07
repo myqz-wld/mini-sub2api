@@ -70,6 +70,7 @@ func TestOpenCodeResponsesCapture(t *testing.T) {
 						}
 						continue
 					}
+					assertScaffoldCustomSession(t, packets[i], session)
 					assertScaffoldMessageParity(t, packets[i], wire)
 					if wire.value["previous_response_id"] != nil {
 						t.Fatal("OpenCode Subscription HTTP sent an incremental reference")
@@ -78,9 +79,46 @@ func TestOpenCodeResponsesCapture(t *testing.T) {
 						assertNativeLiteIDs(t, wire)
 					}
 				}
+				if route == "subscription" {
+					assertScaffoldContinuation(t, wires, false)
+				}
 				saveFinalCapture(t, packets, wires)
 			})
 		}
+	}
+}
+
+func assertScaffoldCustomSession(t *testing.T, packet nativePacket, session string) {
+	t.Helper()
+	if packet.headers.Get("Session-Id") != "" || packet.headers.Get("Originator") != "" ||
+		packet.headers.Get("X-Session-Id") != session || packet.headers.Get("X-Session-Affinity") != session {
+		t.Fatal("custom-provider fixture no longer exercises anonymous history association")
+	}
+	caller := decodeNativePacket(t, packet)
+	metadata, _ := caller["client_metadata"].(map[string]any)
+	if caller["previous_response_id"] != nil || metadata["session_id"] != nil {
+		t.Fatal("custom-provider fixture supplied an explicit gateway context locator")
+	}
+}
+
+// A successful full-context request alone does not prove that the gateway associated its history.
+func assertScaffoldContinuation(t *testing.T, wires []nativeWire, toolFollowup bool) {
+	t.Helper()
+	if len(wires) != 2 {
+		t.Fatal("scaffold continuation requires exactly two captured requests")
+	}
+	first, _ := wires[0].value["client_metadata"].(map[string]any)
+	second, _ := wires[1].value["client_metadata"].(map[string]any)
+	for _, field := range []string{"session_id", "thread_id"} {
+		value, ok := first[field].(string)
+		if !ok || value == "" || value != second[field] {
+			t.Fatalf("scaffold continuation changed %s", field)
+		}
+	}
+	firstTurn, _ := first["turn_id"].(string)
+	secondTurn, _ := second["turn_id"].(string)
+	if firstTurn == "" || secondTurn == "" || (firstTurn == secondTurn) != toolFollowup {
+		t.Fatal("scaffold continuation did not preserve tool turns or advance user turns")
 	}
 }
 

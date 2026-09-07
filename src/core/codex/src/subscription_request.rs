@@ -248,6 +248,13 @@ pub(crate) struct Dependencies {
     pub(crate) items: BTreeSet<String>,
 }
 
+pub(crate) fn uses_direct_call_reference(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_call" | "custom_tool_call" | "function_call_output" | "custom_tool_call_output"
+    )
+}
+
 impl Dependencies {
     pub(crate) fn append(&mut self, items: &[Value]) -> Result<(), Error> {
         for item in items {
@@ -265,7 +272,11 @@ impl Dependencies {
             if let Some(id) = optional_id(item.get("id"))? {
                 self.items.insert(id);
             }
-            if let Some(call) = optional_id(item.get("call_id"))? {
+            let call = optional_id(item.get("call_id"))?;
+            if uses_direct_call_reference(kind) && call.is_none() {
+                return Err(Error::InvalidRequest);
+            }
+            if let Some(call) = call {
                 if kind.ends_with("_output") {
                     let consumed = self.calls.get_mut(&call).ok_or(Error::StateUnavailable)?;
                     if *consumed {

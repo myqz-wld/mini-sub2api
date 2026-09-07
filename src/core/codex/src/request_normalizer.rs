@@ -14,6 +14,7 @@ use serde_json::Value;
 
 #[path = "request_emulation_overlay.rs"]
 mod overlay;
+pub(crate) use overlay::filter_subscription_fields;
 
 pub(crate) use request_identity::CodexTransport as EmulationTransport;
 

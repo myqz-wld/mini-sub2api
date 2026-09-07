@@ -74,16 +74,7 @@ pub(super) fn apply(
     force_lite: bool,
 ) -> Result<(Vec<String>, Vec<usize>), ()> {
     let caller_base = codex_instructions::has_valid_instructions(object);
-    object.retain(|name, _| {
-        SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
-            || match transport {
-                EmulationTransport::Http => SUPPORTED_HTTP_FIELDS.contains(&name.as_str()),
-                EmulationTransport::WebSocket => {
-                    SUPPORTED_WEBSOCKET_FIELDS.contains(&name.as_str())
-                }
-            }
-    });
-    strip_unsupported_codex_emulation_fields(object);
+    retain_codex_fields(object, transport);
     canonicalize_structured_request_members(object);
     let mut model_profile = object
         .get("model")
@@ -155,10 +146,29 @@ pub(super) fn apply(
     Ok((synthesized_item_ids, prefixes))
 }
 
-fn strip_unsupported_codex_emulation_fields(object: &mut Map<String, Value>) {
+fn retain_codex_fields(object: &mut Map<String, Value>, transport: EmulationTransport) {
+    object.retain(|name, _| {
+        SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
+            || match transport {
+                EmulationTransport::Http => SUPPORTED_HTTP_FIELDS.contains(&name.as_str()),
+                EmulationTransport::WebSocket => {
+                    SUPPORTED_WEBSOCKET_FIELDS.contains(&name.as_str())
+                }
+            }
+    });
     for field in UNSUPPORTED_CODEX_EMULATION_FIELDS {
         object.remove(*field);
     }
+}
+
+/// History eligibility compares effective caller settings using the same field policy as sending.
+/// This does not rewrite messages, identities, tools or instruction placement.
+pub(crate) fn filter_subscription_fields(
+    object: &mut Map<String, Value>,
+    transport: EmulationTransport,
+) {
+    retain_codex_fields(object, transport);
+    strip_unsupported_subscription_fields(object);
 }
 
 fn enforce_upstream_transport_controls(

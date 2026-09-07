@@ -105,7 +105,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		if errors.As(err, &tooLarge) {
 			status = http.StatusRequestEntityTooLarge
 			code = "request_too_large"
-			message = "The request body exceeds the 16 MiB limit."
+			message = fmt.Sprintf("The request body exceeds the %d-byte limit.", h.requestLimit)
 		}
 		terminal := storage.RequestUpstreamErr
 		if request.Context().Err() != nil {

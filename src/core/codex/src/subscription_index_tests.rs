@@ -53,6 +53,73 @@ fn exact_interning_never_treats_omitted_ids_as_a_transitive_wildcard() {
 }
 
 #[test]
+fn call_id_compatibility_keeps_full_items_distinct_and_preserves_reference_ids() {
+    let mut pool = Interner::default();
+    let call = |id| {
+        json!({"type":"function_call","id":id,"call_id":"call",
+        "name":"tool","arguments":"{}","status":"completed"})
+    };
+    let a = pool.intern(call("a"));
+    let b = pool.intern(call("b"));
+    let omitted = json!({"type":"function_call","call_id":"call","name":"tool","arguments":"{}"});
+    let c = pool.intern(omitted.clone());
+    assert_eq!(a.key.id, b.key.id);
+    assert_eq!(a.key.id, c.key.id);
+    assert!(!Arc::ptr_eq(&a, &b) && !Arc::ptr_eq(&a, &c));
+    assert!(ids_compatible(&omitted, &a.value));
+    assert!(ids_compatible(&omitted, &b.value));
+    assert!(!ids_compatible(&a.value, &b.value));
+    assert!(!ids_compatible(&a.value, &omitted));
+    for kind in [
+        "reasoning",
+        "additional_tools",
+        "item_reference",
+        "file_search_call",
+        "program",
+    ] {
+        let supplied = json!({"type":kind,"id":"required-id","call_id":"call","content":[]});
+        let mut missing = supplied.clone();
+        missing.as_object_mut().unwrap().remove("id");
+        assert!(candidate_key(&supplied) != candidate_key(&missing));
+        assert!(!ids_compatible(&missing, &supplied));
+    }
+    for call_id in [Value::Null, json!(""), json!(" \n"), json!({"id":"nested"})] {
+        let supplied = json!({"type":"function_call","call_id":call_id,"id":"required-id"});
+        let mut missing = supplied.clone();
+        missing.as_object_mut().unwrap().remove("id");
+        assert!(candidate_key(&supplied) != candidate_key(&missing));
+    }
+}
+
+#[test]
+fn empty_output_decoration_is_schema_bounded_and_does_not_change_exact_storage() {
+    let mut pool = Interner::default();
+    let full = json!({"type":"message","role":"assistant","content":[
+        {"type":"output_text","text":"answer","annotations":[],"logprobs":[]} ]});
+    let reduced = json!({"type":"message","role":"assistant","content":[
+        {"type":"output_text","text":"answer"} ]});
+    let a = pool.intern(full.clone());
+    let b = pool.intern(reduced.clone());
+    assert_eq!(a.key.id, b.key.id);
+    assert!(!Arc::ptr_eq(&a, &b));
+    assert!(a.value == full && b.value == reduced);
+    assert!(!completion_items_compatible(&full, &reduced));
+    for (role, kind) in [
+        ("user", "input_text"),
+        ("developer", "output_text"),
+        ("assistant", "refusal"),
+    ] {
+        let mut full = full.clone();
+        let mut reduced = reduced.clone();
+        for value in [&mut full, &mut reduced] {
+            value["role"] = role.into();
+            value["content"][0]["type"] = kind.into();
+        }
+        assert!(candidate_key(&full) != candidate_key(&reduced));
+    }
+}
+
+#[test]
 fn digest_bucket_hits_always_verify_exact_bytes() {
     let mut pool = Interner::default();
     let a = pool.intern(json!({"type":"message","role":"user","content":[]}));

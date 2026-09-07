@@ -1,5 +1,5 @@
 use crate::subscription_context::{ContextStore, Operation, Pending};
-use crate::subscription_index::{History, candidate_key, ids_compatible};
+use crate::subscription_index::{History, completion_items_compatible};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
@@ -179,10 +179,10 @@ impl ContextStore {
         let output: Cow<'_, [Value]> =
             if let Some(output) = crate::response_output::populated(response.get("output")) {
                 for (index, item) in &active.output {
-                    if output.get(*index).is_none_or(|final_item| {
-                        candidate_key(item) != candidate_key(final_item)
-                            || !ids_compatible(item, final_item)
-                    }) {
+                    if output
+                        .get(*index)
+                        .is_none_or(|final_item| !completion_items_compatible(item, final_item))
+                    {
                         active.output_available = false;
                         active.dependencies_available = false;
                     }

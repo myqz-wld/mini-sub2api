@@ -69,8 +69,12 @@ func TestOpenCodeReadToolCapture(t *testing.T) {
 							t.Fatal("OpenCode API-key read request changed")
 						}
 					} else {
+						assertScaffoldCustomSession(t, packets[i], session)
 						assertScaffoldMessageParity(t, packets[i], wire)
 					}
+				}
+				if route == "subscription" {
+					assertScaffoldContinuation(t, wires, true)
 				}
 				saveFinalCapture(t, packets, wires)
 			})
