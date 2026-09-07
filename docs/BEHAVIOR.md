@@ -33,8 +33,9 @@ history. A local prefix match alone does not prove upstream WS reuse.
 
 Within Key/account scope: original HTTP/WS handshake `session-id` → `client_metadata.session_id` →
 turn metadata session ID. Otherwise use a known previous-response association, then an eligible full
-history prefix, then initialize. WS first-frame selection binds the connection; later frames reject
-cross-session identities, supply current turn/window evidence, and reconnect locates again.
+history prefix or verified anonymous checkpoint association, then initialize. WS first-frame selection
+binds the connection; later frames reject cross-session identities, supply current turn/window
+evidence, and reconnect locates again.
 `conversation_id`, cache/request/thread/window IDs are not locators. Mapped top-level `conversation`
 is only compatibility evidence, not complete local history.
 
@@ -54,6 +55,15 @@ Matching uses normalized caller input and public-side output, before identity/Li
   require nonblank IDs; results consume known calls once. Conflict never selects by recency.
 - Settings share the sending field filter and selected-format defaults. Discarded controls do not
   split history. Exact content storage and provider-output/WS-send comparisons remain separate.
+
+If anonymous full input has no eligible prefix, its last compaction item can locate a uniquely owned,
+completed compaction in the same Key's anonymous pool. Match the entire structured item, including ID
+and encrypted bytes, under the existing internal-metadata normalization. This restores identity and
+window only: validate source lineage and the current input's dependencies, send the caller's complete
+replacement with current settings, and do not inherit the old turn or authorize WS reuse from this
+association. Changed/missing checkpoint IDs and external summaries provide no fallback authority;
+conflicting owners fail closed. Verified checkpoint-only windows also qualify for completed-prefix indexing.
+Checkpoint indexes expire/evict with the source history and remain within the same memory budgets.
 
 Explicit turns take priority; tool follow-ups retain their turn, and quiescent new user input starts
 one. Equivalent contexts share immutable content, not active/tool state. Each branch/turn and WS

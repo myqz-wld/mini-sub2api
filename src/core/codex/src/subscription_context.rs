@@ -43,6 +43,7 @@ pub(crate) struct Scope {
     pub(crate) routing: HashMap<String, String>,
     pub(crate) bindings: HashMap<String, String>,
     pub(crate) index: HashMap<Option<String>, Radix>,
+    pub(crate) checkpoints: HashMap<u64, Vec<String>>,
     pub(crate) interner: Interner,
     pub(crate) settings_pool: HashMap<[u8; 32], Vec<Weak<Value>>>,
 }
@@ -70,6 +71,8 @@ pub(crate) struct Record {
     // on that same socket/thread. It is live connection metadata, never persisted body history.
     pub(crate) startup_token: Option<String>,
     pub(crate) compaction: Option<crate::request_compaction::PendingCompaction>,
+    // Set only by accepted output replacement; never inferred from caller input.
+    pub(crate) compaction_key: Option<u64>,
     pub(crate) last_used: Instant,
 }
 
@@ -310,6 +313,10 @@ impl ContextStore {
 #[path = "subscription_retention.rs"]
 mod retention;
 
+#[path = "subscription_checkpoint.rs"]
+mod checkpoint;
+pub(crate) use checkpoint::CheckpointAssociation;
+
 impl Record {
     pub(crate) fn descriptor_cost(&self) -> usize {
         2048 + self.dependencies.cost()
@@ -349,43 +356,6 @@ impl Scope {
         });
     }
 
-    pub(crate) fn rebuild_index(&mut self) {
-        self.index.clear();
-        for (id, record) in &self.records {
-            if !record.completed {
-                continue;
-            }
-            let Some(history) = &record.history else {
-                continue;
-            };
-            // An empty/setup-only completion is never an anonymous association terminal.
-            let items = history.items();
-            if !items.iter().any(|item| {
-                matches!(
-                    item.value.get("role").and_then(Value::as_str),
-                    Some("user" | "assistant")
-                )
-            }) {
-                continue;
-            }
-            let path: Vec<_> = items.iter().map(|item| item.key.id).collect();
-            self.index
-                .entry(Some(record.identity.session_id.clone()))
-                .or_default()
-                .insert(&path, id.clone());
-            if self
-                .sessions
-                .get(&record.identity.session_id)
-                .is_some_and(|session| !session.explicit)
-            {
-                self.index
-                    .entry(None)
-                    .or_default()
-                    .insert(&path, id.clone());
-            }
-        }
-    }
-
     pub(crate) fn intern_settings(&mut self, value: Value, hash: [u8; 32]) -> Arc<Value> {
         let bucket = self.settings_pool.entry(hash).or_default();
         bucket.retain(|v| v.strong_count() > 0);
@@ -422,6 +392,7 @@ impl Scope {
                 })
                 .sum::<usize>()
             + self.index.values().map(Radix::cost).sum::<usize>()
+            + self.checkpoint_index_cost(None)
             + self.settings_pool.len() * 128
             + (self.sessions.len()
                 + self.aliases.len()
@@ -452,6 +423,7 @@ impl Scope {
             }
         }
         cost + self.index.get(&Some(session.into())).map_or(0, Radix::cost)
+            + self.checkpoint_index_cost(Some(session))
             + self
                 .aliases
                 .values()

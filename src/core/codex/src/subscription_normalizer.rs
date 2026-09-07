@@ -123,11 +123,7 @@ pub(crate) async fn prepare_stateful_codex_request(
         .as_object_mut()
         .ok_or(Error::InvalidRequest)?;
     metadata.insert("session_id".into(), Value::String(session));
-    if let Some(inherited) = plan
-        .baseline
-        .as_ref()
-        .map(|base| &base.identity)
-        .or(context.binding)
+    if let Some(inherited) = plan.identity_baseline().or(context.binding)
         && (!identity_evidence.explicit_thread_lineage
             || (identity_evidence.parent_thread.is_none() && identity_evidence.thread.is_none()))
         && inherited.thread_id != inherited.session_id
@@ -146,13 +142,10 @@ pub(crate) async fn prepare_stateful_codex_request(
             ),
         );
     }
-    if let Some(base) = &plan.baseline
+    if let Some(base) = plan.identity_baseline()
         && identity_evidence.window_number.is_none()
     {
-        metadata.insert(
-            "x-codex-window-id".into(),
-            Value::String(base.identity.window_id()),
-        );
+        metadata.insert("x-codex-window-id".into(), Value::String(base.window_id()));
     }
     if identity_evidence.is_prewarm() {
         metadata.insert("turn_id".into(), Value::String(String::new()));

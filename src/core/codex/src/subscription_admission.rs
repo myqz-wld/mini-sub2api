@@ -122,6 +122,7 @@ impl ContextStore {
             completed: false,
             startup_token: None,
             compaction,
+            compaction_key: None,
             last_used: now,
         };
         let id = plan.admission.0.id.clone();

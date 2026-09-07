@@ -1,7 +1,8 @@
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_normalizer::{EmulationTransport, StatefulPrepareError as Error};
 use crate::subscription_context::{
-    Active, ContextStore, Lease, Operation, Pending, Publication, Record, Session,
+    Active, CheckpointAssociation, ContextStore, Lease, Operation, Pending, Publication, Record,
+    Session,
 };
 use crate::subscription_index::{History, canonical, ids_compatible, settings};
 use crate::subscription_request::{Dependencies, Evidence, Format};
@@ -21,6 +22,7 @@ pub(crate) struct ContextPlan {
     pub(crate) session: Option<String>,
     pub(crate) turn: Option<String>,
     pub(crate) baseline: Option<Record>,
+    pub(crate) checkpoint: Option<CheckpointAssociation>,
     pub(crate) branch: Option<String>,
     pub(crate) caller_format: Format,
     pub(crate) admission: Operation,
@@ -156,6 +158,18 @@ impl ContextStore {
             None
         };
 
+        let checkpoint = if baseline.is_none() && session.is_none() && evidence.previous.is_none() {
+            scope
+                .map(|scope| scope.checkpoint_association(&evidence.input))
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        if let Some(source) = &checkpoint {
+            session = Some(source.identity.session_id.clone());
+        }
+
         let caller_format = evidence
             .declared_format
             .or_else(|| baseline.as_ref().map(|r| r.caller_format))
@@ -248,7 +262,10 @@ impl ContextStore {
         let branch = if independent_branch {
             Some(Uuid::now_v7().to_string())
         } else {
-            baseline.as_ref().map(|r| r.branch.clone())
+            baseline
+                .as_ref()
+                .map(|r| r.branch.clone())
+                .or_else(|| checkpoint.as_ref().map(|source| source.branch.clone()))
         };
         let session = session.or_else(|| Some(Uuid::now_v7().to_string()));
         let reserved = canonical(&Value::Array(evidence.input.clone()))
@@ -319,6 +336,7 @@ impl ContextStore {
             session,
             turn,
             baseline,
+            checkpoint,
             branch,
             caller_format,
             admission,
@@ -357,6 +375,13 @@ fn local_dependencies(record: &Record) -> Dependencies {
 }
 
 impl ContextPlan {
+    pub(crate) fn identity_baseline(&self) -> Option<&ResolvedRequestIdentity> {
+        self.baseline
+            .as_ref()
+            .map(|record| &record.identity)
+            .or_else(|| self.checkpoint.as_ref().map(|source| &source.identity))
+    }
+
     pub(crate) fn full_input(&self, store: &ContextStore) -> Result<Vec<Value>, Error> {
         if self.evidence.previous.is_none() {
             return Ok(self.evidence.input.clone());

@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 #[path = "subscription_compaction_lite_tests.rs"]
 mod lite_tests;
 
+#[path = "subscription_checkpoint_tests.rs"]
+mod checkpoint_tests;
+
 fn compacted(text: &str) -> Value {
     json!({"type":"compaction","id":"cmp_checkpoint","encrypted_content":text})
 }

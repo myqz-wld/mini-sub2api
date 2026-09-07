@@ -277,6 +277,12 @@ impl ContextStore {
                             .cloned()
                             .map(|item| scope.interner.intern(item)),
                     );
+                    active.record.compaction_key = input
+                        .iter()
+                        .find(|item| {
+                            item.value.get("type").and_then(Value::as_str) == Some("compaction")
+                        })
+                        .map(|item| item.key.id);
                     Some(History::extend(None, input))
                 }
                 compaction::Window::Unavailable => None,

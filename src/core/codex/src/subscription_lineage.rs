@@ -27,25 +27,27 @@ impl ContextPlan {
         editor: &mut RequestStateEditor<'_>,
         evidence: &mut crate::request_identity_evidence::RequestIdentityEvidence,
     ) -> anyhow::Result<()> {
-        if evidence.forked_from_thread.is_some() || self.evidence.previous.is_none() {
+        if evidence.forked_from_thread.is_some()
+            || (self.evidence.previous.is_none() && self.checkpoint.is_none())
+        {
             return Ok(());
         }
-        let Some(base) = &self.baseline else {
+        let Some(base) = self.identity_baseline() else {
             return Ok(());
         };
-        let Some(source) = &base.identity.forked_from_thread_id else {
+        let Some(source) = &base.forked_from_thread_id else {
             return Ok(());
         };
         let mut same_thread = !evidence.explicit_thread_lineage;
         if let Some(thread) = &evidence.thread {
-            same_thread |= thread == &base.identity.thread_id
+            same_thread |= thread == &base.thread_id
                 || editor
                     .existing_wire_from_downstream(
                         crate::request_state_types::WireIdDomain::Thread,
                         thread,
                     )?
                     .as_ref()
-                    == Some(&base.identity.thread_id);
+                    == Some(&base.thread_id);
         }
         if same_thread {
             // A previous-only continuation restores the referenced thread's known provenance.
@@ -61,16 +63,26 @@ impl ContextPlan {
         identity: &ResolvedRequestIdentity,
         object: &Map<String, Value>,
     ) -> anyhow::Result<HistoryLineage> {
-        let baseline = self.evidence.previous.as_ref().and(self.baseline.as_ref());
+        let baseline = self
+            .evidence
+            .previous
+            .as_ref()
+            .and(self.baseline.as_ref())
+            .map(|record| (&record.identity, &record.lineage))
+            .or_else(|| {
+                self.checkpoint
+                    .as_ref()
+                    .map(|source| (&source.identity, &source.lineage))
+            });
         let mut lineage = HistoryLineage::default();
-        if let Some(baseline) = baseline {
+        if let Some((source, source_lineage)) = baseline {
             anyhow::ensure!(
-                editor.history_thread_allowed(&baseline.identity.thread_id, identity),
+                editor.history_thread_allowed(&source.thread_id, identity),
                 "previous response belongs to an unrelated historical thread"
             );
             // Validate all effective history, including a prior response's explicitly copied fork
             // source. The response owner alone cannot establish eligibility of that earlier history.
-            for turn in baseline.lineage.turns.iter() {
+            for turn in source_lineage.turns.iter() {
                 if let Some((_, known)) = editor.turn_by_id(turn) {
                     anyhow::ensure!(
                         editor.history_thread_allowed(&known.thread_id, identity),
@@ -78,7 +90,7 @@ impl ContextPlan {
                     );
                 }
             }
-            lineage = baseline.lineage.clone();
+            lineage = source_lineage.clone();
         }
         if let Some(items) = object.get("input").and_then(Value::as_array) {
             for turn in items.iter().filter_map(|item| {
