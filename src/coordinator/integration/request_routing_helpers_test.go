@@ -139,21 +139,6 @@ func assertAPIKeyCapture(t *testing.T, capture routingMatrixCapture, wantBody []
 	}
 }
 
-func assertCodexOpenAIProfileCapture(t *testing.T, capture routingMatrixCapture) {
-	t.Helper()
-	if capture.Headers.Get("Authorization") != "Bearer "+upstreamAPIKey ||
-		capture.Headers.Get("ChatGPT-Account-ID") != "" || capture.Headers.Get("Content-Encoding") != "" ||
-		capture.Headers.Get("X-Codex-Routing-Hint") != "" {
-		t.Fatal("Codex API-key profile crossed a subscription credential boundary")
-	}
-	if capture.Headers.Get("Originator") != "codex-tui" ||
-		capture.Headers.Get("Version") != "0.153.4" ||
-		capture.Headers.Get("Accept") != "text/event-stream" {
-		t.Fatalf("Codex API-key identity headers = %#v", capture.Headers)
-	}
-	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
-}
-
 func assertSubscriptionCapture(
 	t *testing.T,
 	capture routingMatrixCapture,

@@ -27,6 +27,7 @@ var forwardedRequestHeaders = map[string]bool{
 	"Openai-Project":                         true,
 	"X-Client-Request-Id":                    true,
 	"X-Codex-Beta-Features":                  true,
+	"X-Codex-Routing-Hint":                   true,
 	"X-Codex-Inference-Call-Id":              true,
 	"X-Codex-Turn-State":                     true,
 	"X-Codex-Turn-Metadata":                  true,

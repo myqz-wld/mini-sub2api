@@ -66,6 +66,8 @@ The coordinator may forward only these public-client headers to the core:
 - `originator`
 - `session-id`
 - `thread-id`
+- `traceparent`
+- `tracestate`
 - `user-agent`
 - `version`
 - `openai-beta`
@@ -73,6 +75,7 @@ The coordinator may forward only these public-client headers to the core:
 - `openai-project`
 - `x-client-request-id`
 - `x-codex-beta-features`
+- `x-codex-routing-hint`
 - `x-codex-inference-call-id`
 - `x-codex-turn-state`
 - `x-codex-turn-metadata`
@@ -109,10 +112,13 @@ application frames and response bodies remain byte-transparent, including Codex-
 that path never reads identity/context state or applies the Subscription schema/default filter.
 Authentication, admission, accounting and the reviewed header allowlists still apply.
 
+Caller `x-codex-routing-hint` is preserved for API-key HTTP/WS requests, including an explicit empty
+value; omission stays omission. Subscription derives its hint from the actual model/service tier.
+
 Subscription replaces `User-Agent`, `originator`, and `version` with the runtime-derived Codex
 v0.153.4 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
 level-3 zstd. Only API-key upstreams receive `OpenAI-Organization`, `OpenAI-Project` and reviewed
-`X-Stainless-*` headers. Both layers remove cookies, proxy authentication, forwarding headers,
+`X-Stainless-*` headers. Both layers remove caller cookies, proxy authentication, forwarding headers,
 content length, transfer encoding, connection-specific headers, unreviewed internal headers and
 unknown `X-Stainless-*` headers.
 

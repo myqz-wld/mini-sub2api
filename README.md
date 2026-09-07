@@ -5,7 +5,7 @@ Each distribution Key binds one credential; request status, latency and usage ar
 
 | Upstream | Behavior for every caller |
 |---|---|
-| API key | Pass bodies/valid WS frames through; retain gateway auth, admission and response-header policy. |
+| API key | Pass bodies/valid WS frames and caller `X-Codex-Routing-Hint` through; retain gateway auth, admission and response-header policy. |
 | Codex Subscription | Emulate Codex 0.153.4 for native Codex, bare API and third-party Responses clients. |
 
 No account pool, automatic switching, Chat Completions or admin HTTP API.

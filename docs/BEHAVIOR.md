@@ -12,6 +12,9 @@ Chat Completions or conversation-management API is provided.
 | API key | Bodies and valid WS frames pass through unchanged; gateway auth, admission, usage and response-header policy remain. |
 | Subscription | Codex 0.153.4 request format, defaults and scoped identities; HTTP zstd level 3, WS JSON. |
 
+Caller `X-Codex-Routing-Hint` passes through for API-key HTTP/WS; a missing hint stays absent.
+Subscription constructs its hint from the actual request model/service tier.
+
 HTTP stays HTTP; WS stays WS, including recovery. Nonblank `Originator` only disables gateway-added
 WS prewarm/automatic incrementality; it never bypasses emulation. Ordinary WS callers may receive
 hidden `generate:false` setup and suffix sending when saved config/input/output and thread/socket match.
