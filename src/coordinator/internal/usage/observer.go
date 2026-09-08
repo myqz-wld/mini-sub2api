@@ -7,11 +7,14 @@ import (
 	"strings"
 
 	"mini-sub2api/src/coordinator/internal/storage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
-const maxObservedEventBytes = 8 * 1024 * 1024
-
 type Observer struct {
+	maximum         int
+	lineLength      uint8
+	lineCR          bool
+	dropping        bool
 	streaming       bool
 	detectStreaming bool
 	disabled        bool
@@ -34,6 +37,7 @@ func NewObserver(contentType string) *Observer {
 		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
 	}
 	return &Observer{
+		maximum:         int(protocolv1.MustInferenceLimits().OutputBytes),
 		streaming:       strings.EqualFold(mediaType, "text/event-stream"),
 		detectStreaming: mediaType == "",
 	}
@@ -43,23 +47,84 @@ func (o *Observer) Observe(chunk []byte) {
 	if o.disabled || len(chunk) == 0 {
 		return
 	}
-	if len(o.buffer)+len(chunk) > maxObservedEventBytes {
+	if o.streaming {
+		o.observeSSE(chunk)
+		return
+	}
+	if len(chunk) > o.maximum-len(o.buffer) {
 		o.buffer = nil
 		o.disabled = true
 		return
 	}
 	o.buffer = append(o.buffer, chunk...)
-	if !o.streaming && o.detectStreaming && looksLikeSSE(o.buffer) {
+	if o.detectStreaming && looksLikeSSE(o.buffer) {
 		o.streaming = true
-	}
-	if o.streaming {
-		o.consumeSSEEvents()
+		pending := o.buffer
+		o.buffer = nil
+		o.observeSSE(pending)
 	}
 }
 
+// Scan each byte once, even when a single event approaches the response budget.
+// An over-budget event is ignored; its delimiter restores observation of later events.
+func (o *Observer) observeSSE(chunk []byte) {
+	for len(chunk) > 0 {
+		end := o.eventBoundary(chunk)
+		size := len(chunk)
+		if end >= 0 {
+			size = end
+		}
+		if !o.dropping {
+			if size > o.maximum-len(o.buffer) {
+				o.buffer = nil
+				o.dropping = true
+			} else {
+				o.buffer = append(o.buffer, chunk[:size]...)
+			}
+		}
+		chunk = chunk[size:]
+		if end < 0 {
+			return
+		}
+		if !o.dropping {
+			o.acceptEvent(o.buffer)
+		}
+		o.buffer = nil
+		o.dropping = false
+	}
+}
+
+func (o *Observer) eventBoundary(chunk []byte) int {
+	for i, b := range chunk {
+		if b == '\n' {
+			empty := o.lineLength == 0 || (o.lineLength == 1 && o.lineCR)
+			o.lineLength = 0
+			o.lineCR = false
+			if empty {
+				return i + 1
+			}
+		} else {
+			if o.lineLength == 0 {
+				o.lineCR = b == '\r'
+			}
+			o.lineLength = min(o.lineLength+1, 2)
+		}
+	}
+	return -1
+}
+
+func (o *Observer) acceptEvent(event []byte) {
+	data := eventData(event)
+	if len(data) != 0 && !bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		o.acceptJSON(data)
+	}
+}
+
+func (o *Observer) IsStreaming() bool { return o.streaming }
+
 func looksLikeSSE(buffer []byte) bool {
 	trimmed := bytes.TrimLeft(buffer, " \t\r\n")
-	return bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:"))
+	return bytes.HasPrefix(trimmed, []byte("event:")) || bytes.HasPrefix(trimmed, []byte("data:")) || bytes.HasPrefix(trimmed, []byte(":"))
 }
 
 func (o *Observer) Usage() *storage.TokenUsage {
@@ -79,29 +144,10 @@ func (o *Observer) TerminalStatus() TerminalStatus {
 func (o *Observer) finish() {
 	if !o.streaming && !o.disabled && len(o.buffer) > 0 {
 		o.acceptJSON(o.buffer)
-		o.buffer = nil
-	} else if o.streaming && !o.disabled && len(o.buffer) > 0 {
-		data := eventData(o.buffer)
-		if len(data) != 0 && !bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-			o.acceptJSON(data)
-		}
-		o.buffer = nil
+	} else if o.streaming && !o.dropping && len(o.buffer) > 0 {
+		o.acceptEvent(o.buffer)
 	}
-}
-
-func (o *Observer) consumeSSEEvents() {
-	for {
-		index, delimiterLength := nextEventBoundary(o.buffer)
-		if index < 0 {
-			return
-		}
-		event := o.buffer[:index]
-		o.buffer = o.buffer[index+delimiterLength:]
-		data := eventData(event)
-		if len(data) != 0 && !bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
-			o.acceptJSON(data)
-		}
-	}
+	o.buffer = nil
 }
 
 func (o *Observer) acceptJSON(data []byte) {
@@ -116,6 +162,9 @@ func (o *Observer) acceptJSON(data []byte) {
 }
 
 func (o *Observer) observeTerminal(eventType, responseStatus string) {
+	if o.terminal == TerminalUpstreamError {
+		return
+	}
 	switch eventType {
 	case "response.completed":
 		o.terminal = TerminalCompleted
@@ -131,37 +180,18 @@ func (o *Observer) observeTerminal(eventType, responseStatus string) {
 	}
 }
 
-func nextEventBoundary(buffer []byte) (int, int) {
-	lf := bytes.Index(buffer, []byte("\n\n"))
-	crlf := bytes.Index(buffer, []byte("\r\n\r\n"))
-	switch {
-	case lf < 0:
-		if crlf < 0 {
-			return -1, 0
-		}
-		return crlf, 4
-	case crlf < 0 || lf < crlf:
-		return lf, 2
-	default:
-		return crlf, 4
-	}
-}
-
 func eventData(event []byte) []byte {
-	lines := bytes.Split(bytes.ReplaceAll(event, []byte("\r\n"), []byte("\n")), []byte("\n"))
-	var data []byte
-	for _, line := range lines {
-		if !bytes.HasPrefix(line, []byte("data:")) {
-			continue
+	var parts [][]byte
+	for _, line := range bytes.Split(event, []byte("\n")) {
+		line = bytes.TrimSuffix(line, []byte("\r"))
+		if value, ok := bytes.CutPrefix(line, []byte("data:")); ok {
+			parts = append(parts, bytes.TrimPrefix(value, []byte(" ")))
 		}
-		value := bytes.TrimPrefix(line, []byte("data:"))
-		value = bytes.TrimPrefix(value, []byte(" "))
-		if len(data) > 0 {
-			data = append(data, '\n')
-		}
-		data = append(data, value...)
 	}
-	return data
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return bytes.Join(parts, []byte("\n"))
 }
 
 type responseEnvelope struct {

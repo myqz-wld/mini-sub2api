@@ -45,6 +45,9 @@ func streamBody(
 			if observer.TerminalStatus() == usage.TerminalUpstreamError {
 				return observedUsage, streamResponseFailed
 			}
+			if observer.IsStreaming() && observer.TerminalStatus() != usage.TerminalCompleted {
+				return observedUsage, streamUpstreamError
+			}
 			return observedUsage, streamComplete
 		}
 		if readErr != nil {

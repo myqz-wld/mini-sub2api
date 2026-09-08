@@ -160,6 +160,11 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	if failure, ok := failureFromTrailers(response.Trailer); ok {
 		publishFailureTrailers(writer.Header(), failure)
 		streamResult = streamUpstreamError
+	} else if streamResult == streamUpstreamError {
+		publishFailureTrailers(writer.Header(), protocolv1.FailureMetadata{
+			RetryAdvice: protocolv1.RetryNever, Phase: protocolv1.PhaseUpstreamStream,
+			DeliveryState: protocolv1.DeliveryDelivered,
+		})
 	}
 	terminal := storage.RequestCompleted
 	if response.StatusCode >= 400 || streamResult == streamResponseFailed || streamResult == streamUpstreamError {

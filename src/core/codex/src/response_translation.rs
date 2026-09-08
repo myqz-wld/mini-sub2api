@@ -170,11 +170,6 @@ impl ResponseStateContext {
         Ok(translated)
     }
 
-    pub(crate) async fn translate_text(&self, text: String, maximum: usize) -> Result<String> {
-        self.translate_text_with_compaction(text, maximum, None)
-            .await
-    }
-
     pub(crate) async fn translate_text_with_compaction(
         &self,
         text: String,

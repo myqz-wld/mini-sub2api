@@ -22,6 +22,15 @@ func TestHTTPResponseTerminalsRecordUpstreamErrors(t *testing.T) {
 		body    string
 	}{
 		{
+			name:    "sse_without_terminal",
+			headers: http.Header{"Content-Type": []string{"text/event-stream"}},
+			body:    `data: {"type":"response.output_text.delta","delta":"synthetic"}` + "\n\ndata: [DONE]\n\n",
+		},
+		{
+			name:    "empty_sse",
+			headers: http.Header{"Content-Type": []string{"text/event-stream"}},
+		},
+		{
 			name:    "sse_failed",
 			headers: http.Header{"Content-Type": []string{"text/event-stream"}},
 			body:    `data: {"type":"response.failed","response":{"usage":{"total_tokens":2}}}` + "\n\n",

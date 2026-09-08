@@ -19,6 +19,8 @@ import (
 )
 
 type nativeGateway struct {
+	store    *storage.Store
+	keyID    string
 	server   *httptest.Server
 	tap      *nativeTap
 	secret   string
@@ -58,7 +60,7 @@ func newNativeGateway(t *testing.T, upstream string, subscription bool) nativeGa
 	handler := httpapi.NewHandler(store, supervisor, nil)
 	server, tap := newNativeTappedServer(t, handler)
 	t.Cleanup(handler.ShutdownWebSockets)
-	return nativeGateway{server: server, tap: tap, secret: key.Secret, stateDir: coreDir}
+	return nativeGateway{server: server, tap: tap, secret: key.Secret, stateDir: coreDir, store: store, keyID: key.ID}
 }
 
 func TestNativeCodexThroughGateway(t *testing.T) {

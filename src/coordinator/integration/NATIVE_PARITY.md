@@ -46,6 +46,8 @@ provider account and never fall back to real endpoints.
 | Actual OpenCode | 18 custom-provider text/read/denied-file and built-in OpenAI-plugin cases: stable session/thread, user/tool turns, headers and API-key bytes |
 | Model/context | All 11 catalogs; caller bases/personality, ordered developer messages, AGENTS/Skills/permissions, CWD, detected time/shell and supplied timezone text |
 | Identity/privacy | Key isolation, device modes/shared account, branches/forks/history ownership, explicit conflicts, restart/corruption and required references |
+| HTTP stream boundaries | 64 credential/model/JSON-SSE cases: EOF, delta, DONE-only, all terminals and 9 MiB output; exact API-key bytes, no replay and usage/status checks |
+| WS body controls | 24 credential/model/control/reference cases: inject/append/generic, active ownership, rejected stale HTTP reconstruction and full replacement recovery |
 | Cache/completion | Publication ordering, item/footer reconciliation, failed/incomplete responses, expiry/pressure, exact interning and tool consumption |
 | WS/compaction | Socket reuse/reconnect, first routing token, hidden prewarm, uncertain-send fences, V2 item-done proof and window commits |
 | Compaction continuation | 36 credential/transport/format cases: explicit and in-band windows, two HTTP deltas, full WS recovery, caller Lite setup, unavailable-window errors and exact API-key packets |
@@ -60,15 +62,16 @@ content, nonempty decoration, Key isolation and dependency validation.
 
 ## Evidence and limits
 
-- [Current repair](../../../ref/reviews/recent-3-days/REVIEW_44_reasoning-visibility.md): encrypted reasoning acquisition, caller visibility and verified history restoration.
+- [Latest validation](../../../ref/reviews/recent-3-days/REVIEW_45_release-check.md): 1,546 local leaves and 36 real Subscription cells; stream, usage and controlled-history repairs.
+- [Reasoning policy](../../../ref/reviews/recent-3-days/REVIEW_44_reasoning-visibility.md): acquisition, caller visibility and verified history restoration.
 - [History association](../../../ref/reviews/recent-3-days/REVIEW_43_history-association.md): configuration-independent association and WS reuse boundaries.
 - [Historical 128-case excerpts](../../../ref/architecture/plan-17/capture-index.md) and [audit](../../../ref/architecture/plan-17/source-audit.md).
 
 Earlier 14-case OpenCode evidence covers delivery only; newer 18-case coverage checks continuity.
 Historical excerpts are reencoded after in-memory byte/UUID checks, not replay files. Exports and
-live runs require separate authorization and opt-in. Prior real Subscription evidence covers 18
-text/tool/schema and 18 five-turn conversational-memory cells on gpt-5.5/Astra; the reasoning repair
-was local-only. No real API-key credential was available.
+live runs require separate authorization and opt-in. The latest authorized run passed 18 functional
+and 18 five-turn conversational-memory cells on gpt-5.5/Astra, including hidden/default reasoning
+visibility across full/reference histories. No real API-key credential was available.
 
 General responders sometimes force direct functions for protocol stress. Actual code-mode tests
 separately execute the native nested host; host availability and tool exposure differ. Core provides

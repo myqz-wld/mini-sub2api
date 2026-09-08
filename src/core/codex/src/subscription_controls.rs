@@ -11,31 +11,51 @@ impl ContextStore {
         binding: Option<&ResolvedRequestIdentity>,
         value: &Value,
     ) -> Result<(), Error> {
-        let Some(object) = value.as_object() else {
-            return Err(Error::InvalidRequest);
-        };
+        let object = value.as_object().ok_or(Error::InvalidRequest)?;
         let id = optional_id(object.get("response_id"))?;
-        let Some(id) = id else {
+        let inject = object.get("type").and_then(Value::as_str) == Some("response.inject");
+        let mutates = inject || object.contains_key("item") || object.contains_key("input");
+        if id.is_none() && !mutates {
             return Ok(());
-        };
+        }
         let bound = binding.ok_or(Error::StateUnavailable)?;
         let mut inner = self.inner.lock().map_err(|_| Error::StateUnavailable)?;
-        let owner = inner
-            .scopes
-            .get(scope)
-            .and_then(|s| s.records.get(&id))
+        if let Some(id) = &id {
+            let owner = inner
+                .scopes
+                .get(scope)
+                .and_then(|s| s.records.get(id))
+                .ok_or(Error::StateUnavailable)?;
+            if owner.identity.session_id != bound.session_id
+                || owner.identity.thread_id != bound.thread_id
+                || owner.socket != bound.connection_id
+            {
+                return Err(Error::InvalidRequest);
+            }
+        }
+        if !mutates {
+            return Ok(());
+        }
+        // Missing response_id targets only the current bound operation. In particular, it cannot
+        // leave that operation's old full history eligible for publication at completion.
+        let mut candidates = inner.operations.iter().filter(|(_, op)| {
+            op.scope == scope
+                && op.record.identity.session_id == bound.session_id
+                && op.record.identity.thread_id == bound.thread_id
+                && op.record.socket == bound.connection_id
+                && id
+                    .as_ref()
+                    .is_none_or(|id| op.response_id.as_ref() == Some(id))
+        });
+        let operation_id = candidates
+            .next()
+            .map(|(id, _)| id.clone())
             .ok_or(Error::StateUnavailable)?;
-        if owner.identity.session_id != bound.session_id || owner.socket != bound.connection_id {
+        if candidates.next().is_some() {
             return Err(Error::InvalidRequest);
         }
-        if object.get("type").and_then(Value::as_str) == Some("response.inject") {
+        let dependencies = if inject {
             let input = normalize_input(object.get("input"))?;
-            let operation_id = inner
-                .operations
-                .iter()
-                .find(|(_, op)| op.scope == scope && op.response_id.as_ref() == Some(&id))
-                .map(|(id, _)| id.clone())
-                .ok_or(Error::StateUnavailable)?;
             let extra = serde_json::to_vec(&input)
                 .map_err(|_| Error::InvalidRequest)?
                 .len()
@@ -43,36 +63,45 @@ impl ContextStore {
             if !inner.make_room(&self.limits, scope, &bound.session_id, extra) {
                 return Err(Error::StateUnavailable);
             }
-            let operation = inner
+            let active = inner
                 .operations
                 .get_mut(&operation_id)
                 .ok_or(Error::StateUnavailable)?;
-            if !operation.dependencies_available {
+            if !active.dependencies_available {
                 return Err(Error::StateUnavailable);
             }
-            let mut dependencies = operation.record.dependencies.clone();
+            let mut dependencies = active.record.dependencies.clone();
             dependencies.append(&input)?;
-            operation.reserved = operation.reserved.saturating_add(extra);
-            // Injection can interleave with generated items. Without an authoritative replacement
-            // context, keep only the continuation facts; a later full request can materialize it.
-            operation.record.dependencies = dependencies;
-            operation.record.history = None;
-            operation.record.settings = None;
-            operation.output_available = false;
-            operation.output.clear();
-            operation.output_bytes = 0;
-        } else if object.contains_key("item") || object.contains_key("input") {
-            if let Some(record) = inner
-                .scopes
-                .get_mut(scope)
-                .and_then(|s| s.records.get_mut(&id))
-            {
+            active.reserved = active.reserved.saturating_add(extra);
+            Some(dependencies)
+        } else {
+            None
+        };
+        let active = inner
+            .operations
+            .get_mut(&operation_id)
+            .ok_or(Error::StateUnavailable)?;
+        if let Some(dependencies) = dependencies {
+            active.record.dependencies = dependencies;
+        } else {
+            // Generic control semantics do not establish the effective dependency graph.
+            // Forward the control, but require a complete client replacement before local reuse.
+            active.dependencies_available = false;
+        }
+        active.record.history = None;
+        active.record.settings = None;
+        active.output_available = false;
+        active.output.clear();
+        active.output_bytes = 0;
+        active.reserved = active.reserved.saturating_sub(active.buffer_charge);
+        active.buffer_charge = 0;
+        let response_id = active.response_id.clone();
+        if let Some(scope) = inner.scopes.get_mut(scope) {
+            if let Some(record) = response_id.and_then(|id| scope.records.get_mut(&id)) {
                 record.history = None;
                 record.settings = None;
             }
-            if let Some(scope) = inner.scopes.get_mut(scope) {
-                scope.rebuild_index();
-            }
+            scope.rebuild_index();
         }
         Ok(())
     }

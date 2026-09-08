@@ -83,7 +83,8 @@ func TestSSEUsageIsDetectedWhenUpstreamOmitsContentType(t *testing.T) {
 
 func TestOversizedOrNegativeUsageIsIgnored(t *testing.T) {
 	observer := NewObserver("application/json")
-	observer.Observe(make([]byte, maxObservedEventBytes+1))
+	observer.maximum = 1024
+	observer.Observe(make([]byte, observer.maximum+1))
 	if got := observer.Usage(); got != nil {
 		t.Fatalf("oversized usage = %#v", got)
 	}

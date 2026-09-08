@@ -60,7 +60,7 @@ func TestLiveSubscriptionMemoryBare(t *testing.T) {
 					client := ordinaryClient(t, gateway, delivery == "ws", delivery != "json", nil)
 					var history []any
 					var previous any
-					for _, step := range steps {
+					for stepIndex, step := range steps {
 						message := map[string]any{"role": "user", "content": step.prompt}
 						input := []any{message}
 						if mode == "full" {
@@ -68,11 +68,29 @@ func TestLiveSubscriptionMemoryBare(t *testing.T) {
 							input = history
 						}
 						request := map[string]any{"model": model, "instructions": liveMemoryBase, "input": input, "reasoning": map[string]any{"effort": "low"}}
+						// Exercise both hidden-state restoration in full histories and private
+						// previous-response continuation without adding provider requests.
+						hidden := stepIndex < 2 || stepIndex == 3
+						if hidden {
+							request["include"] = []any{}
+						}
+						if stepIndex == 3 {
+							request["include"] = nil
+						}
 						if mode == "reference" && previous != nil {
 							request["previous_response_id"] = previous
 						}
 						response := liveResponse(t, client, request)
 						assertLiveMemory(t, liveText(response), label, step.count)
+						if hidden {
+							items, _ := response["output"].([]any)
+							for _, raw := range items {
+								item, _ := raw.(map[string]any)
+								if item["type"] == "reasoning" && item["encrypted_content"] != nil {
+									t.Fatal("live reasoning visibility ignored caller include")
+								}
+							}
+						}
 						previous = response["id"]
 						if previous == nil {
 							t.Fatal("live memory response reference absent")

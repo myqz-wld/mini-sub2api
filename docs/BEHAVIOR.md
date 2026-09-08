@@ -157,6 +157,12 @@ live/retained mappings. Installation/session/thread nodes have no fixed TTL; usa
 
 ## Completion and recovery
 
+SSE needs a completed/failed/incomplete/error terminal; EOF, keepalives and `[DONE]` alone do not
+mean success. Premature EOF keeps delivered bytes, reports `upstream_stream / delivered / never`
+in failure trailers and records an upstream error. The usage observer follows `outputBytes`
+(128 MiB default), resumes after an oversized SSE event, and never lets success overwrite failure.
+These checks change accounting/diagnostics, not API-key payload bytes.
+
 Publish valid context before public completion. Reconcile item-done/final output once; an empty footer
 uses completed items for JSON/history, without duplicate stream events. Failed/incomplete responses
 are not baselines. V2 compaction requires matching success and exactly one valid encrypted item-done;
@@ -182,6 +188,11 @@ At most one extra attempt is allowed while business inference is proven unsent; 
 allowlist is empty. Attempted/uncertain send or delivered events prevent hidden replay. OAuth refresh
 has its separate bounded retry. Errors expose retryAdvice/phase/deliveryState; missing required state
 fails before inference. Subscription non-2xx bodies become bounded errors; API-key bodies stay transparent.
+
+Subscription WS body controls must belong to the active session/thread/socket. Without a response ID,
+use that bound operation. Injection invalidates full history but retains validated dependency facts;
+unknown body-control semantics also invalidate dependency reuse. Completion cannot restore the old
+history. Full client replacement can rebuild it; payload-free transport controls remain forwardable.
 
 HTTP/WS handshake req_* is returned in X-Mini-Sub2Api-Request-Id; WS operation IDs stay in local usage.
 Response.id is the continuation reference. Public provider request-ID headers use aliases; one bounded
