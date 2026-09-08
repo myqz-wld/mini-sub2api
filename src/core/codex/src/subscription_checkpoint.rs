@@ -43,7 +43,7 @@ impl Scope {
             {
                 continue;
             }
-            let path: Vec<_> = items.iter().map(|item| item.key.id).collect();
+            let path: Vec<_> = items.iter().map(|item| item.lookup_key.id).collect();
             self.index
                 .entry(Some(record.identity.session_id.clone()))
                 .or_default()

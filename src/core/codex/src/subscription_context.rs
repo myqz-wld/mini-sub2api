@@ -109,6 +109,7 @@ pub(crate) struct Operation(pub(crate) Arc<Lease>);
 pub(crate) struct Lease {
     pub(crate) id: String,
     pub(crate) store: Weak<Mutex<Inner>>,
+    pub(crate) reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility,
 }
 
 pub(crate) struct SocketLease {

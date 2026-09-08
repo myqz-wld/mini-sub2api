@@ -22,6 +22,9 @@ mod history_tests;
 #[path = "subscription_compaction_tests.rs"]
 mod compaction_tests;
 
+#[path = "subscription_reasoning_tests.rs"]
+mod reasoning_tests;
+
 const NAMESPACE: &str = "context-admission";
 const OWNER: &str = "acct_context_tests";
 const KEY: &str = "isolated-key";

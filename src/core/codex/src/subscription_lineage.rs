@@ -28,7 +28,9 @@ impl ContextPlan {
         evidence: &mut crate::request_identity_evidence::RequestIdentityEvidence,
     ) -> anyhow::Result<()> {
         if evidence.forked_from_thread.is_some()
-            || (self.evidence.previous.is_none() && self.checkpoint.is_none())
+            || (self.evidence.previous.is_none()
+                && self.checkpoint.is_none()
+                && self.restored_input.is_none())
         {
             return Ok(());
         }
@@ -63,11 +65,11 @@ impl ContextPlan {
         identity: &ResolvedRequestIdentity,
         object: &Map<String, Value>,
     ) -> anyhow::Result<HistoryLineage> {
-        let baseline = self
-            .evidence
-            .previous
-            .as_ref()
-            .and(self.baseline.as_ref())
+        // Hydration introduces private state absent from the caller's body. Its source must
+        // satisfy the same lineage checks as an explicit reference, including omitted item turns.
+        let baseline = (self.evidence.previous.is_some() || self.restored_input.is_some())
+            .then_some(self.baseline.as_ref())
+            .flatten()
             .map(|record| (&record.identity, &record.lineage))
             .or_else(|| {
                 self.checkpoint

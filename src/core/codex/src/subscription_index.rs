@@ -1,12 +1,14 @@
 //! Memory-only content interning and response-boundary radix lookup. Never log these values.
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Weak};
 
 #[path = "subscription_history_match.rs"]
 mod history_match;
-pub(crate) use history_match::{candidate_key, completion_items_compatible, ids_compatible};
+pub(crate) use history_match::{
+    candidate_key, completion_items_compatible, hidden_ciphertext_compatible, ids_compatible,
+};
 
 pub(crate) fn canonical(value: &Value) -> Vec<u8> {
     fn sorted(value: &Value) -> Value {
@@ -35,6 +37,7 @@ pub(crate) struct Key {
 pub(crate) struct Item {
     pub(crate) value: Value,
     pub(crate) key: Arc<Key>,
+    pub(crate) lookup_key: Arc<Key>,
     bytes: Vec<u8>,
 }
 
@@ -45,6 +48,11 @@ impl Item {
             .len()
             .saturating_mul(4)
             .saturating_add(self.key.bytes.len())
+            .saturating_add(if Arc::ptr_eq(&self.key, &self.lookup_key) {
+                0
+            } else {
+                self.lookup_key.bytes.len()
+            })
             .saturating_add(256)
     }
 }
@@ -93,7 +101,17 @@ impl Interner {
             return item;
         }
         let key = self.key(candidate_key(&value));
-        let item = Arc::new(Item { value, key, bytes });
+        let lookup_key = if crate::reasoning_visibility::ciphertext(&value).is_some() {
+            self.key(history_match::history_lookup_key(&value))
+        } else {
+            Arc::clone(&key)
+        };
+        let item = Arc::new(Item {
+            value,
+            key,
+            lookup_key,
+            bytes,
+        });
         self.items
             .entry(digest)
             .or_default()
@@ -102,7 +120,18 @@ impl Interner {
     }
 
     pub(crate) fn lookup(&self, value: &Value) -> Option<u64> {
-        let bytes = candidate_key(value);
+        self.lookup_bytes(candidate_key(value))
+    }
+
+    pub(crate) fn lookup_history(&self, value: &Value) -> Option<u64> {
+        if crate::reasoning_visibility::ciphertext(value).is_some() {
+            self.lookup_bytes(history_match::history_lookup_key(value))
+        } else {
+            self.lookup(value)
+        }
+    }
+
+    fn lookup_bytes(&self, bytes: Vec<u8>) -> Option<u64> {
         self.keys
             .get(&<[u8; 32]>::from(Sha256::digest(&bytes)))?
             .iter()
@@ -215,12 +244,52 @@ pub(crate) struct History {
     pub(crate) parent: Option<Arc<History>>,
     pub(crate) items: Vec<Arc<Item>>,
     pub(crate) len: usize,
+    // Only keys in this block, inherited through parent links; dropped with the body history.
+    hidden_reasoning: BTreeSet<u64>,
+    has_hidden_reasoning: bool,
 }
 
 impl History {
+    #[cfg(test)]
     pub(crate) fn extend(parent: Option<Arc<Self>>, items: Vec<Arc<Item>>) -> Arc<Self> {
+        Self::extend_with_hidden(parent, items, &BTreeSet::new())
+    }
+
+    pub(crate) fn extend_with_hidden(
+        parent: Option<Arc<Self>>,
+        items: Vec<Arc<Item>>,
+        hidden: &BTreeSet<u64>,
+    ) -> Arc<Self> {
         let len = parent.as_ref().map_or(0, |parent| parent.len) + items.len();
-        Arc::new(Self { parent, items, len })
+        let hidden_reasoning: BTreeSet<_> = items
+            .iter()
+            .map(|item| item.key.id)
+            .filter(|key| hidden.contains(key))
+            .collect();
+        let has_hidden_reasoning = !hidden_reasoning.is_empty()
+            || parent
+                .as_ref()
+                .is_some_and(|parent| parent.has_hidden_reasoning);
+        Arc::new(Self {
+            parent,
+            items,
+            len,
+            hidden_reasoning,
+            has_hidden_reasoning,
+        })
+    }
+
+    pub(crate) fn hidden_reasoning(&self) -> BTreeSet<u64> {
+        let mut hidden = BTreeSet::new();
+        if !self.has_hidden_reasoning {
+            return hidden;
+        }
+        let mut current = Some(self);
+        while let Some(block) = current {
+            hidden.extend(&block.hidden_reasoning);
+            current = block.parent.as_deref();
+        }
+        hidden
     }
 
     pub(crate) fn items(&self) -> Vec<&Arc<Item>> {
@@ -248,7 +317,9 @@ impl History {
             if !blocks.insert(block as *const Self as usize) {
                 break;
             }
-            cost += 64 + block.items.capacity() * std::mem::size_of::<Arc<Item>>();
+            cost += 96
+                + block.items.capacity() * std::mem::size_of::<Arc<Item>>()
+                + block.hidden_reasoning.len() * 40;
             if let Some(seen) = items.as_mut() {
                 for item in &block.items {
                     if seen.insert(Arc::as_ptr(item) as usize) {

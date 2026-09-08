@@ -73,7 +73,8 @@ impl ResponseStateContext {
         let pending = (value.get("type").and_then(Value::as_str) == Some("response.completed"))
             .then_some(self.default_compaction.as_ref())
             .flatten();
-        self.translate_value_with_compaction(value, pending).await
+        self.translate_value_with_compaction(value, pending, None)
+            .await
     }
 
     pub(crate) async fn translate_terminal_value(
@@ -87,19 +88,13 @@ impl ResponseStateContext {
         // This caller already proved the terminal kind. Use the schema's response envelope even
         // when the provider omits output/usage/object, so its ID cannot bypass response aliasing.
         let mut envelope = self
-            .translate_value_with_compaction(serde_json::json!({"response": value}), pending)
+            .translate_value_with_compaction(
+                serde_json::json!({"response": value}),
+                pending,
+                Some(completed),
+            )
             .await?;
         let translated = envelope["response"].take();
-        let operation = self
-            .operation
-            .lock()
-            .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
-            .clone();
-        if let Some(operation) = operation {
-            self.store
-                .contexts
-                .observe(&operation, &translated, Some(completed))?;
-        }
         Ok(translated)
     }
 
@@ -107,6 +102,7 @@ impl ResponseStateContext {
         &self,
         mut value: Value,
         pending_compaction: Option<&PendingCompaction>,
+        terminal: Option<bool>,
     ) -> Result<Value> {
         let owner = self
             .owner
@@ -140,7 +136,7 @@ impl ResponseStateContext {
             }
             _ => None,
         };
-        let translated = self
+        let mut translated = self
             .store
             .edit(
                 &self.state_namespace,
@@ -159,10 +155,17 @@ impl ResponseStateContext {
                 },
             )
             .await?;
-        if let Some(operation) = operation
-            && translated.get("type").is_some()
-        {
-            self.store.contexts.observe(&operation, &translated, None)?;
+        if let Some(operation) = operation {
+            if terminal.is_some() || translated.get("type").is_some() {
+                self.store
+                    .contexts
+                    .observe(&operation, &translated, terminal)?;
+            }
+            // Publish private continuation state before applying the caller's optional-output policy.
+            operation
+                .0
+                .reasoning_visibility
+                .filter_response(&mut translated);
         }
         Ok(translated)
     }
@@ -183,7 +186,9 @@ impl ResponseStateContext {
         let pending = completed
             .then_some(pending_compaction.or(self.default_compaction.as_ref()))
             .flatten();
-        let value = self.translate_value_with_compaction(value, pending).await?;
+        let value = self
+            .translate_value_with_compaction(value, pending, None)
+            .await?;
         let encoded = serde_json::to_string(&value)?;
         anyhow::ensure!(encoded.len() <= maximum, "translated response is too large");
         Ok(encoded)

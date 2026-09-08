@@ -43,7 +43,7 @@ OpenCode's enabled built-in `openai` plugin sends `session-id`/`originator`. Cus
 send `X-Session-Id`/`x-session-affinity`, which are not gateway locators. Bare/custom requests without
 references use full-history matching in the same Key's anonymous pool; explicit sessions stay separate.
 
-Matching uses normalized caller input and public-side output, before identity/Lite conversion:
+Matching uses normalized caller input and retained output with public IDs, before upstream identity/Lite conversion:
 
 - Compare ordered structured content, preserving duplicates, strings, arguments and ciphertext.
   Object-key order is irrelevant. Only completed-response boundaries are candidates.
@@ -58,6 +58,10 @@ Matching uses normalized caller input and public-side output, before identity/Li
   WS reuse separately compares its actual transmitted configuration and input/output baseline.
 - Historical developer messages and formed Lite input prefixes remain content: editing them can
   break the prefix. Exact content storage and provider-output comparisons remain separate.
+- A coarse reasoning key may omit ciphertext, but eligibility accepts missing/null ciphertext only
+  when Core recorded that field as hidden in this history. Full context equality still includes it.
+  Restore only that verified field; source-thread/fork validation gates sending it. Other content, IDs and
+  dependencies remain checked. Removing an entire reasoning item does not qualify as field omission.
 
 If anonymous full input has no eligible prefix, its last compaction item can locate a uniquely owned,
 completed compaction in the same Key's anonymous pool. Match the entire structured item, including ID
@@ -106,6 +110,21 @@ access programs, sequential_cutoff, HTTP trace headers and allowed turn metadata
 
 Native exec/wait exposure and host availability differ. Bare API/OpenCode retain direct tools;
 Core provides no JavaScript bridge or claim of full default-native code-mode equivalence.
+
+## Reasoning visibility
+
+Subscription always adds `reasoning.encrypted_content` to upstream `include`, preserving other
+entries/order. Missing `include` returns ciphertext by default; explicit lists return it only when
+requested, and null requests no optional ciphertext. Other types/non-string entries fail before
+inference. API-key requests and responses remain transparent.
+
+JSON/SSE/WS retain full output internally before hiding only reasoning items' `encrypted_content`.
+Keep their summaries/content/IDs, compaction ciphertext and opaque tool data. Visibility is per
+request, including each WS create. Full sending preserves supplied ciphertext regardless of current
+`include`, and restores proven hidden fields in matched histories; explicit previous inputs still
+append wholly to the retained private context. Upstream WS reuse compares the restored request and real socket
+baseline. Hidden-field provenance shares history expiry/capacity; persisted ID aliases cannot recover
+expired ciphertext. Core neither decrypts nor invents encrypted state.
 
 ## State and limits
 

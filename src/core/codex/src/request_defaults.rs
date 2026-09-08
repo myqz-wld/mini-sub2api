@@ -166,9 +166,7 @@ fn merge_text(object: &mut Map<String, Value>, profile: ModelProfile) {
 }
 
 fn merge_include(object: &mut Map<String, Value>) {
-    object
-        .entry("include".to_string())
-        .or_insert_with(|| serde_json::json!(["reasoning.encrypted_content"]));
+    crate::reasoning_visibility::require_upstream(object);
 }
 
 #[cfg(test)]
@@ -224,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_controls_and_nulls_are_preserved_except_lite_parallel_tool_calls() {
+    fn explicit_controls_keep_nulls_except_lite_parallel_and_required_include() {
         let mut request = serde_json::json!({
             "store": true,
             "stream": false,
@@ -236,6 +234,7 @@ mod tests {
         });
         let mut expected = request.clone();
         expected["parallel_tool_calls"] = Value::Bool(false);
+        expected["include"] = serde_json::json!(["reasoning.encrypted_content"]);
         merge_request_defaults(
             request.as_object_mut().expect("object"),
             model_profile("gpt-5.6-sol"),

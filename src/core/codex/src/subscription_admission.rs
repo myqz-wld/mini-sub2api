@@ -67,7 +67,12 @@ impl ContextStore {
             raw_turn: plan.evidence.turn.clone(),
         };
         let parent = plan.baseline.as_ref().and_then(|r| r.history.clone());
+        let hidden = parent
+            .as_ref()
+            .map(|history| history.hidden_reasoning())
+            .unwrap_or_default();
         let delta = plan.evidence.previous.is_some();
+        let effective_input = plan.restored_input.unwrap_or(plan.evidence.input);
         let history = if plan.external_context || (delta && parent.is_none()) {
             None
         } else {
@@ -77,29 +82,28 @@ impl ContextStore {
                 parent
                     .as_ref()
                     .filter(|base| {
-                        base.len <= plan.evidence.input.len()
+                        base.len <= effective_input.len()
                             && base
                                 .items()
                                 .iter()
-                                .zip(&plan.evidence.input)
+                                .zip(&effective_input)
                                 .all(|(saved, current)| saved.value == *current)
                     })
                     .map_or(0, |base| base.len)
             };
-            let input = plan
-                .evidence
-                .input
+            let input = effective_input
                 .into_iter()
                 .skip(shared_len)
                 .map(|item| scope.interner.intern(item))
                 .collect();
-            Some(History::extend(
+            Some(History::extend_with_hidden(
                 if delta || shared_len > 0 {
                     parent
                 } else {
                     None
                 },
                 input,
+                &hidden,
             ))
         };
         let has_history = history.is_some();

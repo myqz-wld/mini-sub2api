@@ -45,6 +45,26 @@ pub(crate) fn ids_compatible(request: &Value, saved: &Value) -> bool {
     compare_ids(request, saved, omitted_allowed)
 }
 
+pub(crate) fn history_lookup_key(item: &Value) -> Vec<u8> {
+    let mut item = item.clone();
+    crate::reasoning_visibility::remove_ciphertext(&mut item);
+    candidate_key(&item)
+}
+
+pub(crate) fn hidden_ciphertext_compatible(request: &Value, saved: &Value, hidden: bool) -> bool {
+    if crate::reasoning_visibility::ciphertext(request)
+        == crate::reasoning_visibility::ciphertext(saved)
+    {
+        return true;
+    }
+    if !hidden || crate::reasoning_visibility::ciphertext(request).is_some_and(|v| !v.is_null()) {
+        return false;
+    }
+    // The index already compared every other semantic field. Missing ciphertext is compatible
+    // only with a field actually suppressed by the gateway in this effective history.
+    crate::reasoning_visibility::ciphertext(saved).is_some()
+}
+
 fn call_anchored(item: &Value) -> bool {
     item.get("type")
         .and_then(Value::as_str)

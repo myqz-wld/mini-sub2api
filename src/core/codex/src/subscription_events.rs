@@ -258,35 +258,47 @@ impl ContextStore {
         let scope = inner.scopes.entry(active.scope.clone()).or_default();
         if can_retain {
             let window = compaction::select(&active.record, &active.compaction_output, &output);
-            active.record.history = match window {
-                compaction::Window::Append => active.record.history.take().map(|parent| {
-                    let items = output
-                        .iter()
-                        .cloned()
-                        .map(|item| scope.interner.intern(item))
-                        .collect();
-                    History::extend(Some(parent), items)
-                }),
-                compaction::Window::Replace {
-                    mut input,
-                    output: range,
-                } => {
-                    input.extend(
-                        output[range]
-                            .iter()
-                            .cloned()
-                            .map(|item| scope.interner.intern(item)),
-                    );
-                    active.record.compaction_key = input
-                        .iter()
-                        .find(|item| {
-                            item.value.get("type").and_then(Value::as_str) == Some("compaction")
-                        })
-                        .map(|item| item.key.id);
-                    Some(History::extend(None, input))
+            let output_items: Vec<_> = output
+                .iter()
+                .cloned()
+                .map(|item| scope.interner.intern(item))
+                .collect();
+            let mut hidden = active
+                .record
+                .history
+                .as_ref()
+                .map(|history| history.hidden_reasoning())
+                .unwrap_or_default();
+            if operation.0.reasoning_visibility
+                == crate::reasoning_visibility::ReasoningVisibility::Hide
+            {
+                for item in output_items
+                    .iter()
+                    .filter(|item| crate::reasoning_visibility::ciphertext(&item.value).is_some())
+                {
+                    hidden.insert(item.key.id);
                 }
-                compaction::Window::Unavailable => None,
-            };
+            }
+            active.record.history =
+                match window {
+                    compaction::Window::Append => active.record.history.take().map(|parent| {
+                        History::extend_with_hidden(Some(parent), output_items, &hidden)
+                    }),
+                    compaction::Window::Replace {
+                        mut input,
+                        output: range,
+                    } => {
+                        input.extend(output_items[range].iter().cloned());
+                        active.record.compaction_key = input
+                            .iter()
+                            .find(|item| {
+                                item.value.get("type").and_then(Value::as_str) == Some("compaction")
+                            })
+                            .map(|item| item.key.id);
+                        Some(History::extend_with_hidden(None, input, &hidden))
+                    }
+                    compaction::Window::Unavailable => None,
+                };
         } else {
             active.record.history = None;
         }

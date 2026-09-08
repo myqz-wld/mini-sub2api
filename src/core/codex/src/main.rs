@@ -16,6 +16,7 @@ mod lifecycle_carriers;
 mod lite_prefix_identity;
 mod oauth;
 mod oauth_login;
+mod reasoning_visibility;
 mod request_compaction;
 mod request_defaults;
 mod request_identity;

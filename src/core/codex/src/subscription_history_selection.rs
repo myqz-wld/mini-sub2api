@@ -1,7 +1,7 @@
 //! Completed-history association is independent of current request settings and WS reuse.
 use super::{Error, Record, local_dependencies};
 use crate::subscription_context::Scope;
-use crate::subscription_index::ids_compatible;
+use crate::subscription_index::{hidden_ciphertext_compatible, ids_compatible};
 use serde_json::Value;
 
 pub(super) struct HistoryMatch<'a> {
@@ -18,7 +18,7 @@ impl Scope {
     ) -> Result<Option<HistoryMatch<'_>>, Error> {
         let path: Vec<_> = input
             .iter()
-            .map_while(|item| self.interner.lookup(item))
+            .map_while(|item| self.interner.lookup_history(item))
             .collect();
         let candidates = self
             .index
@@ -34,12 +34,16 @@ impl Scope {
             let Some(history) = &record.history else {
                 continue;
             };
+            let hidden = history.hidden_reasoning();
             if !record.completed
-                || !history
-                    .items()
-                    .iter()
-                    .zip(input)
-                    .all(|(saved, caller)| ids_compatible(caller, &saved.value))
+                || !history.items().iter().zip(input).all(|(saved, caller)| {
+                    ids_compatible(caller, &saved.value)
+                        && hidden_ciphertext_compatible(
+                            caller,
+                            &saved.value,
+                            hidden.contains(&saved.key.id),
+                        )
+                })
             {
                 continue;
             }

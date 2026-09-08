@@ -73,6 +73,7 @@ pub(super) fn apply(
     profile: UpstreamProfile,
     force_lite: bool,
 ) -> Result<(Vec<String>, Vec<usize>), ()> {
+    crate::reasoning_visibility::ReasoningVisibility::read(object).map_err(|_| ())?;
     let caller_base = codex_instructions::has_valid_instructions(object);
     retain_codex_fields(object, transport);
     canonicalize_structured_request_members(object);

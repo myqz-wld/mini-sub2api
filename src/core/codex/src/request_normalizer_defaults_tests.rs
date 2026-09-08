@@ -40,7 +40,7 @@ fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
 }
 
 #[test]
-fn gpt_5_2_preserves_explicit_null_public_members() {
+fn gpt_5_2_preserves_explicit_null_members_except_required_include() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.2",
@@ -82,10 +82,13 @@ fn gpt_5_2_preserves_explicit_null_public_members() {
         "service_tier",
         "prompt_cache_key",
         "previous_response_id",
-        "include",
     ] {
         assert!(value[name].is_null(), "field {name}");
     }
+    assert_eq!(
+        value["include"],
+        serde_json::json!(["reasoning.encrypted_content"])
+    );
     assert!(
         uuid::Uuid::parse_str(
             value["client_metadata"]["x-codex-installation-id"]

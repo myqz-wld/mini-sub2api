@@ -22,6 +22,7 @@ mod history_selection;
 
 pub(crate) struct ContextPlan {
     pub(crate) evidence: Evidence,
+    pub(crate) restored_input: Option<Vec<Value>>,
     pub(crate) session: Option<String>,
     pub(crate) turn: Option<String>,
     // Local history/reference evidence; upstream WS reuse has its own request/socket baseline.
@@ -216,8 +217,41 @@ impl ContextStore {
                 .or_else(|| checkpoint.as_ref().map(|source| source.branch.clone()))
         };
         let session = session.or_else(|| Some(Uuid::now_v7().to_string()));
+        let mut restorations = Vec::new();
+        let mut restored_bytes = 0_usize;
+        if !explicit_delta
+            && matched_len > 0
+            && let Some(history) = baseline.as_ref().and_then(|base| base.history.as_ref())
+        {
+            let hidden = history.hidden_reasoning();
+            for (index, (caller, saved)) in evidence
+                .input
+                .iter()
+                .zip(history.items())
+                .take(matched_len)
+                .enumerate()
+            {
+                if hidden.contains(&saved.key.id)
+                    && crate::reasoning_visibility::ciphertext(caller)
+                        != crate::reasoning_visibility::ciphertext(&saved.value)
+                {
+                    let cipher = crate::reasoning_visibility::ciphertext(&saved.value)
+                        .expect("hidden field");
+                    restored_bytes = restored_bytes.saturating_add(
+                        crate::responses_websocket_projection::encoded_len_within(
+                            cipher,
+                            self.limits.session_bytes,
+                        )
+                        .ok_or(Error::StateUnavailable)?
+                        .saturating_add(24),
+                    );
+                    restorations.push(index);
+                }
+            }
+        }
         let reserved = canonical(&Value::Array(evidence.input.clone()))
             .len()
+            .saturating_add(restored_bytes)
             .saturating_mul(8)
             .saturating_add(canonical(&effective_settings).len().saturating_mul(6))
             .saturating_add(self.limits.output_items.saturating_mul(2304))
@@ -266,6 +300,19 @@ impl ContextStore {
                 return Err(Error::StateUnavailable);
             }
         }
+        // Check assembly capacity before copying private fields into a caller-sized request.
+        let restored_input = (!restorations.is_empty()).then(|| {
+            let mut input = evidence.input.clone();
+            let history = baseline
+                .as_ref()
+                .and_then(|base| base.history.as_ref())
+                .expect("restored history");
+            let items = history.items();
+            for index in restorations {
+                crate::reasoning_visibility::restore_hidden(&mut input[index], &items[index].value);
+            }
+            input
+        });
         let id = Uuid::now_v7().to_string();
         inner.reservations.insert(
             id.clone(),
@@ -278,9 +325,11 @@ impl ContextStore {
         let admission = Operation(Arc::new(Lease {
             id,
             store: Arc::downgrade(&self.inner),
+            reasoning_visibility: evidence.reasoning_visibility,
         }));
         Ok(ContextPlan {
             evidence,
+            restored_input,
             session,
             turn,
             baseline,
@@ -323,6 +372,12 @@ fn local_dependencies(record: &Record) -> Dependencies {
 }
 
 impl ContextPlan {
+    pub(crate) fn input(&self) -> &[Value] {
+        self.restored_input
+            .as_deref()
+            .unwrap_or(&self.evidence.input)
+    }
+
     pub(crate) fn identity_baseline(&self) -> Option<&ResolvedRequestIdentity> {
         self.baseline
             .as_ref()
@@ -332,7 +387,7 @@ impl ContextPlan {
 
     pub(crate) fn full_input(&self, store: &ContextStore) -> Result<Vec<Value>, Error> {
         if self.evidence.previous.is_none() {
-            return Ok(self.evidence.input.clone());
+            return Ok(self.input().to_vec());
         }
         let history = self
             .baseline
@@ -361,8 +416,8 @@ impl ContextPlan {
         // sending must prove references against the actual replacement window, not those facts.
         let mut dependencies = Dependencies::default();
         dependencies.append(&full)?;
-        dependencies.append(&self.evidence.input)?;
-        full.extend(self.evidence.input.clone());
+        dependencies.append(self.input())?;
+        full.extend(self.input().to_vec());
         Ok(full)
     }
 }

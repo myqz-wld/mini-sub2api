@@ -89,7 +89,7 @@ pub(crate) async fn prepare_stateful_codex_request(
             }
         }
     } else {
-        object.insert("input".into(), Value::Array(plan.evidence.input.clone()));
+        object.insert("input".into(), Value::Array(plan.input().to_vec()));
     }
     if explicit_delta && !full_send && target_lite {
         // The validated unchanged prefix is already held upstream. Ordinary callers retain their

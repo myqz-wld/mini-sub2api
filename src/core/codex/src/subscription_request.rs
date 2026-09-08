@@ -13,6 +13,7 @@ pub(crate) enum Format {
 
 #[derive(Clone)]
 pub(crate) struct Evidence {
+    pub(crate) reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility,
     pub(crate) transport: EmulationTransport,
     pub(crate) session: Option<String>,
     pub(crate) turn: Option<String>,
@@ -205,6 +206,7 @@ impl Evidence {
             turn = one(header_turns)?;
         }
         Ok(Self {
+            reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility::read(object)?,
             transport,
             session: selected_session(object, headers)?,
             turn,

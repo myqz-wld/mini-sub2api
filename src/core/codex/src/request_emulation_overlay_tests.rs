@@ -65,6 +65,7 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
                     | "temperature"
                     | "top_p"
                     | "stream_options"
+                    | "include"
                     | "truncation"
                     | "user"
             )
@@ -84,6 +85,10 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
     }
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
+    assert_eq!(
+        normalized["include"],
+        serde_json::json!(["file_search_call.results", "reasoning.encrypted_content"])
+    );
     assert!(
         normalized["tools"][0]
             .get("unsupported_tool_member")
@@ -112,7 +117,7 @@ fn explicit_previous_response_id_survives_http_and_websocket_for_both_profiles()
 }
 
 #[test]
-fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
+fn codex_defaults_preserve_controls_except_fixed_transport_and_required_include() {
     let explicit = serde_json::json!({
         "model": "gpt-5.6-sol",
         "input": [],
@@ -131,7 +136,6 @@ fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
     for name in [
         "tool_choice",
         "reasoning",
-        "include",
         "service_tier",
         "prompt_cache_key",
         "text",
@@ -142,6 +146,10 @@ fn codex_defaults_preserve_controls_except_fixed_upstream_transport_members() {
     assert_eq!(normalized["parallel_tool_calls"], false);
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
+    assert_eq!(
+        normalized["include"],
+        serde_json::json!(["file_search_call.results", "reasoning.encrypted_content"])
+    );
 
     let defaults = prepare_subscription(
         serde_json::json!({"model":"gpt-5.4","input":[]}),
