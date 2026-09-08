@@ -4,8 +4,8 @@
 
 ## Routing
 
-Each distribution Key binds one credential; Keys may share it. No account pool, automatic switching,
-Chat Completions or conversation-management API is provided.
+Each distribution Key binds one credential; Keys may share it. There is no account pool, automatic
+switching, Chat Completions or conversation-management API.
 
 | Upstream | Every caller |
 |---|---|
@@ -63,14 +63,13 @@ Matching uses normalized caller input and retained output with public IDs, befor
   Restore only that verified field; source-thread/fork validation gates sending it. Other content, IDs and
   dependencies remain checked. Removing an entire reasoning item does not qualify as field omission.
 
-If anonymous full input has no eligible prefix, its last compaction item can locate a uniquely owned,
-completed compaction in the same Key's anonymous pool. Match the entire structured item, including ID
-and encrypted bytes, under the existing internal-metadata normalization. This restores identity and
-window only: validate source lineage and the current input's dependencies, send the caller's complete
-replacement with current settings, and do not inherit the old turn or authorize WS reuse from this
-association. Changed/missing checkpoint IDs and external summaries provide no fallback authority;
-conflicting owners fail closed. Verified checkpoint-only windows also qualify for completed-prefix indexing.
-Checkpoint indexes expire/evict with the source history and remain within the same memory budgets.
+Without an eligible anonymous prefix, the last compaction item can locate a uniquely owned,
+completed checkpoint in the same Key's anonymous pool. Match the entire item, including ID and
+ciphertext, with existing internal-metadata normalization. Restore session/thread/window, validate
+lineage and dependencies, then send the caller's current replacement and settings. This neither
+inherits the turn nor authorizes WS reuse. Missing/changed IDs or external summaries grant no
+fallback; conflicting owners fail. Verified checkpoint-only windows also enter the prefix index.
+Checkpoint indexes share source-history expiry, eviction and memory budgets.
 
 Explicit turns take priority; tool follow-ups retain their turn, and quiescent new user input starts
 one. Equivalent contexts share immutable content, not active/tool state. Each branch/turn and WS
@@ -118,13 +117,13 @@ entries/order. Missing `include` returns ciphertext by default; explicit lists r
 requested, and null requests no optional ciphertext. Other types/non-string entries fail before
 inference. API-key requests and responses remain transparent.
 
-JSON/SSE/WS retain full output internally before hiding only reasoning items' `encrypted_content`.
-Keep their summaries/content/IDs, compaction ciphertext and opaque tool data. Visibility is per
-request, including each WS create. Full sending preserves supplied ciphertext regardless of current
-`include`, and restores proven hidden fields in matched histories; explicit previous inputs still
-append wholly to the retained private context. Upstream WS reuse compares the restored request and real socket
-baseline. Hidden-field provenance shares history expiry/capacity; persisted ID aliases cannot recover
-expired ciphertext. Core neither decrypts nor invents encrypted state.
+Before filtering public JSON/SSE/WS, retain full output internally. Hide only reasoning items'
+`encrypted_content`; keep summaries/content/IDs, compaction ciphertext and opaque tool data.
+Visibility belongs to each request/WS create. Full sending preserves supplied ciphertext and
+restores verified hidden fields regardless of current `include`; explicit previous inputs still
+append wholly. WS reuse checks the restored request against its real baseline. Hidden-field
+provenance expires/evicts with history; persisted aliases cannot recover ciphertext. Core neither
+decrypts nor invents encrypted state.
 
 ## State and limits
 
@@ -173,11 +172,10 @@ stores a replacement window under that response ID before completion is delivere
   leading tools/developer setup; ordinary-to-Lite setup still comes from each request's settings.
 
 Later HTTP increments and required full WS sends reconstruct from this exact window. Full-history
-matching cannot revive item references removed by compaction. The original explicit-reference
-intent survives full WS reconstruction and disables extra hidden prewarm/automatic incrementality.
-No opaque content is decrypted, no bodies are persisted, and Core does not discover fresh client
-environment or apply untransmitted client truncation settings. Local text summaries, multiple or
-unobserved checkpoints, unsupported explicit input kinds and unresolved dropped tool calls require
+matching cannot revive item references removed by compaction. Explicit-reference intent survives
+full WS reconstruction and disables extra prewarm/automatic incrementality. Core does not decrypt
+opaque content, persist bodies, discover fresh environment or apply untransmitted truncation.
+Local summaries, multiple/unobserved checkpoints, unsupported explicit input kinds and dropped tool calls require
 a client-supplied replacement. A complete window supplied by the client remains authoritative.
 
 At most one extra attempt is allowed while business inference is proven unsent; the rejection retry

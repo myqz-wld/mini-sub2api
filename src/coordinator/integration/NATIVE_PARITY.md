@@ -13,8 +13,8 @@ bash scripts/test-scaffold-parity.sh
 
 Codex **0.153.4** uses source `3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`;
 OpenCode **1.18.29** uses `16747470f976aca3d362ad730bcd3fe82ecc2c9a`.
-Missing/wrong prerequisites fail, not skip. Client executables are verified on macOS arm64.
-Standard suites need no provider account and never fall back to real endpoints.
+Missing/wrong prerequisites fail. Clients are verified on macOS arm64; standard suites need no
+provider account and never fall back to real endpoints.
 
 ## Method
 
@@ -64,11 +64,11 @@ content, nonempty decoration, Key isolation and dependency validation.
 - [History association](../../../ref/reviews/recent-3-days/REVIEW_43_history-association.md): configuration-independent association and WS reuse boundaries.
 - [Historical 128-case excerpts](../../../ref/architecture/plan-17/capture-index.md) and [audit](../../../ref/architecture/plan-17/source-audit.md).
 
-The earlier 14 OpenCode cases proved functional delivery, not cross-request session continuity.
-Historical sanitized excerpts are reencoded, not byte-exact replay files; in-memory byte/UUID checks
-precede export. Export and real-provider runs require separate explicit authorization and opt-in.
-This repair makes no live calls. Prior live evidence covers 18 text/tool/schema and 18 five-turn
-memory cells on gpt-5.5/Astra; no real API-key credential was available.
+Earlier 14-case OpenCode evidence covers delivery only; newer 18-case coverage checks continuity.
+Historical excerpts are reencoded after in-memory byte/UUID checks, not replay files. Exports and
+live runs require separate authorization and opt-in. Prior real Subscription evidence covers 18
+text/tool/schema and 18 five-turn conversational-memory cells on gpt-5.5/Astra; the reasoning repair
+was local-only. No real API-key credential was available.
 
 General responders sometimes force direct functions for protocol stress. Actual code-mode tests
 separately execute the native nested host; host availability and tool exposure differ. Core provides

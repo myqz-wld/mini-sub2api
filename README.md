@@ -70,22 +70,18 @@ its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHA
 
 ## Main rules
 
-- HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history.
-- Verified full-history association survives current configuration changes; WS incrementality
-  separately requires matching actual request settings, input/output and connection state.
-- Subscription always requests encrypted reasoning upstream. Caller `include` controls its public
-  visibility; verified histories can restore ciphertext previously hidden by Core.
-- Accepted compaction can publish a replacement window under its response ID, allowing later HTTP
-  increments without resending history. Unsupported or incomplete windows still require full input.
-- Anonymous full requests can recover session/thread/window from an exact, verified compaction item
-  in the same Key's anonymous pool, while using the caller's current context and settings.
-- Full history expires after three idle hours; full input can rebuild it, and valid live WS references
-  can outlive local bodies. Identity retention is separate.
-- Preserve valid caller base instructions verbatim; never insert a model-default base. Preserve
-  developer order/duplicates and Subscription system→developer in place. Lite prefixes contain tools
-  and an optional caller base with scoped deterministic IDs.
-- Core does not discover client workspaces/Skills/tools or execute them. Native code mode and
-  ordinary direct tools keep their respective protocols.
+- HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history;
+  WS reuse separately checks the actual settings, input/output and connection.
+- Full-history association survives configuration changes. An exact verified anonymous compaction
+  item can restore its session/thread/window; accepted replacement windows support later increments.
+- Full history expires after three idle hours. Full input can rebuild it; valid live WS references
+  and persisted identities have separate lifetimes.
+- Subscription always requests encrypted reasoning. Caller `include` controls public visibility;
+  Core retains it and restores verified fields it previously hid from matched histories.
+- Preserve valid caller base instructions, developer order and duplicates; never insert a default
+  base. Subscription maps system→developer in place. Lite uses scoped deterministic prefix IDs.
+- Workspace/Skills/tools belong to the client. Core does not discover or execute them; native code
+  mode and ordinary direct tools keep their respective protocols.
 
 Plain HTTP binds only loopback; other listeners need TLS. Run one service per state directory.
 Vault/identity files are private but unencrypted; request/response bodies are not persisted.
