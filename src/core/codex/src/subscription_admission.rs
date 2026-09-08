@@ -112,7 +112,6 @@ impl ContextStore {
             branch,
             caller_format: plan.caller_format,
             upstream_format,
-            settings_hash,
             setup_hash,
             settings: stored_settings,
             history,

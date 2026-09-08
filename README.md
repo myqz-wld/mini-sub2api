@@ -71,6 +71,8 @@ its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHA
 ## Main rules
 
 - HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history.
+- Verified full-history association survives current configuration changes; WS incrementality
+  separately requires matching actual request settings, input/output and connection state.
 - Accepted compaction can publish a replacement window under its response ID, allowing later HTTP
   increments without resending history. Unsupported or incomplete windows still require full input.
 - Anonymous full requests can recover session/thread/window from an exact, verified compaction item

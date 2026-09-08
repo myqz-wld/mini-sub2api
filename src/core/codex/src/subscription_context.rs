@@ -59,7 +59,6 @@ pub(crate) struct Record {
     pub(crate) branch: String,
     pub(crate) caller_format: Format,
     pub(crate) upstream_format: Format,
-    pub(crate) settings_hash: [u8; 32],
     pub(crate) setup_hash: [u8; 32],
     pub(crate) settings: Option<Arc<Value>>,
     pub(crate) history: Option<Arc<History>>,

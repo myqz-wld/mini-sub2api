@@ -40,6 +40,7 @@ Standard suites need no provider account and never fall back to real endpoints.
 | Bare explicit references | 54 transport/format/identity cases: HTTP reconstruction, WS remote continuation and missing-state errors |
 | Bare anonymous history | 96 cases, three calls each: both credentials × JSON/SSE/WS-reconnect × ordinary/converted/formed/forced Lite × text/tool × exact/reduced history |
 | Bare minimal history | 24 cases start with model/input only, without instructions/tools/IDs; ordinary/Lite × transports × exact/reduced history × credentials |
+| Anonymous configuration changes | 48 four-request cases: credentials × JSON/SSE/WS/WS-reconnect × ordinary/converted/formed Lite × markers; stable identity, changed/current/omitted settings, full then eligible WS suffix, exact Lite IDs and API-key bytes |
 | Caller-only bases | 144 standard HTTP/WS cases, two business requests each: credentials × caller markers × ordinary/Lite × missing/invalid/explicit bases; no inserted defaults, stable prefix ownership and API-key bytes |
 | Actual OpenCode | 18 custom-provider text/read/denied-file and built-in OpenAI-plugin cases: stable session/thread, user/tool turns, headers and API-key bytes |
 | Model/context | All 11 catalogs; caller bases/personality, ordered developer messages, AGENTS/Skills/permissions, CWD, detected time/shell and supplied timezone text |
@@ -58,7 +59,7 @@ content, nonempty decoration, Key isolation and dependency validation.
 
 ## Evidence and limits
 
-- [Current repair](../../../ref/reviews/recent-3-days/REVIEW_38_history-prefix-compatibility.md): failures, fixes and current results.
+- [Current repair](../../../ref/reviews/recent-3-days/REVIEW_43_history-association.md): configuration-independent association, source boundaries and validation.
 - [Historical 128-case excerpts](../../../ref/architecture/plan-17/capture-index.md) and [audit](../../../ref/architecture/plan-17/source-audit.md).
 
 The earlier 14 OpenCode cases proved functional delivery, not cross-request session continuity.

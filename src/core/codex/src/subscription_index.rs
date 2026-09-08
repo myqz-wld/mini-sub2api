@@ -269,28 +269,6 @@ impl History {
     }
 }
 
-pub(crate) fn settings(
-    object: &Map<String, Value>,
-    transport: crate::request_normalizer::EmulationTransport,
-) -> Value {
-    let lite = object
-        .get("input")
-        .and_then(Value::as_array)
-        .and_then(|input| input.first())
-        .and_then(|item| item.get("type"))
-        .and_then(Value::as_str)
-        == Some("additional_tools");
-    settings_for_format(
-        object,
-        if lite {
-            crate::subscription_request::Format::Lite
-        } else {
-            crate::subscription_request::Format::Responses
-        },
-        transport,
-    )
-}
-
 pub(crate) fn settings_for_format(
     object: &Map<String, Value>,
     format: crate::subscription_request::Format,

@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "subscription_history_config_tests.rs"]
+mod config_tests;
+
 fn assistant() -> Value {
     json!({"type":"message","id":"msg_history","status":"completed","role":"assistant",
         "content":[{"type":"output_text","text":"answer","annotations":[],"logprobs":[]}]})
@@ -306,8 +309,8 @@ async fn filtered_subscription_controls_do_not_split_a_completed_history() {
         let mut changed = first.clone();
         changed[field] = "different".into();
         assert!(
-            plan(&store, &changed, KEY).unwrap().baseline.is_none(),
-            "changed {field} matched"
+            plan(&store, &changed, KEY).unwrap().baseline.is_some(),
+            "current {field} split verified history"
         );
     }
 }

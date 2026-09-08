@@ -4,7 +4,7 @@ use crate::subscription_context::{
     Active, CheckpointAssociation, ContextStore, Lease, Operation, Pending, Publication, Record,
     Session,
 };
-use crate::subscription_index::{History, canonical, ids_compatible, settings};
+use crate::subscription_index::{History, canonical};
 use crate::subscription_request::{Dependencies, Evidence, Format};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -17,10 +17,14 @@ use uuid::Uuid;
 mod lineage;
 pub(crate) use lineage::HistoryLineage;
 
+#[path = "subscription_history_selection.rs"]
+mod history_selection;
+
 pub(crate) struct ContextPlan {
     pub(crate) evidence: Evidence,
     pub(crate) session: Option<String>,
     pub(crate) turn: Option<String>,
+    // Local history/reference evidence; upstream WS reuse has its own request/socket baseline.
     pub(crate) baseline: Option<Record>,
     pub(crate) checkpoint: Option<CheckpointAssociation>,
     pub(crate) branch: Option<String>,
@@ -68,7 +72,6 @@ impl ContextStore {
             return Err(Error::InvalidRequest);
         }
         let mut session = binding.map(|b| b.session_id.clone()).or(selected);
-        let current_settings = settings(object, evidence.transport);
         let mut matched_len = 0;
         let mut independent_branch = false;
         let mut baseline = if let Some(previous) = &evidence.previous {
@@ -87,70 +90,14 @@ impl ContextStore {
             session = Some(record.identity.session_id.clone());
             Some(record.clone())
         } else if let Some(scope) = scope {
-            let path: Vec<_> = evidence
-                .input
-                .iter()
-                .map_while(|item| scope.interner.lookup(item))
-                .collect();
-            let candidates = scope
-                .index
-                .get(&session)
-                .map(|index| index.prefixes(&path))
-                .unwrap_or_default();
-            let mut qualified = Vec::new();
-            for (length, id) in candidates {
-                let Some(record) = scope.records.get(&id) else {
-                    continue;
-                };
-                let Some(history) = &record.history else {
-                    continue;
-                };
-                if !history
-                    .items()
-                    .iter()
-                    .zip(&evidence.input)
-                    .all(|(saved, caller)| ids_compatible(caller, &saved.value))
-                {
-                    continue;
-                }
-                // Configurations are checked separately from the structural radix key.
-                if record.settings.as_deref() != Some(&current_settings) {
-                    continue;
-                }
-                let mut dependencies = local_dependencies(record);
-                if dependencies.append(&evidence.input[length..]).is_err() {
-                    continue;
-                }
-                if length > matched_len {
-                    qualified.clear();
-                    matched_len = length;
-                }
-                if length == matched_len {
-                    qualified.push(record);
-                }
-            }
-            if let Some(first) = qualified.first() {
-                independent_branch = qualified.len() > 1
+            if let Some(found) = scope.match_history(&session, &evidence.input)? {
+                matched_len = found.length;
+                independent_branch = found.equivalent_count > 1
                     && evidence.session.is_none()
                     && binding.is_none()
                     && evidence.turn.is_none();
-                let first_context = first.history.as_ref().expect("indexed history").items();
-                if qualified.iter().skip(1).any(|record| {
-                    record.dependencies.calls != first.dependencies.calls
-                        || record.settings_hash != first.settings_hash
-                        || !record
-                            .history
-                            .as_ref()
-                            .expect("indexed history")
-                            .items()
-                            .iter()
-                            .zip(&first_context)
-                            .all(|(a, b)| a.key.id == b.key.id)
-                }) {
-                    return Err(Error::StateUnavailable);
-                }
-                session = Some(first.identity.session_id.clone());
-                Some((*first).clone())
+                session = Some(found.record.identity.session_id.clone());
+                Some(found.record.clone())
             } else {
                 None
             }
@@ -242,6 +189,7 @@ impl ContextStore {
         {
             return Err(Error::InvalidRequest);
         }
+        // A full-history match establishes context and identity, never the current configuration.
         let mut effective_settings = crate::subscription_index::settings_for_format(
             object,
             caller_format,

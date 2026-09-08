@@ -51,10 +51,13 @@ Matching uses normalized caller input and public-side output, before identity/Li
   function/custom-tool items. Nonempty decoration remains significant.
 - Message IDs may be omitted. Direct function/custom-tool call/output IDs may be omitted only with
   the same valid call_id. Explicit IDs and other item/resource/reference IDs remain strict.
-- Filter ID, dependency and configuration failures before choosing the longest candidate. Calls
+- Filter ID and dependency failures before choosing the longest candidate. Calls
   require nonblank IDs; results consume known calls once. Conflict never selects by recency.
-- Settings share the sending field filter and selected-format defaults. Discarded controls do not
-  split history. Exact content storage and provider-output/WS-send comparisons remain separate.
+- Current top-level instructions/tools/model/settings do not determine history association or
+  make equivalent histories conflict. Use current effective settings; ordinary bases never inherit.
+  WS reuse separately compares its actual transmitted configuration and input/output baseline.
+- Historical developer messages and formed Lite input prefixes remain content: editing them can
+  break the prefix. Exact content storage and provider-output comparisons remain separate.
 
 If anonymous full input has no eligible prefix, its last compaction item can locate a uniquely owned,
 completed compaction in the same Key's anonymous pool. Match the entire structured item, including ID
