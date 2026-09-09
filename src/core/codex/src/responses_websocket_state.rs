@@ -29,6 +29,7 @@ struct ActiveOperation {
     output: Vec<Value>,
     output_bytes: usize,
     compaction_output: crate::request_compaction::CompactionOutput,
+    output_lifecycle: crate::response_output::OutputLifecycle,
     reusable: bool,
     pending_compaction: Option<PendingCompaction>,
 }
@@ -275,6 +276,18 @@ impl ResponsesWebSocketState {
             };
         };
 
+        if let Some(active) = self.active.as_mut()
+            && active
+                .output_lifecycle
+                .observe(event, self.max_output_items)
+                .is_err()
+        {
+            self.fail_active(kind);
+            return ObservedServerEvent {
+                disposition,
+                completed_compaction: None,
+            };
+        }
         let mut completed_compaction = None;
         match event_type {
             "response.output_item.done" => self.observe_output_item(event),
@@ -333,7 +346,9 @@ impl ResponsesWebSocketState {
             .and_then(|p| p.request.as_ref())
             .map_or(0, RequestSnapshot::cost)
             + self.active.as_ref().map_or(0, |a| {
-                a.request.as_ref().map_or(0, RequestSnapshot::cost) + a.output_bytes * 4
+                a.request.as_ref().map_or(0, RequestSnapshot::cost)
+                    + a.output_bytes * 4
+                    + a.output_lifecycle.retained_bytes()
             })
     }
 
@@ -366,6 +381,7 @@ impl ResponsesWebSocketState {
             output: Vec::new(),
             output_bytes: 0,
             compaction_output: Default::default(),
+            output_lifecycle: Default::default(),
             reusable: true,
             pending_compaction: planned.pending_compaction,
         });

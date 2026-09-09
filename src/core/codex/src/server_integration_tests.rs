@@ -171,9 +171,9 @@ async fn subscription_route_streams_upstream_and_aggregates_for_non_streaming_ca
                         .header(http::header::CONTENT_TYPE, "text/event-stream")
                         .body(Body::from(
                             "event: response.output_text.delta\r\n\
-                             data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\r\n\r\n\
+                             data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"item_id\":\"msg_answer\",\"delta\":\"ok\"}\r\n\r\n\
                              event: response.completed\r\n\
-                             data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_api_key\",\"object\":\"response\",\"output\":[]}}\r\n\r\n",
+                             data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_api_key\",\"object\":\"response\",\"output\":[{\"type\":\"message\",\"id\":\"msg_answer\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\r\n\r\n",
                         ))
                         .expect("mock response")
                 },
@@ -213,7 +213,8 @@ async fn subscription_route_streams_upstream_and_aggregates_for_non_streaming_ca
     let response_id = returned["id"].as_str().expect("response ID");
     assert_ne!(response_id, "resp_api_key");
     assert_eq!(returned["object"], "response");
-    assert_eq!(returned["output"], serde_json::json!([]));
+    assert_eq!(returned["output"].as_array().unwrap().len(), 1);
+    assert_eq!(returned["output"][0]["content"][0]["text"], "ok");
     assert_eq!(
         uuid::Uuid::parse_str(
             response_id

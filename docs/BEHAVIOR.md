@@ -183,6 +183,18 @@ prefix events are delivered before later malformed/oversized data regardless of 
 Failure trailers survive the internal Core HTTP hop, including errors after an already delivered
 terminal event; the request is then recorded as failed.
 
+Created/in-progress output snapshots, item-added events and output deltas also establish unfinished
+items. A completed claim must close every known item through matching item-done evidence or a
+complete final output item with the same index/identity. An empty/absent/truncated footer cannot
+discard an unfinished suffix, and explicitly unfinished item status cannot become success. Failed
+and incomplete terminals still terminate as failures. These checks cover JSON, SSE, WS and hidden
+prewarm reuse, before history or compaction publication.
+
+Completion tracking retains only bounded identity facts, not partial content. Missing usable item
+locators or exceeding the concurrent unfinished-item limit (`outputItems`) makes completion proof
+unavailable and rejects a subsequent completed claim. Body-cache pressure alone still permits
+valid delivery when the separate completion facts remain available.
+
 When complete source history and a single matching observed compaction item are available, Core
 stores a replacement window under that response ID before completion is delivered:
 

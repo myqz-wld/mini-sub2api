@@ -83,7 +83,8 @@ its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHA
 - Preserve valid caller item times even without item IDs; retained history keeps first-generated
   times across reference expansion. Same-turn retries/reconnects retain the first routing token.
 - Streaming success requires a consistent terminal event. Errors cannot become JSON success;
-  malformed/conflicting output fails while verified SSE prefixes survive later errors and chunking.
+  unfinished, malformed or conflicting output fails while verified SSE prefixes survive later errors
+  and chunking. Started output must finish through item.done or a matching complete final footer.
   Body-changing WS controls invalidate stale local history.
 - Workspace/Skills/tools belong to the client. Core does not discover or execute them; native code
   mode and ordinary direct tools keep their respective protocols.

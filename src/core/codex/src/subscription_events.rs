@@ -37,26 +37,36 @@ impl ContextStore {
                 "invalid completed item index"
             );
         }
-        if terminal.is_none()
-            && !matches!(
+        let is_terminal = terminal.is_some()
+            || matches!(
                 kind,
                 "response.completed" | "response.failed" | "response.incomplete"
-            )
-        {
-            return Ok(());
-        }
+            );
+        let completed = terminal == Some(true) || kind == "response.completed";
         let response = event.get("response").unwrap_or(&Value::Null);
         let mut inner = self
             .inner
             .lock()
             .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
-        let active = operation.and_then(|operation| inner.operations.get(&operation.0.id));
+        let active = operation.and_then(|operation| inner.operations.get_mut(&operation.0.id));
         let valid = (|| {
             anyhow::ensure!(
-                operation.is_none() || active.is_some(),
+                operation.is_none()
+                    || active.is_some()
+                    || !(is_terminal
+                        || crate::response_output::OutputLifecycle::is_output_event(event)),
                 "operation already terminated"
             );
             if let Some(active) = active {
+                active
+                    .output_lifecycle
+                    .observe(event, self.limits.output_items)?;
+                if !is_terminal {
+                    return Ok(());
+                }
+                if completed {
+                    active.output_lifecycle.validate_completed(response)?;
+                }
                 if let (Some(previous), Some(id)) = (
                     &active.response_id,
                     response.get("id").and_then(Value::as_str),
@@ -71,8 +81,14 @@ impl ContextStore {
                     active.observed_items.iter().map(|(i, item)| (*i, *item)),
                     active.dependencies_available,
                 )
-            } else {
+            } else if is_terminal {
+                if completed {
+                    crate::response_output::OutputLifecycle::default()
+                        .validate_completed(response)?;
+                }
                 crate::response_output::validate_terminal(response, std::iter::empty(), true)
+            } else {
+                Ok(())
             }
         })();
         if valid.is_err()

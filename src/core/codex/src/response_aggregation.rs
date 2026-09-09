@@ -25,11 +25,18 @@ pub(super) struct TerminalResponse {
 pub(super) fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalResponse, CoreFailure> {
     let mut terminal = None;
     let mut output = std::collections::BTreeMap::new();
+    let mut lifecycle = crate::response_output::OutputLifecycle::default();
     for event in events(bytes)? {
         let event = event?;
         if event.get("type").and_then(serde_json::Value::as_str) == Some("error") {
             return Err(CoreFailure::UpstreamResponseFailed);
         }
+        if terminal.is_some() && crate::response_output::OutputLifecycle::is_output_event(&event) {
+            return Err(CoreFailure::UpstreamResponseFailed);
+        }
+        lifecycle
+            .observe(&event, crate::inference_limits::get().output_items)
+            .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
         if terminal.is_none()
             && event.get("type").and_then(serde_json::Value::as_str)
                 == Some("response.output_item.done")
@@ -67,6 +74,11 @@ pub(super) fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalRespons
         }
     }
     let mut terminal = terminal.ok_or(CoreFailure::UpstreamResponseFailed)?;
+    if terminal.kind == TerminalKind::Completed {
+        lifecycle
+            .validate_completed(&terminal.response)
+            .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    }
     crate::response_output::validate_terminal(
         &terminal.response,
         output
@@ -188,6 +200,21 @@ mod output_tests {
             ]);
             assert!(terminal_response_from_sse(&bytes).is_err());
         }
+    }
+
+    #[test]
+    fn aggregation_rejects_a_finished_prefix_with_an_unfinished_suffix() {
+        let item = json!({"type":"message","id":"msg_first","role":"assistant","content":[]});
+        let bytes = stream(vec![
+            json!({"type":"response.output_item.done","output_index":0,"item":item}),
+            json!({"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_partial","status":"in_progress","content":[]}}),
+            json!({"type":"response.output_text.delta","output_index":1,"item_id":"msg_partial","delta":"unfinished suffix"}),
+            json!({"type":"response.completed","response":{"id":"resp_partial","output":[]}}),
+        ]);
+        assert!(
+            terminal_response_from_sse(&bytes).is_err(),
+            "JSON silently discarded unfinished output"
+        );
     }
 
     #[test]

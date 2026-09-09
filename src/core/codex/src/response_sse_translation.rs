@@ -27,6 +27,7 @@ struct TranslationState {
     upstream_ended: bool,
     terminal_seen: bool,
     maximum: usize,
+    output_lifecycle: crate::response_output::OutputLifecycle,
 }
 
 pub(crate) fn translated_sse_frames(
@@ -44,6 +45,7 @@ pub(crate) fn translated_sse_frames(
             upstream_ended: false,
             terminal_seen: false,
             maximum,
+            output_lifecycle: Default::default(),
         },
         |mut state| async move {
             if state.finished {
@@ -89,7 +91,15 @@ async fn finish_event(
     mut state: TranslationState,
     event: Vec<u8>,
 ) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
-    match translate_event(&state.context, event, state.maximum).await {
+    match translate_event(
+        &state.context,
+        event,
+        state.maximum,
+        &mut state.output_lifecycle,
+        state.terminal_seen,
+    )
+    .await
+    {
         Ok((bytes, terminal)) => {
             state.terminal_seen |= terminal;
             (Ok(Frame::data(bytes)), state)
@@ -137,6 +147,8 @@ async fn translate_event(
     context: &ResponseStateContext,
     event: Vec<u8>,
     maximum: usize,
+    lifecycle: &mut crate::response_output::OutputLifecycle,
+    terminal_seen: bool,
 ) -> Result<(Bytes, bool), ()> {
     let text = std::str::from_utf8(&event).map_err(|_| ())?;
     let data = data_payload(text);
@@ -147,6 +159,17 @@ async fn translate_event(
         return Ok((Bytes::from(event), false));
     }
     let value: serde_json::Value = serde_json::from_str(&data).map_err(|_| ())?;
+    if terminal_seen && crate::response_output::OutputLifecycle::is_output_event(&value) {
+        return Err(());
+    }
+    lifecycle
+        .observe(&value, crate::inference_limits::get().output_items)
+        .map_err(|_| ())?;
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("response.completed") {
+        lifecycle
+            .validate_completed(&value["response"])
+            .map_err(|_| ())?;
+    }
     let terminal = matches!(
         value.get("type").and_then(serde_json::Value::as_str),
         Some("response.completed" | "response.failed" | "response.incomplete" | "error")

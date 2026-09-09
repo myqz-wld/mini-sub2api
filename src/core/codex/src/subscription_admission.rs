@@ -140,6 +140,7 @@ impl ContextStore {
                 reserved,
                 output: BTreeMap::new(),
                 observed_items: BTreeMap::new(),
+                output_lifecycle: Default::default(),
                 compaction_output: Default::default(),
                 dependencies_available: true,
                 output_bytes: 0,

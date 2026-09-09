@@ -5,6 +5,9 @@ fn state() -> ResponsesWebSocketState {
     ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534)
 }
 
+#[path = "responses_websocket_partial_output_tests.rs"]
+mod partial_output_tests;
+
 fn item(item_type: &str, id: &str) -> Value {
     json!({"type": item_type, "id": id})
 }

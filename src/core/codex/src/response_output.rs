@@ -1,6 +1,10 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[path = "response_output_lifecycle.rs"]
+mod lifecycle;
+pub(crate) use lifecycle::OutputLifecycle;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct CompletionFingerprint {
     digest: [u8; 32],

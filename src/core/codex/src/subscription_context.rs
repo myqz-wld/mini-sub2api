@@ -95,6 +95,7 @@ pub(crate) struct Active {
     pub(crate) reserved: usize,
     pub(crate) output: BTreeMap<usize, Value>,
     pub(crate) observed_items: BTreeMap<usize, crate::response_output::CompletionFingerprint>,
+    pub(crate) output_lifecycle: crate::response_output::OutputLifecycle,
     pub(crate) compaction_output: crate::request_compaction::CompactionOutput,
     pub(crate) dependencies_available: bool,
     pub(crate) output_bytes: usize,

@@ -39,6 +39,14 @@ impl ResponsesWebSocketState {
 
     pub(super) fn complete_active(&mut self, event: &Value) -> Option<PendingCompaction> {
         let mut active = self.active.take()?;
+        if active
+            .output_lifecycle
+            .validate_completed(&event["response"])
+            .is_err()
+        {
+            self.fail_active(active.kind);
+            return None;
+        }
         let response = event
             .as_object()
             .and_then(|object| object.get("response"))
