@@ -136,6 +136,8 @@ impl ResponseStateContext {
             }
             _ => None,
         };
+        let validation_store = self.store.contexts.clone();
+        let validation_operation = operation.clone();
         let mut translated = self
             .store
             .edit(
@@ -144,6 +146,11 @@ impl ResponseStateContext {
                 &self.downstream_scope,
                 move |editor| {
                     translate_response_ids(editor, &mut value, owner.as_ref())?;
+                    validation_store.validate_event(
+                        validation_operation.as_ref(),
+                        &value,
+                        terminal,
+                    )?;
                     if let Some(pending) = pending_compaction {
                         editor.commit_compaction(
                             &pending.marker_key,

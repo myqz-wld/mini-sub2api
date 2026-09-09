@@ -22,6 +22,7 @@ struct TranslationState {
     upstream: UpstreamByteStream,
     context: ResponseStateContext,
     buffer: Vec<u8>,
+    pending: Bytes,
     finished: bool,
     upstream_ended: bool,
     terminal_seen: bool,
@@ -38,6 +39,7 @@ pub(crate) fn translated_sse_frames(
             upstream,
             context,
             buffer: Vec::new(),
+            pending: Bytes::new(),
             finished: false,
             upstream_ended: false,
             terminal_seen: false,
@@ -52,6 +54,18 @@ pub(crate) fn translated_sse_frames(
                     let event = state.buffer.drain(..end).collect::<Vec<_>>();
                     return Some(finish_event(state, event).await);
                 }
+                if !state.pending.is_empty() {
+                    let take = state
+                        .maximum
+                        .saturating_sub(state.buffer.len())
+                        .min(state.pending.len());
+                    if take == 0 {
+                        return Some(fail(state));
+                    }
+                    state.buffer.extend_from_slice(&state.pending[..take]);
+                    state.pending = state.pending.slice(take..);
+                    continue;
+                }
                 if state.upstream_ended {
                     if state.buffer.is_empty() {
                         return (!state.terminal_seen).then(|| fail(state));
@@ -61,9 +75,7 @@ pub(crate) fn translated_sse_frames(
                 }
                 match state.upstream.next().await {
                     Some(Ok(bytes)) => {
-                        if append_bounded(&mut state.buffer, &bytes, state.maximum).is_err() {
-                            return Some(fail(state));
-                        }
+                        state.pending = bytes;
                     }
                     Some(Err(_)) => return Some(fail(state)),
                     None => state.upstream_ended = true,
@@ -202,18 +214,6 @@ fn find_event_end(bytes: &[u8]) -> Option<usize> {
         line_start = index + 1;
     }
     None
-}
-
-fn append_bounded(destination: &mut Vec<u8>, chunk: &[u8], maximum: usize) -> Result<(), ()> {
-    if destination
-        .len()
-        .checked_add(chunk.len())
-        .is_none_or(|length| length > maximum)
-    {
-        return Err(());
-    }
-    destination.extend_from_slice(chunk);
-    Ok(())
 }
 
 #[cfg(test)]

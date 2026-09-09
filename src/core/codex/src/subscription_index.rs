@@ -7,7 +7,8 @@ use std::sync::{Arc, Weak};
 #[path = "subscription_history_match.rs"]
 mod history_match;
 pub(crate) use history_match::{
-    candidate_key, completion_items_compatible, hidden_ciphertext_compatible, ids_compatible,
+    candidate_key, completion_items_compatible, completion_key, hidden_ciphertext_compatible,
+    ids_compatible,
 };
 
 pub(crate) fn canonical(value: &Value) -> Vec<u8> {

@@ -32,6 +32,12 @@ type responsesProfileHTTPFixture struct {
 }
 
 func newResponsesProfileHTTPFixture(t *testing.T) *responsesProfileHTTPFixture {
+	return newResponsesProfileHTTPFixtureWithResponder(t, func(writer http.ResponseWriter, body []byte) (string, string) {
+		return writeLoopbackResponsesResult(writer, body, "resp_profile")
+	})
+}
+
+func newResponsesProfileHTTPFixtureWithResponder(t *testing.T, respond func(http.ResponseWriter, []byte) (string, string)) *responsesProfileHTTPFixture {
 	t.Helper()
 	t.Setenv("NO_PROXY", "127.0.0.1,::1")
 	t.Setenv("no_proxy", "127.0.0.1,::1")
@@ -43,7 +49,7 @@ func newResponsesProfileHTTPFixture(t *testing.T) *responsesProfileHTTPFixture {
 			http.Error(writer, "capture body", http.StatusInternalServerError)
 			return
 		}
-		responseID, providerRequestID := writeLoopbackResponsesResult(writer, body, "resp_profile")
+		responseID, providerRequestID := respond(writer, body)
 		captures <- routingMatrixCapture{
 			Headers: request.Header.Clone(), Body: body,
 			ResponseID: responseID, ProviderRequestID: providerRequestID,

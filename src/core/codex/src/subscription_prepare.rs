@@ -20,9 +20,13 @@ pub(crate) use lineage::HistoryLineage;
 #[path = "subscription_history_selection.rs"]
 mod history_selection;
 
+#[path = "subscription_input_metadata.rs"]
+mod input_metadata;
+
 pub(crate) struct ContextPlan {
     pub(crate) evidence: Evidence,
     pub(crate) restored_input: Option<Vec<Value>>,
+    pub(crate) input_metadata_charge: usize,
     pub(crate) session: Option<String>,
     pub(crate) turn: Option<String>,
     // Local history/reference evidence; upstream WS reuse has its own request/socket baseline.
@@ -330,6 +334,7 @@ impl ContextStore {
         Ok(ContextPlan {
             evidence,
             restored_input,
+            input_metadata_charge: 0,
             session,
             turn,
             baseline,

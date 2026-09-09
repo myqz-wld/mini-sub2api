@@ -1,7 +1,6 @@
 use crate::subscription_context::{ContextStore, Operation, Pending};
 use crate::subscription_index::{History, completion_items_compatible};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::time::Instant;
 
@@ -17,6 +16,78 @@ fn accepted_compaction(
 }
 
 impl ContextStore {
+    /// Validate the translated envelope inside the identity transaction, before compaction or
+    /// response aliases commit. Fingerprints survive body-cache pressure without partial history.
+    pub(crate) fn validate_event(
+        &self,
+        operation: Option<&Operation>,
+        event: &Value,
+        terminal: Option<bool>,
+    ) -> anyhow::Result<()> {
+        let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+        if kind == "response.output_item.done" {
+            anyhow::ensure!(
+                event.get("item").is_some_and(Value::is_object),
+                "invalid completed item"
+            );
+            anyhow::ensure!(
+                event
+                    .get("output_index")
+                    .is_none_or(|i| i.as_u64().and_then(|i| usize::try_from(i).ok()).is_some()),
+                "invalid completed item index"
+            );
+        }
+        if terminal.is_none()
+            && !matches!(
+                kind,
+                "response.completed" | "response.failed" | "response.incomplete"
+            )
+        {
+            return Ok(());
+        }
+        let response = event.get("response").unwrap_or(&Value::Null);
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
+        let active = operation.and_then(|operation| inner.operations.get(&operation.0.id));
+        let valid = (|| {
+            anyhow::ensure!(
+                operation.is_none() || active.is_some(),
+                "operation already terminated"
+            );
+            if let Some(active) = active {
+                if let (Some(previous), Some(id)) = (
+                    &active.response_id,
+                    response.get("id").and_then(Value::as_str),
+                ) {
+                    anyhow::ensure!(
+                        previous == id,
+                        "response ownership changed during inference"
+                    );
+                }
+                crate::response_output::validate_terminal(
+                    response,
+                    active.observed_items.iter().map(|(i, item)| (*i, *item)),
+                    active.dependencies_available,
+                )
+            } else {
+                crate::response_output::validate_terminal(response, std::iter::empty(), true)
+            }
+        })();
+        if valid.is_err()
+            && let Some(operation) = operation
+            && let Some(active) = inner.operations.remove(&operation.0.id)
+            && let Some(scope) = inner.scopes.get_mut(&active.scope)
+        {
+            if let Some(id) = active.response_id {
+                scope.records.remove(&id);
+            }
+            scope.rebuild_index();
+        }
+        valid
+    }
+
     pub(crate) fn accepts_compaction(
         &self,
         operation: Option<&Operation>,
@@ -105,7 +176,7 @@ impl ContextStore {
             let encoded = serde_json::to_vec(item)?;
             let size = encoded.len();
             if index < self.limits.output_items {
-                let fingerprint: [u8; 32] = Sha256::digest(&encoded).into();
+                let fingerprint = crate::response_output::CompletionFingerprint::new(item);
                 if let Some(previous) = active.observed_items.insert(index, fingerprint) {
                     anyhow::ensure!(
                         previous == fingerprint,

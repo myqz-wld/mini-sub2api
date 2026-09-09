@@ -76,7 +76,9 @@ one. Equivalent contexts share immutable content, not active/tool state. Each br
 allows one inference. Historical ownership permits current-thread, ancestor or declared-fork history;
 fork provenance grants no cross-session reference authority, including remote-only WS continuation.
 
-Keep the first upstream handshake/metadata turn token until a new turn. Completed prewarm may hand
+Keep the first upstream handshake/metadata turn token for the same logical turn, including failed
+attempts and socket reconnects. Failed-turn metadata obeys session idle expiry and capacity eviction;
+active/admitted work stays protected. Completed prewarm may hand
 it to the first business turn on the same socket/thread; another thread cannot consume it. Hidden
 setup updates the business frame before sending. Memory metadata uses its native turn-free shape;
 Core does not implement a memory-writing service.
@@ -106,6 +108,10 @@ none of these or client tools. Sandbox meaning survives while implementation fol
 Root-agent/time and model REPL flags use existing defaults; explicit valid values survive. Flags do
 not enable execution. Filter server-unsupported max_output_tokens/temperature/top_p; retain supported
 access programs, sequential_cutoff, HTTP trace headers and allowed turn metadata.
+
+Valid numeric item `create_time` survives even when an optional item ID is absent. Retained
+caller-form history carries first-assigned time/turn metadata through reference expansion and
+verified full-history matching, while explicit caller values and original content remain intact.
 
 Native exec/wait exposure and host availability differ. Bare API/OpenCode retain direct tools;
 Core provides no JavaScript bridge or claim of full default-native code-mode equivalence.
@@ -154,6 +160,8 @@ Private schema-v1 files contain bounded typed ID pairs, never bodies/raw Keys. D
 text/ciphertext/resource IDs. Corruption fails for the affected account without reset/raw-ID fallback.
 Files are bounded to 512 MiB/account; inactive details are pruning-eligible after 30 days, protecting
 live/retained mappings. Installation/session/thread nodes have no fixed TTL; usage details default to seven days.
+Startup orphan cleanup rechecks credential ownership under the identity-state lock before deletion;
+a stale scan cannot delete newly owned state, and unreadable ownership evidence preserves it.
 
 ## Completion and recovery
 
@@ -167,6 +175,13 @@ Publish valid context before public completion. Reconcile item-done/final output
 uses completed items for JSON/history, without duplicate stream events. Failed/incomplete responses
 are not baselines. V2 compaction requires matching success and exactly one valid encrypted item-done;
 a final array alone is insufficient. Overlapping same-base commits advance once.
+
+Subscription JSON aggregation rejects an `error` event even when a completed/incomplete event
+follows it. Malformed output footers, contradictory completed items and incomplete item sequences
+fail before public completion or history publication. SSE budgeting applies per event: verified
+prefix events are delivered before later malformed/oversized data regardless of network chunking.
+Failure trailers survive the internal Core HTTP hop, including errors after an already delivered
+terminal event; the request is then recorded as failed.
 
 When complete source history and a single matching observed compaction item are available, Core
 stores a replacement window under that response ID before completion is delivered:

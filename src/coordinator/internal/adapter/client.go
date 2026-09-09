@@ -89,6 +89,8 @@ func (s *Supervisor) Forward(
 	request.Header.Set(protocolv1.AccountRefHeader, accountRef)
 	request.Header.Set(protocolv1.PseudonymScopeHeader, pseudonymScope)
 	request.Header.Set(protocolv1.RequestIDHeader, requestID)
+	// Core's HTTP/1 transport only sends failure trailers to a peer that advertises support.
+	request.Header.Set("Te", "trailers")
 	response, err := internalHTTPClient.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("call Codex core: %w", err)

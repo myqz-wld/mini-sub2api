@@ -4,6 +4,41 @@ use crate::request_wire_ids::translate_request_ids;
 use std::collections::BTreeSet;
 
 #[tokio::test]
+async fn validated_prefix_delivery_does_not_depend_on_network_chunking() {
+    let prefix = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"prefix\"}\n\n";
+    for suffix in [
+        format!("data: {}", "x".repeat(512)),
+        "data: invalid\n\n".into(),
+    ] {
+        let joined = format!("{prefix}{prefix}{suffix}");
+        for chunk_size in [1, prefix.len(), joined.len()] {
+            let temp = tempfile::tempdir().unwrap();
+            let store =
+                crate::request_state_store::RequestStateStore::new(temp.path().to_path_buf());
+            let context =
+                ResponseStateContext::new("acct_chunks", "chunks", "scope", &store, None, None);
+            let upstream: UpstreamByteStream = Box::pin(futures_util::stream::iter(
+                joined
+                    .as_bytes()
+                    .chunks(chunk_size)
+                    .map(|v| Ok(Bytes::copy_from_slice(v)))
+                    .collect::<Vec<_>>(),
+            ));
+            let frames = translated_sse_frames(upstream, context, 128)
+                .collect::<Vec<_>>()
+                .await;
+            let frames: Vec<_> = frames.into_iter().map(Result::unwrap).collect();
+            assert_eq!(
+                frames.iter().filter(|f| f.data_ref().is_some()).count(),
+                2,
+                "validated prefix lost"
+            );
+            assert!(frames.last().unwrap().trailers_ref().is_some());
+        }
+    }
+}
+
+#[tokio::test]
 async fn stream_eof_requires_a_terminal_and_preserves_the_last_event() {
     for (data, terminal) in [
         ("", false),

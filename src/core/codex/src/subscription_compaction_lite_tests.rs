@@ -31,7 +31,10 @@ async fn in_band_lite_compaction_retains_the_actual_optional_setup_block() {
         let values = cached.values();
         assert_eq!(values[0]["type"], "additional_tools");
         for item in &values[1..=developers] {
-            assert!(*item == message("developer", "caller prefix kept exactly"));
+            assert_caller_item_with_generated_metadata(
+                item,
+                &message("developer", "caller prefix kept exactly"),
+            );
         }
         let mut next = delta(&response, vec![input("new user")]);
         next.as_object_mut().unwrap().remove("instructions");

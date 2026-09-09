@@ -127,7 +127,9 @@ fn build_streaming_response(
     builder = builder.header(CORE_TTFB_HEADER, ttfb_ms.to_string());
     builder = builder.header(
         http::header::TRAILER,
-        format!("{FAILURE_PHASE_TRAILER}, {DELIVERY_STATE_TRAILER}, {RETRY_ADVICE_TRAILER}"),
+        // Hyper compares these tokens to HeaderName's lowercase representation.
+        format!("{FAILURE_PHASE_TRAILER}, {DELIVERY_STATE_TRAILER}, {RETRY_ADVICE_TRAILER}")
+            .to_ascii_lowercase(),
     );
     let translate_sse = response_state.is_some() && expects_sse && status.is_success();
     let upstream_stream: UpstreamByteStream = Box::pin(upstream.bytes_stream());

@@ -94,7 +94,7 @@ pub(crate) struct Active {
     pub(crate) lane: String,
     pub(crate) reserved: usize,
     pub(crate) output: BTreeMap<usize, Value>,
-    pub(crate) observed_items: BTreeMap<usize, [u8; 32]>,
+    pub(crate) observed_items: BTreeMap<usize, crate::response_output::CompletionFingerprint>,
     pub(crate) compaction_output: crate::request_compaction::CompactionOutput,
     pub(crate) dependencies_available: bool,
     pub(crate) output_bytes: usize,
@@ -327,14 +327,19 @@ impl Record {
 }
 
 impl Scope {
-    pub(crate) fn prune_metadata(&mut self) {
+    pub(crate) fn prune_metadata(&mut self, now: Instant, ttl: Duration) {
         let sessions: HashSet<_> = self
             .records
             .values()
             .map(|r| r.identity.session_id.clone())
             .chain(self.bindings.values().cloned())
             .collect();
-        self.sessions.retain(|id, _| sessions.contains(id));
+        // A failed first operation has no completed record. Its admitted session/turn still
+        // owns the first routing token until idle expiry, including across socket reconnects.
+        self.sessions.retain(|id, session| {
+            sessions.contains(id) || now.saturating_duration_since(session.last_business) < ttl
+        });
+        let sessions: HashSet<_> = self.sessions.keys().cloned().collect();
         self.aliases.retain(|_, id| sessions.contains(id));
         self.turns.retain(|_, id| sessions.contains(id));
         let turns: HashSet<_> = self
@@ -352,7 +357,7 @@ impl Scope {
                 || id
                     .split_once(':')
                     .and_then(|(_, turn)| self.turns.get(turn))
-                    .is_some_and(|owner| self.bindings.values().any(|bound| bound == owner))
+                    .is_some_and(|owner| sessions.contains(owner))
         });
     }
 

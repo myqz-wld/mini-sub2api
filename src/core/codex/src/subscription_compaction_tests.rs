@@ -129,10 +129,22 @@ async fn explicit_compaction_keeps_caller_context_and_supports_two_http_deltas()
         let values = cached.values();
         let offset = usize::from(lite);
         assert_eq!(values.len(), offset + 5);
-        assert!(values[offset] == message("system", "caller system"));
-        assert!(values[offset + 1] == message("developer", "caller rule"));
-        assert!(values[offset + 2] == message("user", "first user"));
-        assert!(values[offset + 3] == message("user", "second user"));
+        assert_caller_item_with_generated_metadata(
+            &values[offset],
+            &message("system", "caller system"),
+        );
+        assert_caller_item_with_generated_metadata(
+            &values[offset + 1],
+            &message("developer", "caller rule"),
+        );
+        assert_caller_item_with_generated_metadata(
+            &values[offset + 2],
+            &message("user", "first user"),
+        );
+        assert_caller_item_with_generated_metadata(
+            &values[offset + 3],
+            &message("user", "second user"),
+        );
         assert_eq!(
             values[offset + 4]["encrypted_content"],
             "opaque 新 checkpoint"
@@ -416,8 +428,11 @@ async fn repeated_compaction_uses_the_referenced_window_not_the_latest_session()
     .await;
     let values = history(&store, &two).unwrap().values();
     assert_eq!(values.len(), 3);
-    assert!(values[0] == message("user", "original branch"));
-    assert!(values[1] == message("user", "original branch suffix"));
+    assert_caller_item_with_generated_metadata(&values[0], &message("user", "original branch"));
+    assert_caller_item_with_generated_metadata(
+        &values[1],
+        &message("user", "original branch suffix"),
+    );
     assert_eq!(values[2]["encrypted_content"], "checkpoint two");
     assert_eq!(
         history(&store, &one).unwrap().values().last().unwrap()["encrypted_content"],

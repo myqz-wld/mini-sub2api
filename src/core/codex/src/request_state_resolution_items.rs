@@ -32,17 +32,27 @@ pub(super) fn project_items(
     let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(generated_upstream);
     };
+    // Emulation prepends tool/base items; the caller's business items keep their order.
+    let prefix_count = items.len().saturating_sub(evidence.items.len());
     for (index, item) in items.iter_mut().enumerate() {
         let Some(item) = item.as_object_mut() else {
             continue;
         };
         let temporary_id = item.get("id").and_then(Value::as_str).map(str::to_string);
-        let raw = temporary_id.as_deref().and_then(|id| {
-            evidence
-                .items
-                .iter()
-                .find(|evidence| evidence.id.as_deref() == Some(id))
-        });
+        let raw = temporary_id
+            .as_deref()
+            .and_then(|id| {
+                evidence
+                    .items
+                    .iter()
+                    .find(|evidence| evidence.id.as_deref() == Some(id))
+            })
+            .or_else(|| {
+                index
+                    .checked_sub(prefix_count)
+                    .and_then(|index| evidence.items.get(index))
+                    .filter(|item| item.id.is_none())
+            });
         let projected_turn = project_item_turn(
             editor,
             raw.and_then(|item| item.turn_id.as_deref()).or_else(|| {

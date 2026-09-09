@@ -27,6 +27,9 @@ pub(super) fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalRespons
     let mut output = std::collections::BTreeMap::new();
     for event in events(bytes)? {
         let event = event?;
+        if event.get("type").and_then(serde_json::Value::as_str) == Some("error") {
+            return Err(CoreFailure::UpstreamResponseFailed);
+        }
         if terminal.is_none()
             && event.get("type").and_then(serde_json::Value::as_str)
                 == Some("response.output_item.done")
@@ -64,6 +67,14 @@ pub(super) fn terminal_response_from_sse(bytes: &[u8]) -> Result<TerminalRespons
         }
     }
     let mut terminal = terminal.ok_or(CoreFailure::UpstreamResponseFailed)?;
+    crate::response_output::validate_terminal(
+        &terminal.response,
+        output
+            .iter()
+            .map(|(i, item)| (*i, crate::response_output::CompletionFingerprint::new(item))),
+        true,
+    )
+    .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     // Codex's streamed terminal may contain response metadata without repeating output items.
     // A non-streaming Responses caller still needs the completed items in its JSON response.
     // A populated final output remains authoritative; never concatenate both representations.
@@ -153,6 +164,30 @@ mod output_tests {
             .map(|event| format!("data: {event}\n\n"))
             .collect::<String>()
             .into_bytes()
+    }
+
+    #[test]
+    fn error_cannot_be_overridden_by_a_later_terminal() {
+        for kind in ["response.completed", "response.incomplete"] {
+            let bytes = stream(vec![
+                json!({"type":"error","error":{"code":"synthetic"}}),
+                json!({"type":kind,"response":{"id":"resp_error","output":[]}}),
+            ]);
+            assert!(terminal_response_from_sse(&bytes).is_err());
+        }
+    }
+
+    #[test]
+    fn aggregation_rejects_invalid_and_conflicting_footers() {
+        let item = json!({"type":"message","id":"msg_one","content":[]});
+        let changed = json!({"type":"message","id":"msg_one","content":[{"type":"output_text","text":"changed"}]});
+        for output in [json!([changed]), json!({}), json!(null), json!([false])] {
+            let bytes = stream(vec![
+                json!({"type":"response.output_item.done","output_index":0,"item":item}),
+                json!({"type":"response.completed","response":{"id":"resp_invalid","output":output}}),
+            ]);
+            assert!(terminal_response_from_sse(&bytes).is_err());
+        }
     }
 
     #[test]

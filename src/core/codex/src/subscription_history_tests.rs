@@ -115,9 +115,9 @@ async fn simplified_text_history_keeps_session_and_materializes_the_callers_actu
             let inner = store.contexts.inner.lock().unwrap();
             let record = &inner.scopes[&ContextStore::scope_key(NAMESPACE, KEY)].records
                 [second["id"].as_str().unwrap()];
-            assert!(
-                record.history.as_ref().unwrap().values()[1] == simplified,
-                "matching must not replace caller input with the fuller saved output"
+            assert_caller_item_with_generated_metadata(
+                &record.history.as_ref().unwrap().values()[1],
+                &simplified,
             );
         }
         first["previous_response_id"] = second["id"].clone();
@@ -272,13 +272,22 @@ async fn history_compatibility_does_not_weaken_provider_output_consistency() {
             .unwrap();
         let mut footer = caller_copy(output.clone());
         footer["id"] = output["id"].clone();
+        let created = state
+            .translate_value(
+                json!({"type":"response.created","response":{"id":"resp_inconsistent"}}),
+            )
+            .await
+            .unwrap();
         let terminal = state
             .translate_value(json!({"type":"response.completed",
             "response":{"id":"resp_inconsistent","output":[footer]}}))
-            .await
-            .unwrap();
+            .await;
+        assert!(
+            terminal.is_err(),
+            "inconsistent footer must fail before delivery"
+        );
         let mut next = request(json!([input("continue")]));
-        next["previous_response_id"] = terminal["response"]["id"].clone();
+        next["previous_response_id"] = created["response"]["id"].clone();
         assert!(matches!(
             prepare(&store, next).await,
             Err(StatefulPrepareError::StateUnavailable)

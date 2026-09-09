@@ -165,7 +165,8 @@ pub(crate) async fn prepare_identity_request(
                         &projection.identity,
                     )?;
                     let admission = admission
-                        .map(|(plan, format)| {
+                        .map(|(mut plan, format)| {
+                            plan.capture_input_metadata(&object);
                             let lineage =
                                 plan.history_lineage(editor, &projection.identity, &object)?;
                             Ok::<_, anyhow::Error>((plan, format, lineage))

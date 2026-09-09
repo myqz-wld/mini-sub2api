@@ -39,6 +39,7 @@ impl ContextStore {
             .remove(&plan.admission.0.id)
             .ok_or(Error::StateUnavailable)?
             .reserved
+            .saturating_add(plan.input_metadata_charge)
             .saturating_add(lineage.cost);
         if !inner.make_room(&self.limits, &plan.scope, session, reserved) {
             return Err(Error::StateUnavailable);

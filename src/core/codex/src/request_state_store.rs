@@ -190,6 +190,10 @@ impl RequestStateStore {
 
 pub(crate) fn cleanup_orphan_request_states(accounts_dir: &Path) -> Result<()> {
     let active = active_state_refs(accounts_dir)?;
+    cleanup_unowned_request_states(accounts_dir, &active)
+}
+
+fn cleanup_unowned_request_states(accounts_dir: &Path, active: &BTreeSet<String>) -> Result<()> {
     for entry in std::fs::read_dir(accounts_dir).context("scanning request state files")? {
         let entry = entry.context("reading request state entry")?;
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
@@ -202,7 +206,11 @@ pub(crate) fn cleanup_orphan_request_states(accounts_dir: &Path) -> Result<()> {
             continue;
         }
         let _lock = lock_state(accounts_dir, state_ref)?;
-        remove_file_if_exists(accounts_dir, &entry.path())?;
+        // The scan only selects candidates. A creator may have registered ownership and
+        // committed new identity state while cleanup waited for this same state lock.
+        if owners_for_state_ref(accounts_dir, state_ref)?.is_empty() {
+            remove_file_if_exists(accounts_dir, &entry.path())?;
+        }
     }
     Ok(())
 }
@@ -454,3 +462,7 @@ fn is_not_found(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 #[path = "request_state_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "request_state_cleanup_tests.rs"]
+mod cleanup_tests;

@@ -80,8 +80,11 @@ its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHA
   Core retains it and restores verified fields it previously hid from matched histories.
 - Preserve valid caller base instructions, developer order and duplicates; never insert a default
   base. Subscription maps system→developer in place. Lite uses scoped deterministic prefix IDs.
-- Streaming success requires a terminal event. Truncated streams report failure; body-changing WS
-  controls invalidate stale local history.
+- Preserve valid caller item times even without item IDs; retained history keeps first-generated
+  times across reference expansion. Same-turn retries/reconnects retain the first routing token.
+- Streaming success requires a consistent terminal event. Errors cannot become JSON success;
+  malformed/conflicting output fails while verified SSE prefixes survive later errors and chunking.
+  Body-changing WS controls invalidate stale local history.
 - Workspace/Skills/tools belong to the client. Core does not discover or execute them; native code
   mode and ordinary direct tools keep their respective protocols.
 

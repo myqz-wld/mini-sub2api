@@ -25,6 +25,9 @@ mod compaction_tests;
 #[path = "subscription_reasoning_tests.rs"]
 mod reasoning_tests;
 
+#[path = "subscription_integrity_tests.rs"]
+mod integrity_tests;
+
 const NAMESPACE: &str = "context-admission";
 const OWNER: &str = "acct_context_tests";
 const KEY: &str = "isolated-key";
@@ -47,6 +50,27 @@ fn input(text: &str) -> Value {
 }
 fn request(items: Value) -> Value {
     json!({"model":"gpt-5.4","instructions":"base","input":items})
+}
+
+fn assert_caller_item_with_generated_metadata(actual: &Value, expected: &Value) {
+    let mut actual = actual.clone();
+    let object = actual.as_object_mut().unwrap();
+    if !expected
+        .as_object()
+        .unwrap()
+        .contains_key("internal_chat_message_metadata_passthrough")
+        && let Some(Value::Object(mut metadata)) =
+            object.remove("internal_chat_message_metadata_passthrough")
+    {
+        if let Some(time) = metadata.remove("create_time") {
+            assert!(time.is_number());
+        }
+        if let Some(turn) = metadata.remove("turn_id") {
+            assert!(turn.is_string());
+        }
+        assert!(metadata.is_empty(), "unexpected generated metadata");
+    }
+    assert!(actual == *expected, "caller item content changed");
 }
 
 async fn prepare(

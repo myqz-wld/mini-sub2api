@@ -238,7 +238,7 @@ async fn invalid_compaction_output_never_commits_identity_or_context_windows() {
         let prepared = prepare(&store, body).await.unwrap();
         let identity = prepared.resolved_identity.as_ref().unwrap().clone();
         let response = response_context(&store, &prepared);
-        response
+        let created = response
             .translate_value(json!({"type":"response.created","response":{"id":"resp_compact"}}))
             .await
             .unwrap();
@@ -275,7 +275,15 @@ async fn invalid_compaction_output_never_commits_identity_or_context_windows() {
         if mode == "changed-final" {
             terminal["response"]["output"][0]["encrypted_content"] = "changed-state".into();
         }
-        let completed = response.translate_value(terminal).await.unwrap();
+        let completed = response.translate_value(terminal).await;
+        if mode == "changed-final" {
+            assert!(
+                completed.is_err(),
+                "conflicting footer must fail before delivery"
+            );
+        } else {
+            assert!(completed.is_ok());
+        }
         let accepted = matches!(mode, "valid" | "stream-only");
         let thread = identity.thread_id.clone();
         let window = store
@@ -289,7 +297,7 @@ async fn invalid_compaction_output_never_commits_identity_or_context_windows() {
         let scope = &inner.scopes[&ContextStore::scope_key(NAMESPACE, KEY)];
         let record = scope
             .records
-            .get(completed["response"]["id"].as_str().unwrap());
+            .get(created["response"]["id"].as_str().unwrap());
         assert_eq!(record.is_some(), accepted, "context eligibility: {mode}");
         if let Some(record) = record {
             assert_eq!(record.identity.window_number, 1);

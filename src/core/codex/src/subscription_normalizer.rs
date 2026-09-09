@@ -38,13 +38,14 @@ pub(crate) async fn prepare_stateful_codex_request(
         .map_err(|_| Error::InvalidRequest)?;
     let evidence = Evidence::read(&object, headers, transport)?;
     let store = &context.store.contexts;
-    let plan = store.plan(
+    let mut plan = store.plan(
         ContextStore::scope_key(context.state_namespace, context.downstream_scope),
         &object,
         evidence,
         context.binding,
         context.socket_id,
     )?;
+    plan.restore_input_metadata();
     let target_lite = plan.caller_format == Format::Lite
         || object
             .get("model")

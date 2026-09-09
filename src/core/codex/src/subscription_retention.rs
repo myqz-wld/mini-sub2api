@@ -49,7 +49,7 @@ impl Inner {
                         || r.socket.is_some()
                         || !expired.contains(&r.identity.session_id)
                 });
-                scope.prune_metadata();
+                scope.prune_metadata(now, self.ttl);
             }
             scope.interner.sweep();
             scope.settings_pool.retain(|_, values| {
@@ -188,6 +188,9 @@ impl Inner {
                     })
                     .min_by_key(|(scope, _, owner, seen)| (scope != key, owner != session, *seen));
                 let Some((scope_key, id, _, _)) = stale else {
+                    if self.evict_unreferenced_session(key, session) {
+                        continue;
+                    }
                     return false;
                 };
                 let scope = self
@@ -198,7 +201,7 @@ impl Inner {
                 if !self.operations.values().any(|op| op.scope == scope_key)
                     && !self.reservations.values().any(|p| p.scope == scope_key)
                 {
-                    scope.prune_metadata();
+                    scope.prune_metadata(Instant::now(), self.ttl);
                 }
                 scope.rebuild_index();
                 scope.interner.sweep();
@@ -246,5 +249,50 @@ impl Inner {
             }
         }
         false
+    }
+
+    fn evict_unreferenced_session(&mut self, protected_key: &str, protected_session: &str) -> bool {
+        let victim =
+            self.scopes
+                .iter()
+                .flat_map(|(key, scope)| {
+                    scope
+                        .sessions
+                        .iter()
+                        .filter(|(session, _)| {
+                            !scope
+                                .records
+                                .values()
+                                .any(|r| r.identity.session_id == **session)
+                                && !scope.bindings.values().any(|bound| bound == *session)
+                        })
+                        .map(move |(session, state)| {
+                            (key.clone(), session.clone(), state.last_business)
+                        })
+                })
+                .filter(|(key, session, _)| {
+                    !((key == protected_key && session == protected_session)
+                        || self.operations.values().any(|op| {
+                            op.scope == *key && op.record.identity.session_id == *session
+                        })
+                        || self
+                            .reservations
+                            .values()
+                            .any(|p| p.scope == *key && p.session == *session))
+                })
+                .min_by_key(|(_, _, used)| *used);
+        let Some((key, session, _)) = victim else {
+            return false;
+        };
+        let scope = self.scopes.get_mut(&key).expect("metadata scope");
+        scope.routing.retain(|id, _| {
+            id.split_once(':')
+                .and_then(|(_, turn)| scope.turns.get(turn))
+                != Some(&session)
+        });
+        scope.sessions.remove(&session);
+        scope.aliases.retain(|_, owner| *owner != session);
+        scope.turns.retain(|_, owner| *owner != session);
+        true
     }
 }

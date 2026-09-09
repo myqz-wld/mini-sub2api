@@ -95,7 +95,7 @@ pub(crate) fn completion_items_compatible(observed: &Value, terminal: &Value) ->
         )
 }
 
-fn completion_key(item: &Value) -> Vec<u8> {
+pub(crate) fn completion_key(item: &Value) -> Vec<u8> {
     let mut item = item.clone();
     project_completed_metadata(&mut item);
     canonical(&item)
