@@ -9,6 +9,10 @@ use crate::request_state_store::RequestStateStore;
 use crate::request_state_types::WireIdOwner;
 use crate::response_wire_ids::translate_response_ids;
 
+#[path = "response_failure_tail.rs"]
+mod failure_tail;
+pub(crate) use failure_tail::SseFailureTail;
+
 #[derive(Clone)]
 pub(crate) struct ResponseStateContext {
     account_ref: String,
@@ -73,7 +77,7 @@ impl ResponseStateContext {
         let pending = (value.get("type").and_then(Value::as_str) == Some("response.completed"))
             .then_some(self.default_compaction.as_ref())
             .flatten();
-        self.translate_value_with_compaction(value, pending, None)
+        self.translate_value_with_compaction(value, pending, None, None)
             .await
     }
 
@@ -92,6 +96,7 @@ impl ResponseStateContext {
                 serde_json::json!({"response": value}),
                 pending,
                 Some(completed),
+                None,
             )
             .await?;
         let translated = envelope["response"].take();
@@ -103,6 +108,7 @@ impl ResponseStateContext {
         mut value: Value,
         pending_compaction: Option<&PendingCompaction>,
         terminal: Option<bool>,
+        failure_tail: Option<SseFailureTail>,
     ) -> Result<Value> {
         let owner = self
             .owner
@@ -138,6 +144,7 @@ impl ResponseStateContext {
         };
         let validation_store = self.store.contexts.clone();
         let validation_operation = operation.clone();
+        let failed_tail = failure_tail.is_some();
         let mut translated = self
             .store
             .edit(
@@ -146,11 +153,15 @@ impl ResponseStateContext {
                 &self.downstream_scope,
                 move |editor| {
                     translate_response_ids(editor, &mut value, owner.as_ref())?;
-                    validation_store.validate_event(
-                        validation_operation.as_ref(),
-                        &value,
-                        terminal,
-                    )?;
+                    if let Some(tail) = failure_tail {
+                        tail.validate(&value)?;
+                    } else {
+                        validation_store.validate_event(
+                            validation_operation.as_ref(),
+                            &value,
+                            terminal,
+                        )?;
+                    }
                     if let Some(pending) = pending_compaction {
                         editor.commit_compaction(
                             &pending.marker_key,
@@ -163,7 +174,7 @@ impl ResponseStateContext {
             )
             .await?;
         if let Some(operation) = operation {
-            if terminal.is_some() || translated.get("type").is_some() {
+            if !failed_tail && (terminal.is_some() || translated.get("type").is_some()) {
                 self.store
                     .contexts
                     .observe(&operation, &translated, terminal)?;
@@ -189,7 +200,7 @@ impl ResponseStateContext {
             .then_some(pending_compaction.or(self.default_compaction.as_ref()))
             .flatten();
         let value = self
-            .translate_value_with_compaction(value, pending, None)
+            .translate_value_with_compaction(value, pending, None, None)
             .await?;
         let encoded = serde_json::to_string(&value)?;
         anyhow::ensure!(encoded.len() <= maximum, "translated response is too large");

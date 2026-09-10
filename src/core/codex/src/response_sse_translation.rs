@@ -13,7 +13,7 @@ use std::convert::Infallible;
 use std::pin::Pin;
 
 use crate::error::failure;
-use crate::response_translation::ResponseStateContext;
+use crate::response_translation::{ResponseStateContext, SseFailureTail};
 
 pub(crate) type UpstreamByteStream =
     Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
@@ -26,6 +26,8 @@ struct TranslationState {
     finished: bool,
     upstream_ended: bool,
     terminal_seen: bool,
+    failed_footer_pending: bool,
+    failure_tail: Option<SseFailureTail>,
     maximum: usize,
     output_lifecycle: crate::response_output::OutputLifecycle,
 }
@@ -44,6 +46,8 @@ pub(crate) fn translated_sse_frames(
             finished: false,
             upstream_ended: false,
             terminal_seen: false,
+            failed_footer_pending: false,
+            failure_tail: None,
             maximum,
             output_lifecycle: Default::default(),
         },
@@ -91,19 +95,8 @@ async fn finish_event(
     mut state: TranslationState,
     event: Vec<u8>,
 ) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
-    match translate_event(
-        &state.context,
-        event,
-        state.maximum,
-        &mut state.output_lifecycle,
-        state.terminal_seen,
-    )
-    .await
-    {
-        Ok((bytes, terminal)) => {
-            state.terminal_seen |= terminal;
-            (Ok(Frame::data(bytes)), state)
-        }
+    match translate_event(&mut state, event).await {
+        Ok(bytes) => (Ok(Frame::data(bytes)), state),
         Err(()) => fail(state),
     }
 }
@@ -143,44 +136,62 @@ fn fail(mut state: TranslationState) -> (Result<Frame<Bytes>, Infallible>, Trans
     (Ok(Frame::trailers(trailers)), state)
 }
 
-async fn translate_event(
-    context: &ResponseStateContext,
-    event: Vec<u8>,
-    maximum: usize,
-    lifecycle: &mut crate::response_output::OutputLifecycle,
-    terminal_seen: bool,
-) -> Result<(Bytes, bool), ()> {
+async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result<Bytes, ()> {
     let text = std::str::from_utf8(&event).map_err(|_| ())?;
     let data = data_payload(text);
     let Some(data) = data else {
-        return Ok((Bytes::from(event), false));
+        return Ok(Bytes::from(event));
     };
     if data.trim().is_empty() || data.trim() == "[DONE]" {
-        return Ok((Bytes::from(event), false));
+        return Ok(Bytes::from(event));
     }
     let value: serde_json::Value = serde_json::from_str(&data).map_err(|_| ())?;
-    if terminal_seen && crate::response_output::OutputLifecycle::is_output_event(&value) {
+    if state.terminal_seen && crate::response_output::OutputLifecycle::is_output_event(&value) {
         return Err(());
     }
-    lifecycle
+    let kind = value.get("type").and_then(serde_json::Value::as_str);
+    let response_terminal = matches!(
+        kind,
+        Some("response.completed" | "response.failed" | "response.incomplete")
+    );
+    let failed_footer = state.failed_footer_pending && kind == Some("response.failed");
+    if state.terminal_seen && response_terminal && !failed_footer {
+        return Err(());
+    }
+    if kind == Some("error") && !state.terminal_seen {
+        state.failure_tail = state.context.detach_sse_failure().map_err(|_| ())?;
+        state.failed_footer_pending = true;
+    }
+    state
+        .output_lifecycle
         .observe(&value, crate::inference_limits::get().output_items)
         .map_err(|_| ())?;
-    if value.get("type").and_then(serde_json::Value::as_str) == Some("response.completed") {
-        lifecycle
+    if kind == Some("response.completed") {
+        state
+            .output_lifecycle
             .validate_completed(&value["response"])
             .map_err(|_| ())?;
     }
-    let terminal = matches!(
-        value.get("type").and_then(serde_json::Value::as_str),
-        Some("response.completed" | "response.failed" | "response.incomplete" | "error")
-    );
-    let translated = context.translate_value(value).await.map_err(|_| ())?;
+    let terminal = response_terminal || kind == Some("error");
+    let tail = (failed_footer || kind == Some("error"))
+        .then_some(state.failure_tail.as_ref())
+        .flatten();
+    let translated = state
+        .context
+        .translate_sse_value(value, tail)
+        .await
+        .map_err(|_| ())?;
     let translated = serde_json::to_string(&translated).map_err(|_| ())?;
     let rewritten = replace_data_lines(text, &translated)?;
-    if rewritten.len() > maximum {
+    if rewritten.len() > state.maximum {
         return Err(());
     }
-    Ok((Bytes::from(rewritten), terminal))
+    state.terminal_seen |= terminal;
+    if failed_footer {
+        state.failed_footer_pending = false;
+        state.failure_tail = None;
+    }
+    Ok(Bytes::from(rewritten))
 }
 
 fn data_payload(event: &str) -> Option<String> {

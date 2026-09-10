@@ -171,6 +171,15 @@ in failure trailers and records an upstream error. The usage observer follows `o
 (128 MiB default), resumes after an oversized SSE event, and never lets success overwrite failure.
 These checks change accounting/diagnostics, not API-key payload bytes.
 
+Subscription SSE forwards `error` and permits one subsequent valid `response.failed`, preserving
+its projected response ID, error details and usage. The first error releases the execution lane;
+only bounded validation facts remain under the operation's existing memory reservation until the
+failed footer, EOF or cancellation. The footer must match known response ownership and completed
+items. It cannot publish continuation history or commit compaction. Later success, new output,
+conflicting/malformed footers and duplicate response terminals still fail the stream. An error-only
+stream may end normally; a valid failed footer adds no gateway failure trailers. The HTTP status
+already sent stays unchanged and accounting records one upstream error with any reported usage.
+
 Publish valid context before public completion. Reconcile item-done/final output once; an empty footer
 uses completed items for JSON/history, without duplicate stream events. Failed/incomplete responses
 are not baselines. V2 compaction requires matching success and exactly one valid encrypted item-done;
