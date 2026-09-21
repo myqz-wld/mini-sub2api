@@ -38,11 +38,22 @@ Usage belongs to the Key. Details default to seven days; `serve --usage-retentio
 and `0` disables automatic pruning. Daily aggregates survive. A bounded provider request ID may be
 retained in private diagnostics, never exposed publicly.
 
+## Diagnosing long requests
+
 HTTP duration covers the request lifecycle, not model computation alone; TTFB measures headers.
 Stream logs pair the gateway request ID with fixed reasons such as `event_idle_timeout`,
 `terminal_tail_closed`, `incomplete_terminal_tail` or `downstream_write_timeout`, without payloads.
 An idle/truncated upstream is an error; a validated terminal tail can complete normally; client
 cancellation or stalled writes record disconnection. See [timeout limits](BEHAVIOR.md#completion-and-recovery).
+
+The 2026-09-21 investigation found an 11.4-hour request with headers after 741 ms, no recorded token
+usage and a final client-disconnected status. Loopback tests reproduced heartbeat-only and
+completed-but-open responses waiting for transport EOF before the lifetime repair. This established
+the missing bounds; retained production metadata cannot identify the exact upstream event sequence.
+An in-progress usage row alone does not prove Core still holds an execution lane or memory reservation.
+Correlate gateway request IDs, fixed termination reasons and proxy cancellation times without storing
+traffic bodies. The [HTTP lifetime tests](../src/coordinator/integration/responses_http_lifetime_test.go)
+cover the repaired behavior through the actual Go/Core loopback path.
 
 ## Deployment
 

@@ -88,7 +88,6 @@ Vault/identity files are private but unencrypted; request/response bodies are no
 | [Memory](docs/MEMORY.md) | Small-host sizing and OOM diagnosis; context budgets are not RSS caps |
 | [Protocol](src/protocol/v1/README.md) | Private coordinator/Core wire contract |
 | [Architecture](docs/ARCHITECTURE.md) | Runtime ownership, state lifetimes and admission |
-| [Evidence](docs/EVIDENCE.md) | Retained validation and deployment summaries |
 
 ## Validate
 

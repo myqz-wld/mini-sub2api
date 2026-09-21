@@ -63,8 +63,11 @@ After measurement, optional `MemoryHigh`/`MemoryMax` can constrain the whole ser
 headroom for normal peaks and the host. `MemoryHigh` applies pressure; `MemoryMax` can cause an OOM
 kill. Do not copy context budgets directly into those settings. Increase RAM or reduce workload if
 needed; swap absorbs transient pressure at a latency cost. Check disk space before adding swap.
-Measure representative load and idle recovery after the three-hour history expiry. Allocation-free
-JSON size counting reduces temporary buffers; retained history and other request copies still cost RAM.
+Measure representative load and idle recovery after the three-hour history expiry. The JSON accounting
+repair counts encoded bytes through a checked writer over borrowed values, avoiding full serialized
+copies just to measure size. [Tests](../src/core/codex/src/json_size.rs) cover wire-size equivalence,
+escapes, large strings and error propagation. Retained history and other request copies still cost RAM;
+passing allocation/accounting tests does not establish that every workload fits a small host.
 
 ## Separate boot failures
 

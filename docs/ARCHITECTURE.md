@@ -1,6 +1,6 @@
 # Architecture
 
-[Setup](../README.md) · [Behavior](BEHAVIOR.md) · [Protocol](../src/protocol/v1/README.md) · [Evidence](EVIDENCE.md)
+[Setup](../README.md) · [Behavior](BEHAVIOR.md) · [Protocol](../src/protocol/v1/README.md)
 
 ## Runtime ownership
 

@@ -60,14 +60,11 @@ Negative controls preserve explicit IDs, substantive content/decoration, Key iso
 
 ## Evidence and limits
 
-Local evidence is excluded from distribution:
-
-- `ref/reviews/recent-month/REVIEW_45_release-check.md`: historical 1,546 local leaves and 36 real
-  Subscription cells (18 functional + 18 five-turn memory cases on gpt-5.5/Astra). No real API-key credential.
-- `ref/reviews/recent-month/REVIEW_44_reasoning-visibility.md` and
-  `REVIEW_43_history-association.md`: reasoning acquisition/visibility and association/reuse policy.
-- [Retained evidence](../../../docs/EVIDENCE.md): final validation, commit and deployment metadata.
-  Historical capture bodies and duplicate audit artifacts were removed during documentation cleanup.
+Historical validation covered 1,546 local leaves and 36 real Subscription cells (18 functional +
+18 five-turn memory cases on gpt-5.5/Astra), with no real API-key credential. Execution snapshots
+are recoverable from Git history; detailed local review records remain excluded from distribution.
+Run the suites above for current results; the timeout investigation is summarized in
+[Operations](../../../docs/OPERATIONS.md#diagnosing-long-requests).
 
 Older 14-case OpenCode evidence proves delivery only; current 18-case coverage checks continuity.
 Exports/live calls need separate opt-in and authorization. General protocol stress may force direct
