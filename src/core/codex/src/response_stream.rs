@@ -187,12 +187,18 @@ async fn build_non_streaming_response(
         builder = builder.header(name, value);
     }
     let mut bytes = Vec::new();
-    let mut stream = upstream.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    let mut stream = crate::response_sse_reader::SseReader::new(
+        Box::pin(upstream.bytes_stream()),
+        crate::inference_limits::get().output_bytes,
+    );
+    while let Some(event) = stream
+        .next_event()
+        .await
+        .map_err(|_| CoreFailure::UpstreamResponseFailed)?
+    {
         append_bounded(
             &mut bytes,
-            &chunk,
+            &event,
             crate::inference_limits::get().output_bytes,
         )?;
     }

@@ -1,0 +1,11 @@
+{
+  "commit": "70eae05e0d476384e88b6ebed1e6cf15bfafacd8",
+  "subject": "fix: stop injecting default base instructions",
+  "branch": "main",
+  "clean_worktree": true,
+  "validated_source_hashes_match": true,
+  "clean_package_build_and_installed_checks_passed": true,
+  "pushed": false,
+  "deployed": false,
+  "reference_checkout_classification": ".ref/sources is intentionally retained for pinned source/capture checks"
+}

@@ -1,0 +1,29 @@
+{
+  "status": "completed",
+  "commit": "7e8977b825fc2243893289dd2b559daecd28805a",
+  "feature_branch": "fix/ordinary-client-metadata",
+  "feature_pushed": true,
+  "main_expected_base": "4e196f9230eef63242c6070610c2bb7d1b529b8b",
+  "release_directory": "build/releases/7e8977b825fc",
+  "release_sha256": {
+    "mini-sub2api": "0e62b8241a7eec038725ed159dc5d6b64517ae2734ee350c9f01ed5afe20fcc5",
+    "mini-sub2api-core-codex": "5ba2b635d8fcf9de22203f8cd108208067a502bf9beae0830d11f610319cc918",
+    "build-info.json": "e52cfacbade831e0080701044d40edae09c3bc311fdf78934b1fe07279e80038"
+  },
+  "main_build_bin_preserved": true,
+  "policy_preserved": true,
+  "policy_sha256": "634fad71a9890d53a4c9df9c4b4abb558b60af9b9c08bd7f7cb802fd1ab3b3d6",
+  "opencode_artifacts_preserved": "build/third-party/opencode",
+  "main_synced": true,
+  "remote_main_synced": true,
+  "worktree_removed": true,
+  "no_deployment": true,
+  "raw_output_saved": false,
+  "remote_main_verified": "7e8977b825fc2243893289dd2b559daecd28805a",
+  "local_feature_branch_removed": true,
+  "remote_feature_branch_removed": true,
+  "source_clean": true,
+  "main_installed_checks": "main-installed-checks.json",
+  "final_plan": "ref/plans/recent-3-days/PLAN_16_ordinary-caller-live-captures.md",
+  "completed_at": "2026-09-06"
+}

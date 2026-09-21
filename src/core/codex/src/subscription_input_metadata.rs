@@ -79,7 +79,7 @@ fn copy_missing(caller: &mut Value, saved: &Value) -> usize {
         let metadata = metadata.as_object_mut().expect("metadata object");
         if !metadata.get(field).is_some_and(valid) {
             // Charge only the small added fields, without cloning/serializing full bodies again.
-            charge += serde_json::to_vec(value).expect("JSON metadata").len()
+            charge += crate::json_size::encoded_len(value).expect("JSON metadata")
                 + field.len()
                 + META.len()
                 + 8;

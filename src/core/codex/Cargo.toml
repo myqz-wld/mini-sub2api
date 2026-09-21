@@ -46,6 +46,7 @@ zlib-rs = { version = "=0.5.5", default-features = false }
 zstd = "=0.13.3"
 
 [dev-dependencies]
+tokio = { version = "=1.52.3", features = ["test-util"] }
 pretty_assertions = "1"
 reqwest-websocket = "0.5.1"
 tempfile = "3"

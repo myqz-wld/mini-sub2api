@@ -1,0 +1,28 @@
+{
+  "deployment": "passed",
+  "previous_commit": "efb95042bcc375a752bbb1ff6c3d0d8d35bde411",
+  "installed_commit": "0aba391ce943c45714fc95e466302b7c3c55ee9b",
+  "dirty": true,
+  "source_archive_sha256": "9f206a3e90804eed4ff98b564ebea2cbbb46f5562c42b9433c74e017e681c33c",
+  "package_sha256": "771a41dfe03c0b6f5a58a24144375ee742b904804cc98152c538def2715d87fb",
+  "manifest": {
+    "mini-sub2api": "151501df3c7b166fa2a7783452545e016c4c34a70db14029833449bac25a3b83",
+    "mini-sub2api-core-codex": "475cc241f5c6779fdd544350e36d73b9cb623ebde5d6d99065ceacbf4f30c228",
+    "build-info.json": "3c5251b13de7d799212f95088bd3182ec62769612b3296cb8f4eedd9108e7a0d"
+  },
+  "idle_requests_before_stop": 0,
+  "idle_connections_before_stop": 0,
+  "stop_to_ready_seconds": 0.368,
+  "processes": {
+    "mini-sub2api": 1,
+    "mini-sub2api-core-codex": 1
+  },
+  "actual_process_hashes_verified": true,
+  "core_parent_verified": true,
+  "http_unauth_status": 401,
+  "websocket_unauth_status": 401,
+  "memory_profile_preserved": true,
+  "state_directory_preserved": true,
+  "swap_preserved": true,
+  "provider_requests": 0
+}

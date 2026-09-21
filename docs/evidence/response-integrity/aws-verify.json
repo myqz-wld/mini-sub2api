@@ -1,0 +1,13 @@
+{
+  "commit": "d7c1d5de14d754da1feb576ee0c5cfaf30fb991b",
+  "service_active": true,
+  "processes": {
+    "mini-sub2api": 1,
+    "mini-sub2api-core-codex": 1
+  },
+  "actual_process_hashes_match": true,
+  "parent_matches": true,
+  "installed_hashes_match": true,
+  "dirty": false,
+  "state_directory_preserved": true
+}

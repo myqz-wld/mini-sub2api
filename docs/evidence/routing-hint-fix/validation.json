@@ -1,0 +1,55 @@
+{
+  "baseline_commit": "b68f1402f91ee6ab0bbdb4a93e01b98577a0f10d",
+  "status": "completed-local",
+  "completed_at": "2026-09-07T09:00:47.255643+00:00",
+  "matrix": {
+    "leaves": 48,
+    "before_passed": 32,
+    "before_failed": 16,
+    "after_passed": 48,
+    "skipped": 0
+  },
+  "standard_checks_passed": true,
+  "final_integration_race_passed": true,
+  "final_integration_seconds": 39.415,
+  "optional_tag_vet_passed": true,
+  "both_protocol_fixture_suites_passed": true,
+  "packaged_build_and_installed_checks_passed": true,
+  "review_buckets_checked": 39,
+  "files": {
+    "README.md": {
+      "sha256": "aa9be179acd4c493c2134f05633b6f23dc6f82ca0a1dd436f4fbe11aa1c74c50",
+      "lines": 99
+    },
+    "USER_POLICIES.md": {
+      "sha256": "6cb3b6edffa6cfd8578253c90dbc793ae22e18bae5d84021a21049fb97d23448",
+      "lines": 103
+    },
+    "docs/BEHAVIOR.md": {
+      "sha256": "b48fc757c21dcef5f281a975516fbf069bad2c0e7970ec1f7e316b96773ae517",
+      "lines": 138
+    },
+    "src/coordinator/integration/request_routing_helpers_test.go": {
+      "sha256": "4fed44f398a16c622ebc534c76029ff14b99d4a706663154715d540687814ab2",
+      "lines": 406
+    },
+    "src/coordinator/integration/routing_hint_test.go": {
+      "sha256": "cc7ba3f4c5d477c48955675a59dd1a4ffc1856c7d1158b35cb199fd246feed76",
+      "lines": 153
+    },
+    "src/coordinator/internal/adapter/client.go": {
+      "sha256": "275f73f63470e758d73dcd69e53a7283da7486e8a0a3da409884ec13e0f84123",
+      "lines": 109
+    },
+    "src/coordinator/internal/httpapi/headers.go": {
+      "sha256": "468938064579e02274914db9a3d00c8bf25d8c31bc522fc3ca32cbcdd38ee341",
+      "lines": 151
+    },
+    "src/protocol/v1/README.md": {
+      "sha256": "dc91b0dc13a120b05e9f5bd17fefc2aa9ec64cfbd811e81e1c8b405b5dbb150a",
+      "lines": 471
+    }
+  },
+  "provider_calls": false,
+  "deployment_performed": false
+}

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
+	"strings"
 
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
@@ -31,6 +33,14 @@ var knownCoreErrors = map[string]bool{
 func detectCoreError(response *http.Response, requestID string) (protocolv1.CoreError, bool) {
 	if response.StatusCode >= 200 && response.StatusCode < 300 {
 		return protocolv1.CoreError{}, false
+	}
+	// Core error envelopes are JSON. Peeking a streaming provider error before the
+	// stream watchdog starts could otherwise wait forever for EOF or 64 KiB.
+	if contentType := response.Header.Get("Content-Type"); contentType != "" {
+		mediaType, _, err := mime.ParseMediaType(contentType)
+		if err != nil || !strings.EqualFold(mediaType, "application/json") {
+			return protocolv1.CoreError{}, false
+		}
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxCoreErrorBytes+1))
 	if err != nil {

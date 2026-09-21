@@ -1,0 +1,66 @@
+{
+  "status": "committed-pushed",
+  "commit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+  "branch": "main",
+  "remote": "origin/main",
+  "remote_verified_commit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+  "working_tree_clean": true,
+  "validated_hashes_unchanged": 21,
+  "committed_files": [
+    "README.md",
+    "docs/BEHAVIOR.md",
+    "src/coordinator/integration/NATIVE_PARITY.md",
+    "src/coordinator/integration/native_history_configuration_test.go",
+    "src/core/codex/src/subscription_admission.rs",
+    "src/core/codex/src/subscription_context.rs",
+    "src/core/codex/src/subscription_history_config_tests.rs",
+    "src/core/codex/src/subscription_history_selection.rs",
+    "src/core/codex/src/subscription_history_tests.rs",
+    "src/core/codex/src/subscription_index.rs",
+    "src/core/codex/src/subscription_prepare.rs"
+  ],
+  "pushed_commits": [
+    "82522ac3ed2811bdc82821dce97d3895c0968f95",
+    "5b2020937885a453fce4f0e3d698c0df0e57bd19",
+    "f7742e9c3c7bcd1c9dc20cc740f38d9f9ea0a0d4",
+    "70eae05e0d476384e88b6ebed1e6cf15bfafacd8",
+    "6ba5f89371f4036f5798bb2ff6f48b29478bb092"
+  ],
+  "installed_checks": {
+    "mini-sub2api": {
+      "exit_code": 0,
+      "check": {
+        "status": "ok",
+        "installedVersion": "0.1.0",
+        "installedCommit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+        "sourceCommit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+        "originMainCommit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+        "sourceDirty": false,
+        "message": "installed metadata matches the current source checkout"
+      }
+    },
+    "mini-sub2api-core-codex": {
+      "exit_code": 0,
+      "check": {
+        "status": "ok",
+        "installedVersion": "0.1.0",
+        "installedCommit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+        "sourceCommit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+        "originMainCommit": "82522ac3ed2811bdc82821dce97d3895c0968f95",
+        "sourceDirty": false,
+        "message": "installed metadata matches the current source checkout"
+      }
+    }
+  },
+  "package_sha256": {
+    "build/bin/mini-sub2api": "0fa1ebe8260948819d393eda1e0f5de8ff7c296bb2a2e57fc32ace8ba9b2e914",
+    "build/bin/mini-sub2api-core-codex": "0fb2644986e5491cbd8eee6699a103bed03f3284d82fb93091a0ef82bed0fcbb",
+    "build/bin/build-info.json": "33bb86048ae42f499f49661a0dc9304913214afd8cb8dd5be51b8a59d92366ca"
+  },
+  "validation": "Existing standard checks and 338 distinct passing loopback capture leaves apply; code hashes unchanged. Clean package rebuilt for the commit.",
+  "deployment": false,
+  "retained_workspace": [
+    ".ref/sources/codex-v0.153.4: pinned read-only source needed by tests",
+    ".ref/continuation-settings/PLAN.md: closed/superseded historical proposal; not active"
+  ]
+}

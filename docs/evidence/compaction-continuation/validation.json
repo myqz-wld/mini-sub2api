@@ -1,0 +1,208 @@
+{
+  "checked_at": "2026-09-07",
+  "baseline_commit": "70eae05e0d476384e88b6ebed1e6cf15bfafacd8",
+  "native_commit": "3d2ee51ca2d5db578f328aa75e20aa22c0197c9a",
+  "native_checkout_clean": true,
+  "source_dirty": true,
+  "committed": false,
+  "pushed": false,
+  "deployed": false,
+  "provider_calls": false,
+  "bodies_or_secrets_saved": false,
+  "final_rust_core_tests": 357,
+  "final_rust_protocol_tests": 6,
+  "final_capture_leaves": 202,
+  "new_capture_leaves": 36,
+  "final_capture_skips": 0,
+  "standard_go_race": "passed",
+  "tagged_go_vet": "passed",
+  "exact_final_clippy": "passed",
+  "format_and_whitespace": "passed",
+  "package_and_installed_checks": "passed",
+  "runs": [
+    {
+      "file": "build-debug-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "clippy-exact-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "native-compaction-and-context.json",
+      "exit_code": 1,
+      "counts": {
+        "pass": 196,
+        "fail": 6,
+        "skip": 0
+      }
+    },
+    {
+      "file": "native-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 202,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "package-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 0,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "protocol-go-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 6,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "protocol-rust-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 6,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "rust-after.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 6,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "rust-before.json",
+      "exit_code": 101,
+      "counts": {
+        "pass": 2,
+        "fail": 4,
+        "skip": 0
+      }
+    },
+    {
+      "file": "rust-exact-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 363,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "rust-full-corrected.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 361,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "rust-full.json",
+      "exit_code": 101,
+      "counts": {
+        "pass": 352,
+        "fail": 1,
+        "skip": 0
+      }
+    },
+    {
+      "file": "standard-checks.json",
+      "exit_code": 101,
+      "counts": {
+        "pass": 362,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "standard-final.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 363,
+        "fail": 0,
+        "skip": 0
+      }
+    },
+    {
+      "file": "standard-with-ws-boundary.json",
+      "exit_code": 0,
+      "counts": {
+        "pass": 364,
+        "fail": 0,
+        "skip": 0
+      }
+    }
+  ],
+  "source_lines": {
+    "src/coordinator/integration/compaction_continuation_test.go": 142,
+    "src/coordinator/integration/compaction_inline_test.go": 112,
+    "src/coordinator/integration/native_scenario_compaction_capture_test.go": 251,
+    "src/coordinator/integration/native_scenario_compaction_ordinary_test.go": 126,
+    "src/coordinator/integration/scaffold_parity_test.go": 247,
+    "src/core/codex/src/request_compaction.rs": 161,
+    "src/core/codex/src/request_normalizer.rs": 434,
+    "src/core/codex/src/responses_websocket.rs": 499,
+    "src/core/codex/src/responses_websocket_boundary_tests.rs": 110,
+    "src/core/codex/src/responses_websocket_deferred.rs": 459,
+    "src/core/codex/src/responses_websocket_emulation.rs": 359,
+    "src/core/codex/src/responses_websocket_state.rs": 433,
+    "src/core/codex/src/subscription_compaction.rs": 161,
+    "src/core/codex/src/subscription_compaction_lite_tests.rs": 59,
+    "src/core/codex/src/subscription_compaction_tests.rs": 431,
+    "src/core/codex/src/subscription_events.rs": 309,
+    "src/core/codex/src/subscription_normalizer.rs": 207,
+    "src/core/codex/src/subscription_prepare.rs": 395,
+    "src/core/codex/src/subscription_state_tests.rs": 418
+  },
+  "sha256": {
+    "README.md": "9d4b1d2cfcad8ce376c763b31fd9bb84f93e1dc8c9028caf2d810930c61c5ab7",
+    "docs/BEHAVIOR.md": "fc33116bfcfc7fc08a1d29ddca6e6fa79bc7edd663209f3c3df302b543a9eca5",
+    "src/coordinator/integration/NATIVE_PARITY.md": "5090b7c4750599332b1daf56143d7c0e100a82a7705a6343b40392170dc74b4a",
+    "src/coordinator/integration/compaction_continuation_test.go": "03c86ddc62e99cf813cf20257a79f2779288156c215d8f84a28facbefd451943",
+    "src/coordinator/integration/compaction_inline_test.go": "e8853b6927fe5533b5db5bdcd72f052d2a42221af90224ac982495cd2a09a9f6",
+    "src/coordinator/integration/native_scenario_compaction_capture_test.go": "66f7153d40313df3d9dfde3e4eddf61842d82de288f83881daa95e602849fc05",
+    "src/coordinator/integration/native_scenario_compaction_ordinary_test.go": "46ca08b79a815acf352368d54962eb1acbb218b990e51f5b36f0139f7f13730f",
+    "src/coordinator/integration/scaffold_parity_test.go": "8377c2ed004a34dd8a49b11e3600a1426a25e84c3835bc7104944196693ca6e9",
+    "src/core/codex/src/request_compaction.rs": "be78399a1e44ac82229510f840475751cadbc84130c53cad1dbff43bcd0d9b0a",
+    "src/core/codex/src/request_normalizer.rs": "0d6d86d1243b4c19de7921ddb38dc929f92ad3c7dd2bb91494678eaa9c6f5093",
+    "src/core/codex/src/responses_websocket.rs": "2ac5ffeaec01f892207d5cc74c93fe4bd656b8982636d5bbee06ea8ded66a086",
+    "src/core/codex/src/responses_websocket_boundary_tests.rs": "2f001f397bdace013decd776c6dca7c18f5a87c3880217ba3233f0bb4e703f9f",
+    "src/core/codex/src/responses_websocket_deferred.rs": "5bf384625eb03ffc3078e16d36c8b69297f443cf68b976edec26814e14760f6e",
+    "src/core/codex/src/responses_websocket_emulation.rs": "6a6a9e8e1c02d06f49dffef2788be13437b24fc2634243f2c7ff7ed6f6178d70",
+    "src/core/codex/src/responses_websocket_state.rs": "d52ce689a4f53dfc8bcf864a4c2863116056fcda6adc7b33b4dae87dc4ed737e",
+    "src/core/codex/src/subscription_compaction.rs": "a086c4eb0200fc7896380f0b2433f0219903fc7d138638d62a3011b6fe18ad07",
+    "src/core/codex/src/subscription_compaction_lite_tests.rs": "1ee7cdcfcf7b8f58f5a9952471d85a92cadb8e208399f057e90224abe1b875b7",
+    "src/core/codex/src/subscription_compaction_tests.rs": "27a82c5d77c80e2df3c2a53934103888304aa6d693525ff278a9c7a45f46eb49",
+    "src/core/codex/src/subscription_events.rs": "f23f2a18f9fb771be105853415831454a31288a9a1af66b5e397294dabedb33d",
+    "src/core/codex/src/subscription_normalizer.rs": "bbac5469a98dbcd2f45402fc43b5926a11618544effa270ae36fd5cf2000ef98",
+    "src/core/codex/src/subscription_prepare.rs": "9492f79a383e513599f33fdf80461127ea309d9397a3e70a0f30895492570c37",
+    "src/core/codex/src/subscription_state_tests.rs": "a685fff307fc2dfd1b4fb052eb2c6d04cf01bb99f8f211a6914c0679ef494d2c",
+    "src/protocol/v1/README.md": "38c3e5b1d103acd762ef7dad95b4cf280441f0a639c62bfbbdec5eef8b2cf08e",
+    "build/bin/mini-sub2api": "a0204affc2aa53c90643983c3810cfb1d7c8d556e9b4f426f770118dee95ed2f",
+    "build/bin/mini-sub2api-core-codex": "6ff4a40680820ee39cdffd4158013730af3359356e6a6cdc7dfd7c0270598667",
+    "build/bin/build-info.json": "7ff08ef3a4258c2ac5963263e19993836587c49a3a52d61228b7e8d548f9df1f"
+  }
+}

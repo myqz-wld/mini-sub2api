@@ -1,0 +1,21 @@
+{
+  "verification": "passed",
+  "installed_commit": "0aba391ce943c45714fc95e466302b7c3c55ee9b",
+  "dirty": true,
+  "installed_and_running_hashes_match": true,
+  "processes": {
+    "mini-sub2api": 1,
+    "mini-sub2api-core-codex": 1
+  },
+  "core_parent_verified": true,
+  "memory_profile_preserved": true,
+  "swap_active": true,
+  "http_unauth_status": 401,
+  "ws_unauth_status": 401,
+  "database_quick_check": "ok",
+  "automatic_restarts": 0,
+  "oom_events": 0,
+  "service_memory_bytes": 5181440,
+  "xray_state": "active",
+  "provider_calls": 0
+}

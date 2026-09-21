@@ -1,19 +1,11 @@
-# Codex 0.153.4 instruction reference snapshots
+# Codex 0.153.4 instruction fixtures
 
-These files are offline comparison/test fixtures. Core never injects model-default instructions;
-production normalization uses only valid caller base text. The Rust snapshot module is test-only.
+These are byte-exact offline comparison/test fixtures from OpenAI Codex `rust-v0.153.4`, commit
+`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`; LICENSE and NOTICE accompany them.
+Core preserves valid caller bases and never injects these defaults. The Rust snapshot module is test-only.
 
-These effective default instructions are copied from OpenAI Codex `rust-v0.153.4`, commit
-`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`. The source Apache-2.0 LICENSE and NOTICE accompany them.
-
-The eleven catalog models use eight distinct defaults; `fallback.md` and
-`exp-codex-personality.md` provide the two local fallback forms. The three gpt-5.6 models share
-one default. `codex-auto-review` shares the daybreak-blue instructions and uses Lite settings.
-
-Only the native personality variable is rendered with its catalog default. The pinned Astra
-instructions contain a literal `{{connector_id}}` connector-link example, which stays unchanged.
-Templates without variables remain literal, including brace syntax examples. Declared personality
-slots are rendered and checked; exact pinned hashes protect the resulting defaults. Valid caller base instructions are preserved verbatim at runtime and are never rendered by this generator.
+Eleven catalog models use eight defaults. The three gpt-5.6 models share one; codex-auto-review uses
+daybreak-blue with Lite settings. `fallback.md` and `exp-codex-personality.md` cover local fallback forms.
 
 ## Offline regeneration
 
@@ -21,7 +13,8 @@ slots are rendered and checked; exact pinned hashes protect the resulting defaul
 bash scripts/generate-codex-prompts.sh --codex-source .ref/sources/codex-v0.153.4 --check
 ```
 
-Omit `--check` to regenerate, or use `--output build/codex-prompts` for a separate copy. The generator
-reads the exact commit with `git show`, disables Git lazy fetching and performs no provider calls.
-It validates the complete catalog, shared defaults, fallbacks and placeholders before writing.
-Rust hash regressions and the offline check protect byte equality with the pinned source.
+Omit `--check` to regenerate; `--output build/codex-prompts` writes a separate copy.
+The generator reads the exact commit with `git show`, disables lazy fetching and makes no provider calls.
+It validates catalog/default/fallback coverage and renders only declared native personality slots;
+literal braces, including Astra's `{{connector_id}}`, remain unchanged. Caller bases are never rendered.
+Pinned hashes and offline checks protect exact bytes; do not condense the snapshot Markdown.

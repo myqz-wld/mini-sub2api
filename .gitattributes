@@ -3,3 +3,6 @@
 src/core/codex/prompts/codex-0.153.4/gpt-*.md whitespace=-trailing-space
 src/core/codex/prompts/codex-0.153.4/fallback.md whitespace=-trailing-space
 src/core/codex/prompts/codex-0.153.4/exp-codex-personality.md whitespace=-trailing-space
+
+# Private local instructions must also stay out of git-archive exports if explicitly added later.
+AGENTS.override.md export-ignore

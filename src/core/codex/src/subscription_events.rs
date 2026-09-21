@@ -136,8 +136,7 @@ impl ContextStore {
         if event.get("type").and_then(Value::as_str) == Some("response.output_item.done")
             && let Some(item) = event.get("item")
         {
-            let extra = serde_json::to_vec(item)?
-                .len()
+            let extra = crate::json_size::encoded_len(item)?
                 .saturating_mul(4)
                 .saturating_add(128);
             if let Some(active) = inner.operations.get(&operation.0.id) {
@@ -189,8 +188,7 @@ impl ContextStore {
                 .and_then(Value::as_u64)
                 .map(|v| v as usize)
                 .unwrap_or(active.observed_items.len());
-            let encoded = serde_json::to_vec(item)?;
-            let size = encoded.len();
+            let size = crate::json_size::encoded_len(item)?;
             if index < self.limits.output_items {
                 let fingerprint = crate::response_output::CompletionFingerprint::new(item);
                 if let Some(previous) = active.observed_items.insert(index, fingerprint) {
@@ -217,7 +215,7 @@ impl ContextStore {
                 if let Some(previous) = active.output.insert(index, item.clone()) {
                     active.output_bytes = active
                         .output_bytes
-                        .saturating_sub(serde_json::to_vec(&previous)?.len());
+                        .saturating_sub(crate::json_size::encoded_len(&previous)?);
                 }
                 active.output_bytes += size;
             }
@@ -290,7 +288,7 @@ impl ContextStore {
                 active.dependencies_available = false;
                 Cow::Owned(Vec::new())
             };
-        let output_bytes = serde_json::to_vec(&output)?.len();
+        let output_bytes = crate::json_size::encoded_len(&output)?;
         active.output_available &=
             output.len() <= self.limits.output_items && output_bytes <= self.limits.output_bytes;
         // Dependencies are small routing facts. Never publish a partial set as usable state.

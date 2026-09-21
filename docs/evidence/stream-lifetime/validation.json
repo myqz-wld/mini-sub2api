@@ -1,0 +1,36 @@
+{
+  "validated_at": "2026-09-21",
+  "baseline_commit": "0aba391ce943c45714fc95e466302b7c3c55ee9b",
+  "scope": "Uncommitted local HTTP stream lifetime repair",
+  "deployed": false,
+  "real_provider_calls": false,
+  "defaults_seconds": {
+    "sse_event_idle": 300,
+    "core_terminal_tail": 1,
+    "coordinator_terminal_fallback": 2,
+    "downstream_write": 120,
+    "error_envelope_inspection": 300
+  },
+  "validation": {
+    "scripts/test.sh": "passed: Rust workspace, isolated proxy test, Clippy, Go formatting/vet/race",
+    "go_protocol_fixtures": "passed",
+    "scripts/build.sh": "passed, including installed-artifact checks",
+    "public_loopback_cases": [
+      "subscription_completed_sse_without_upstream_eof",
+      "subscription_completed_json_without_upstream_eof",
+      "api_key_terminal_tail_with_unchanged_bytes",
+      "delayed_error_then_failed_footer",
+      "sse_late_invalid_data_reports_failure_trailers",
+      "json_late_invalid_data_fails_aggregation"
+    ],
+    "unit_boundaries": "Heartbeat/empty/DONE/partial idle; progress beyond idle duration; non-extensible terminal tail; EOF; cancellation; blocked writes; final usage status; operation/reservation release; retry isolation; payload-free logs",
+    "shareable_source_personal_marker_scan": "passed",
+    "actual_release_archive_members": ["mini-sub2api", "mini-sub2api-core-codex", "build-info.json"],
+    "actual_archive_content_personal_marker_scan": "passed"
+  },
+  "binary_sha256": {
+    "mini-sub2api": "33d862b3e5992f73e0a7471b6e350dd19e4996a8c3bc8285e31741e1c4db5f83",
+    "mini-sub2api-core-codex": "482c5d9eb3746218c0b741849c5ac2fefb23d9b39d1792ef6c327c8c7577cead"
+  },
+  "limits": "Continuous real events have no total-duration cap; events arriving after the terminal tail cannot change a closed response. Historical production event order remains unknown."
+}

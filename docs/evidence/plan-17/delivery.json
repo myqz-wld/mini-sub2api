@@ -1,0 +1,88 @@
+{
+  "status": "complete",
+  "commit": "2ed47f69454e67f518c4c800162bb155c7567b33",
+  "main_pushed": true,
+  "backup_created": false,
+  "deployment_pending": false,
+  "cleanup_pending": false,
+  "aws_deploy": {
+    "deployed_commit": "2ed47f69454e67f518c4c800162bb155c7567b33",
+    "previous_commit": "16c1a20026305bd0be1306b0bcdabde6afae4f02",
+    "service": "mini-sub2api.service",
+    "active": true,
+    "files_hash_match": true,
+    "http_unauth_status": 401,
+    "ws_unauth_status": 401,
+    "stop_to_ready_seconds": 0.672,
+    "artifact_identity_checked": true,
+    "source_checkout_on_server": false,
+    "backup_created": false,
+    "state_directory_preserved": true,
+    "smoke_next": "four actual Subscription two-turn HTTP/WS cells"
+  },
+  "post_deploy_live_checks": {
+    "cells": [
+      {
+        "model": "gpt-5.5",
+        "passed": true,
+        "transport": "http",
+        "turns": 2
+      },
+      {
+        "model": "gpt-5.5",
+        "passed": true,
+        "transport": "ws",
+        "turns": 2
+      },
+      {
+        "model": "gpt-6-astra",
+        "passed": true,
+        "transport": "http",
+        "turns": 2
+      },
+      {
+        "model": "gpt-6-astra",
+        "passed": true,
+        "transport": "ws",
+        "turns": 2
+      }
+    ],
+    "passed": true,
+    "temporary_key_revoked": true
+  },
+  "aws_final_check": {
+    "active": true,
+    "restart_count": 0,
+    "process_scope": "verified service cgroup",
+    "components": [
+      {
+        "component": "mini-sub2api",
+        "expected_path": true,
+        "hash_match": true
+      },
+      {
+        "component": "mini-sub2api-core-codex",
+        "expected_path": true,
+        "hash_match": true
+      }
+    ]
+  },
+  "cleanup": {
+    "aws_stage_removed": true,
+    "temporary_distribution_key_revoked": true,
+    "task_docker_container_removed": true,
+    "task_docker_volume_removed": true,
+    "task_docker_image_removed": true,
+    "historical_files_processed": 477,
+    "exact_duplicates_removed": 338,
+    "obsolete_backups_and_scripts_removed": 38,
+    "unique_historical_evidence_archived": 101,
+    "pinned_source_preserved": true,
+    "active_worktree_exit_pending": false,
+    "leased_worktree_removed": true,
+    "merged_local_branch_removed": true,
+    "empty_agent_deck_directories_removed": true,
+    "working_plan_directory_removed": true
+  },
+  "completed_at": "2026-09-06"
+}

@@ -9,135 +9,115 @@ switching, Chat Completions or conversation-management API.
 
 | Upstream | Every caller |
 |---|---|
-| API key | Bodies and valid WS frames pass through unchanged; gateway auth, admission, usage and response-header policy remain. |
-| Subscription | Codex 0.153.4 request format, defaults and scoped identities; HTTP zstd level 3, WS JSON. |
+| API key | Bodies/valid WS frames remain byte-transparent; gateway auth, admission, usage and safe headers still apply. Caller `X-Codex-Routing-Hint` survives; omission stays absent. |
+| Subscription | Codex 0.153.4 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
 
-Caller `X-Codex-Routing-Hint` passes through for API-key HTTP/WS; a missing hint stays absent.
-Subscription constructs its hint from the actual request model/service tier.
-
-HTTP stays HTTP; WS stays WS, including recovery. Nonblank `Originator` only disables gateway-added
-WS prewarm/automatic incrementality; it never bypasses emulation. Ordinary WS callers may receive
-hidden `generate:false` setup and suffix sending when saved config/input/output and thread/socket match.
+HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
+prewarm/automatic incrementality; it never bypasses emulation.
 
 | Subscription input | Upstream send |
 |---|---|
-| Full HTTP | Full HTTP; return SSE or aggregated JSON as requested. |
+| Full HTTP | Full HTTP; public SSE or aggregated JSON follows caller preference. |
 | HTTP + valid previous ID | Exact referenced local history + all current input, without the reference. Missing history fails. |
-| Full WS | Full frame, or eligible socket baseline + suffix. |
-| WS + valid previous ID | Valid remote continuation; changed socket/format/setup may require locally reconstructed full WS. |
+| Full WS | Full frame, or eligible same-socket baseline + suffix. |
+| WS + valid previous ID | Valid remote continuation; socket/format/setup changes may require complete local history for full WS. |
 
-Previous ID means append, including repeated input. It selects that response, never the latest session
-history. A local prefix match alone does not prove upstream WS reuse.
+A previous ID selects that response and appends all input, including repetitions. Prefix association
+alone does not authorize WS reuse; compare actual settings, input/output, thread and connection.
 
 ## Sessions and matching
 
-Within Key/account scope: original HTTP/WS handshake `session-id` → `client_metadata.session_id` →
-turn metadata session ID. Otherwise use a known previous-response association, then an eligible full
-history prefix or verified anonymous checkpoint association, then initialize. WS first-frame selection
-binds the connection; later frames reject cross-session identities, supply current turn/window
-evidence, and reconnect locates again.
-`conversation_id`, cache/request/thread/window IDs are not locators. Mapped top-level `conversation`
-is only compatibility evidence, not complete local history.
+Within Key/account scope, locate by original handshake `session-id` → `client_metadata.session_id` →
+turn metadata session ID → known previous response → eligible history/checkpoint → new session.
+The first WS frame binds the session; later frames reject cross-session evidence and supply current
+turn/window metadata. Reconnect resolves again. Conversation/cache/request/thread/window IDs are not
+session locators; mapped top-level `conversation` is compatibility evidence, not full local history.
 
-OpenCode's enabled built-in `openai` plugin sends `session-id`/`originator`. Custom providers normally
-send `X-Session-Id`/`x-session-affinity`, which are not gateway locators. Bare/custom requests without
-references use full-history matching in the same Key's anonymous pool; explicit sessions stay separate.
+OpenCode's enabled built-in OpenAI plugin sends `session-id`/`originator`. Custom-provider
+`X-Session-Id`/`x-session-affinity` are not locators. Unidentified full requests match only the same
+Key's anonymous pool; explicit sessions stay separate.
 
-Matching uses normalized caller input and retained output with public IDs, before upstream identity/Lite conversion:
+Compare normalized caller input and retained public-ID output before upstream identity/Lite conversion:
 
-- Compare ordered structured content, preserving duplicates, strings, arguments and ciphertext.
-  Object-key order is irrelevant. Only completed-response boundaries are candidates.
-- Ignore empty annotations/logprobs on assistant output_text and completed status on messages/direct
-  function/custom-tool items. Nonempty decoration remains significant.
-- Message IDs may be omitted. Direct function/custom-tool call/output IDs may be omitted only with
-  the same valid call_id. Explicit IDs and other item/resource/reference IDs remain strict.
-- Filter ID and dependency failures before choosing the longest candidate. Calls
-  require nonblank IDs; results consume known calls once. Conflict never selects by recency.
-- Current top-level instructions/tools/model/settings do not determine history association or
-  make equivalent histories conflict. Use current effective settings; ordinary bases never inherit.
-  WS reuse separately compares its actual transmitted configuration and input/output baseline.
-- Historical developer messages and formed Lite input prefixes remain content: editing them can
-  break the prefix. Exact content storage and provider-output comparisons remain separate.
-- A coarse reasoning key may omit ciphertext, but eligibility accepts missing/null ciphertext only
-  when Core recorded that field as hidden in this history. Full context equality still includes it.
-  Restore only that verified field; source-thread/fork validation gates sending it. Other content, IDs and
-  dependencies remain checked. Removing an entire reasoning item does not qualify as field omission.
+- Use ordered structured content and completed-response boundaries. Preserve duplicates, text,
+  arguments and ciphertext; object-key order is irrelevant.
+- Ignore empty annotations/logprobs on assistant `output_text` and completed status on
+  message/direct-tool items. Nonempty decoration remains significant.
+- Message IDs may be omitted; direct-tool item IDs may be omitted only with the same valid
+  `call_id`. Explicit and other resource/reference IDs remain strict.
+- Validate IDs/dependencies before longest-prefix selection. Calls require nonblank IDs; each result
+  consumes one known call. Conflicts cannot be resolved by recency.
+- Current model/instructions/tools/settings do not determine association. Use current effective
+  settings; ordinary bases never inherit. Historical developer/Lite input prefixes remain content.
+- Missing/null reasoning ciphertext matches only a field Core previously hid in that verified
+  history. Restore that field after full-context and source-thread/fork checks; removing an entire
+  item or other content does not qualify. Exact storage and provider-output checks remain separate.
 
-Without an eligible anonymous prefix, the last compaction item can locate a uniquely owned,
-completed checkpoint in the same Key's anonymous pool. Match the entire item, including ID and
-ciphertext, with existing internal-metadata normalization. Restore session/thread/window, validate
-lineage and dependencies, then send the caller's current replacement and settings. This neither
-inherits the turn nor authorizes WS reuse. Missing/changed IDs or external summaries grant no
-fallback; conflicting owners fail. Verified checkpoint-only windows also enter the prefix index.
-Checkpoint indexes share source-history expiry, eviction and memory budgets.
+Without an eligible anonymous prefix, an exact last compaction item—including ID/ciphertext—may
+locate a unique completed checkpoint in the same Key's anonymous pool. Normalize internal metadata,
+restore session/thread/window, validate lineage/dependencies, and use the caller's current replacement
+and settings. This grants neither a prior turn nor WS reuse. Changed/missing IDs, external summaries
+and conflicting owners fail; checkpoint evidence shares history expiry, eviction and memory budgets.
 
-Explicit turns take priority; tool follow-ups retain their turn, and quiescent new user input starts
-one. Equivalent contexts share immutable content, not active/tool state. Each branch/turn and WS
-allows one inference. Historical ownership permits current-thread, ancestor or declared-fork history;
-fork provenance grants no cross-session reference authority, including remote-only WS continuation.
+Explicit turns win; tool follow-ups retain their turn, while quiescent new user input starts one.
+Each branch/turn and physical WS permits one inference. Equivalent contexts may share immutable
+content, never execution owners/tool consumption. Current-thread, ancestor or declared-fork history
+still requires the same session, including remote-only continuation.
 
-Keep the first upstream handshake/metadata turn token for the same logical turn, including failed
-attempts and socket reconnects. Failed-turn metadata obeys session idle expiry and capacity eviction;
-active/admitted work stays protected. Completed prewarm may hand
-it to the first business turn on the same socket/thread; another thread cannot consume it. Hidden
-setup updates the business frame before sending. Memory metadata uses its native turn-free shape;
-Core does not implement a memory-writing service.
+Retain the first upstream handshake/metadata turn token across same-turn retries/reconnects.
+Failed-turn facts follow idle expiry/capacity; admitted work is protected. Completed prewarm may
+transfer its token only to the first business turn on that socket/thread. Hidden setup updates the
+business frame before sending. Memory metadata is turn-free; Core provides no memory-writing service.
 
 ## Instructions and Lite
 
 | Caller format | Base and tools |
 |---|---|
-| Ordinary | Nonblank top-level instructions stays verbatim; omit missing/null/blank/nonstring bases. No model-default insertion. Top-level tools. |
-| Ordinary → Lite | additional_tools, optional valid caller-base developer message, original input; remove top-level base/tools. |
-| Formed Lite | Preserve input instructions. Insert an explicit valid top-level base after tools; otherwise no fallback. |
-| Inherited Lite increment | Validate the referenced caller format/setup; do not repeat its prefix. |
+| Ordinary | Keep nonblank top-level instructions verbatim; omit missing/null/blank/nonstring bases. Top-level tools. |
+| Ordinary → Lite | `additional_tools`, optional valid caller-base developer message, original input; remove top-level base/tools. |
+| Formed Lite | Preserve input instructions; place an explicit valid top-level base after tools. |
+| Inherited Lite increment | Validate referenced caller format/setup; do not repeat the prefix. |
 
-Caller/upstream formats stay distinct. Developer content/order/duplicates survive; Subscription
-system→developer happens in place. Caller placeholders stay literal. Effective history settings use
-the same no-default base policy; ordinary continuation does not restore an omitted prior base.
-[Snapshots](../src/core/codex/prompts/codex-0.153.4/README.md) cover 11 catalog models and fallbacks
-for offline comparisons/tests only; production requests never load these prompt defaults.
+No path inserts model-default bases or renders caller placeholders. Ordinary continuation does not
+restore an omitted base. Preserve developer content/order/duplicates; Subscription maps
+system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.153.4/README.md)
+are offline test fixtures only.
 
-Lite UUIDv5 derives a namespace from OID + thread UTF-8, then hashes exact tools bytes (at_) or base
-text (msg_). Regenerate only Core-owned/proven native prefixes; preserve existing aliases. Group loose
-functions/custom tools and all functions namespaces in encounter order, retaining duplicates and the
-last nonblank description.
+Lite UUIDv5 uses OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
+base text (`msg_`). Regenerate only Core-owned/proven native prefixes; retain durable aliases.
+Group loose functions/custom tools and function namespaces in encounter order, preserving duplicates
+and the last nonblank description.
 
-Preserve supplied workspace/personality/AGENTS/Skills/permissions/environment text. Core discovers
-none of these or client tools. Sandbox meaning survives while implementation follows Core OS.
-Root-agent/time and model REPL flags use existing defaults; explicit valid values survive. Flags do
-not enable execution. Filter server-unsupported max_output_tokens/temperature/top_p; retain supported
-access programs, sequential_cutoff, HTTP trace headers and allowed turn metadata.
+Preserve caller workspace/personality/AGENTS/Skills/permissions/environment text. Core discovers or
+executes none of these or client tools. Legal sandbox meaning survives with Core OS implementation;
+root-agent/time/REPL defaults and valid overrides do not enable execution. Filter unsupported
+`max_output_tokens`/`temperature`/`top_p`; supported field details live in the
+[protocol](../src/protocol/v1/README.md#subscription-request-preparation).
 
-Valid numeric item `create_time` survives even when an optional item ID is absent. Retained
-caller-form history carries first-assigned time/turn metadata through reference expansion and
-verified full-history matching, while explicit caller values and original content remain intact.
-
-Native exec/wait exposure and host availability differ. Bare API/OpenCode retain direct tools;
-Core provides no JavaScript bridge or claim of full default-native code-mode equivalence.
+Valid numeric item `create_time` survives absent optional IDs. Retained history preserves first-assigned
+time/turn metadata through expansion/matching; explicit caller values and content remain intact.
+Native exec/wait exposure and host availability differ. Bare API/OpenCode keep direct tools; Core
+provides no JavaScript bridge or claim of complete default-native code-mode equivalence.
 
 ## Reasoning visibility
 
-Subscription always adds `reasoning.encrypted_content` to upstream `include`, preserving other
-entries/order. Missing `include` returns ciphertext by default; explicit lists return it only when
-requested, and null requests no optional ciphertext. Other types/non-string entries fail before
-inference. API-key requests and responses remain transparent.
+Subscription always appends `reasoning.encrypted_content` to upstream `include`, preserving other
+entries/order. Missing `include` exposes ciphertext by default; explicit lists expose it only when
+requested; null hides optional ciphertext. Other types/non-string entries fail before inference.
 
-Before filtering public JSON/SSE/WS, retain full output internally. Hide only reasoning items'
-`encrypted_content`; keep summaries/content/IDs, compaction ciphertext and opaque tool data.
-Visibility belongs to each request/WS create. Full sending preserves supplied ciphertext and
-restores verified hidden fields regardless of current `include`; explicit previous inputs still
-append wholly. WS reuse checks the restored request against its real baseline. Hidden-field
-provenance expires/evicts with history; persisted aliases cannot recover ciphertext. Core neither
-decrypts nor invents encrypted state.
+Retain complete output before filtering public JSON/SSE/WS. Hide only reasoning
+`encrypted_content`; preserve summaries, IDs, compaction ciphertext and opaque tool data.
+Visibility is per request/create. Full sending restores verified hidden fields regardless of current
+visibility; explicit previous inputs still append wholly. WS reuse compares the restored request.
+Provenance expires with history; persisted aliases cannot recover ciphertext. Core never decrypts
+or invents state. API-key traffic remains transparent.
 
 ## State and limits
 
-Full history/settings/comparisons expire after **3 business-idle hours**, checked on lookup and a
-30-second sweep; capacity may evict sooner, active work is protected. Live WS facts/tokens survive
-bulk expiry. Remote continuation does not restore missing local bodies; full input can. Compaction
-windows use the same limits and expiry; unsupported compaction or interleaved injection may still
-require client replacement history before HTTP reconstruction.
+Full history/settings/comparison data expire after **3 business-idle hours**, on lookup and a
+30-second sweep. Capacity may evict sooner; active work is protected. Live WS facts/tokens survive
+bulk expiry. Remote continuation cannot rebuild missing bodies; complete caller input can.
+Compaction/injection may require a client replacement before full reconstruction.
 
 | Resource | Default |
 |---|---:|
@@ -145,91 +125,82 @@ require client replacement history before HTTP reconstruction.
 | Context/index/live facts/assembly: Core / Key / session | 2 GiB / 1 GiB / 256 MiB |
 | Records/session; output items/response | 8,192 each |
 | WS/Key; first-frame / idle / write timeout | 8; 30 s / 5 min / 120 s |
+| HTTP event idle / per-write timeout | 300 s / 120 s |
+| HTTP terminal tail: Core / coordinator fallback | 1 s / 2 s |
 
-These are accounting budgets, not RSS limits. Measure a selected WS delta at its actual size.
-Reserve essential state before inference; body overflow may finish delivery without publishing
-partial history. Override [defaults](../src/protocol/v1/go/limits.json) through MINI_SUB2API_LIMITS JSON:
-positive integers, known fields, sessionBytes <= keyBytes <= globalBytes.
+These are accounting budgets, not RSS limits. Reserve essential state before inference and measure
+WS deltas at their actual size. Oversized retained output may finish valid delivery without publishing
+partial history. Override byte/item [defaults](../src/protocol/v1/go/limits.json) using `MINI_SUB2API_LIMITS`:
+known fields, positive integers up to 2^40, and `sessionBytes <= keyBytes <= globalBytes`.
+See [Memory](MEMORY.md) for small hosts.
 
-Device mode converges installation UUIDv4 across Keys/duplicate credentials for an account. Off uses
-scoped aliases, still with emulation. Logical IDs use UUIDv7 and stay Key-isolated. Mode changes need
-disabled/drained credentials; stale WS revisions fail. Pools/TLS resumption are credential-isolated;
-no configurable JA3/uTLS or per-credential source-IP/proxy mechanism is provided.
+Device mode converges account installation UUIDv4 across duplicate credentials/Keys; off uses scoped
+aliases while keeping emulation. Logical UUIDv7 identities stay Key-isolated. Mode changes require
+disabled/drained credentials; stale WS revisions fail. Transport pools/TLS resumption are credential-isolated,
+without configurable JA3/uTLS or per-credential source-IP/proxy selection.
 
-Private schema-v1 files contain bounded typed ID pairs, never bodies/raw Keys. Do not rewrite arbitrary
-text/ciphertext/resource IDs. Corruption fails for the affected account without reset/raw-ID fallback.
-Files are bounded to 512 MiB/account; inactive details are pruning-eligible after 30 days, protecting
-live/retained mappings. Installation/session/thread nodes have no fixed TTL; usage details default to seven days.
-Startup orphan cleanup rechecks credential ownership under the identity-state lock before deletion;
-a stale scan cannot delete newly owned state, and unreadable ownership evidence preserves it.
+Private schema-v1 identity files store bounded typed ID pairs, never bodies/raw Keys or arbitrary
+text/ciphertext/resource rewrites. Corruption fails for that account without reset/raw-ID fallback.
+The file bound is 512 MiB/account; inactive details are pruning-eligible after 30 days, protecting
+live/retained dependencies. Installation/session/thread nodes have no fixed TTL.
+Startup cleanup rechecks final-owner deletion under lock; unreadable ownership preserves evidence.
+Usage details default to seven days; daily aggregates survive.
 
 ## Completion and recovery
 
-SSE needs a completed/failed/incomplete/error terminal; EOF, keepalives and `[DONE]` alone do not
-mean success. Premature EOF keeps delivered bytes, reports `upstream_stream / delivered / never`
-in failure trailers and records an upstream error. The usage observer follows `outputBytes`
-(128 MiB default), resumes after an oversized SSE event, and never lets success overwrite failure.
-These checks change accounting/diagnostics, not API-key payload bytes.
+SSE requires a completed/failed/incomplete/error terminal. EOF, keepalives and `[DONE]` alone cannot
+prove success. Premature EOF preserves delivered bytes and reports `upstream_stream / delivered / never`
+through failure trailers. Observation follows `outputBytes`, resumes after oversized events, and
+never lets later success overwrite failure. API-key payload bytes remain unchanged.
 
-Subscription SSE forwards `error` and permits one subsequent valid `response.failed`, preserving
-its projected response ID, error details and usage. The first error releases the execution lane;
-only bounded validation facts remain under the operation's existing memory reservation until the
-failed footer, EOF or cancellation. The footer must match known response ownership and completed
-items. It cannot publish continuation history or commit compaction. Later success, new output,
-conflicting/malformed footers and duplicate response terminals still fail the stream. An error-only
-stream may end normally; a valid failed footer adds no gateway failure trailers. The HTTP status
-already sent stays unchanged and accounting records one upstream error with any reported usage.
+HTTP SSE idle time resets only on complete, nonempty data events; comments, partial frames and
+`[DONE]` do not reset it. Subscription streaming and JSON aggregation share this guard. From the
+first terminal, Core receives at most one second of additional tail data and validates buffered
+fragments; Go enforces a two-second fallback, including API-key streams. EOF ends earlier. Later
+events cannot extend the tail or alter an already closed response. Non-SSE passthrough uses byte
+progress; error-envelope inspection is bounded to 300 seconds. Each downstream write/flush has a
+120-second deadline. Timeouts/cancellation release request-owned resources; progressing streams
+have no total-duration cap. Timeout values are fixed, outside `MINI_SUB2API_LIMITS`.
 
-Publish valid context before public completion. Reconcile item-done/final output once; an empty footer
-uses completed items for JSON/history, without duplicate stream events. Failed/incomplete responses
-are not baselines. V2 compaction requires matching success and exactly one valid encrypted item-done;
-a final array alone is insufficient. Overlapping same-base commits advance once.
+Publish valid context before public completion; reconcile item-done/final output once. An empty footer
+can reuse completed items without duplicate events. Every started item—including created/in-progress
+snapshots, item-added and deltas—must finish with matching item-done or a complete final item at the
+same index/identity. Missing/truncated footers, unfinished status, conflicting output or unavailable
+bounded completion proof reject success across JSON/SSE/WS/prewarm. Cache pressure alone may still
+permit delivery when separate completion facts fit. Failed/incomplete responses never become baselines.
 
-Subscription JSON aggregation rejects an `error` event even when a completed/incomplete event
-follows it. Malformed output footers, contradictory completed items and incomplete item sequences
-fail before public completion or history publication. SSE budgeting applies per event: verified
-prefix events are delivered before later malformed/oversized data regardless of network chunking.
-Failure trailers survive the internal Core HTTP hop, including errors after an already delivered
-terminal event; the request is then recorded as failed.
+Subscription SSE may forward `error` followed by one valid matching `response.failed`, including
+projected IDs, details and usage. The first error releases the lane; bounded validation facts stay
+reserved until the footer/EOF/tail deadline/cancellation. New output, later success, duplicate/conflicting terminals
+fail. Error-only EOF and a valid failed footer need no extra failure trailers, but usage records the
+request as failed. Neither path publishes history or commits compaction. JSON aggregation always
+rejects an error event. Valid SSE prefix events survive later malformed/oversized chunks; failure
+trailers cross the internal HTTP hop even after a previously delivered terminal.
 
-Created/in-progress output snapshots, item-added events and output deltas also establish unfinished
-items. A completed claim must close every known item through matching item-done evidence or a
-complete final output item with the same index/identity. An empty/absent/truncated footer cannot
-discard an unfinished suffix, and explicitly unfinished item status cannot become success. Failed
-and incomplete terminals still terminate as failures. These checks cover JSON, SSE, WS and hidden
-prewarm reuse, before history or compaction publication.
+V2 compaction requires matching completion and exactly one valid encrypted item-done; a final array
+alone is insufficient. Concurrent same-base commits advance once. With complete source history,
+matching observed output and capacity, publish a replacement window under the response ID:
 
-Completion tracking retains only bounded identity facts, not partial content. Missing usable item
-locators or exceeding the concurrent unfinished-item limit (`outputItems`) makes completion proof
-unavailable and rejects a subsequent completed claim. Body-cache pressure alone still permits
-valid delivery when the separate completion facts remain available.
+- Explicit V2 retains caller user/system/developer context and formed Lite setup; the actual compaction
+  item replaces covered assistant/reasoning/tool/compaction output and removes the trigger.
+- In-band compaction retains that item and later output, plus formed Lite's leading setup.
+  Ordinary-to-Lite setup still comes from each request's settings.
 
-When complete source history and a single matching observed compaction item are available, Core
-stores a replacement window under that response ID before completion is delivered:
+Full reconstruction uses this exact window and cannot revive removed references. Explicit-reference
+intent survives WS expansion and disables hidden prewarm/automatic incrementality. Unsupported or
+ambiguous checkpoints, local summaries and dropped calls require complete client replacement; Core
+does not decrypt, persist bodies, discover fresh environment or invent truncation choices.
 
-- Explicit V2 with a final compaction_trigger retains caller user/system/developer messages and
-  formed Lite setup, preserving content/order. The actual compaction item replaces old assistant,
-  reasoning, tool and compaction items; the trigger is removed.
-- In-band generation keeps the compaction item and subsequent output. Formed Lite also retains its
-  leading tools/developer setup; ordinary-to-Lite setup still comes from each request's settings.
+Only proven-unsent business inference permits one extra attempt; the rejection allowlist is empty.
+Attempted/uncertain send or delivered events forbid hidden replay. OAuth recovery has a separate bound.
+Errors expose `retryAdvice/phase/deliveryState`; missing required state fails before inference.
+Subscription non-2xx bodies become bounded errors; API-key bodies pass through.
 
-Later HTTP increments and required full WS sends reconstruct from this exact window. Full-history
-matching cannot revive item references removed by compaction. Explicit-reference intent survives
-full WS reconstruction and disables extra prewarm/automatic incrementality. Core does not decrypt
-opaque content, persist bodies, discover fresh environment or apply untransmitted truncation.
-Local summaries, multiple/unobserved checkpoints, unsupported explicit input kinds and dropped tool calls require
-a client-supplied replacement. A complete window supplied by the client remains authoritative.
+WS body controls require active session/thread/socket ownership; without a response ID use the bound
+operation. Injection invalidates history but keeps validated dependencies; unknown control semantics
+also invalidate dependency reuse. Completion cannot restore stale history; full input can rebuild it.
+Payload-free transport controls remain forwardable.
 
-At most one extra attempt is allowed while business inference is proven unsent; the rejection retry
-allowlist is empty. Attempted/uncertain send or delivered events prevent hidden replay. OAuth refresh
-has its separate bounded retry. Errors expose retryAdvice/phase/deliveryState; missing required state
-fails before inference. Subscription non-2xx bodies become bounded errors; API-key bodies stay transparent.
-
-Subscription WS body controls must belong to the active session/thread/socket. Without a response ID,
-use that bound operation. Injection invalidates full history but retains validated dependency facts;
-unknown body-control semantics also invalidate dependency reuse. Completion cannot restore the old
-history. Full client replacement can rebuild it; payload-free transport controls remain forwardable.
-
-HTTP/WS handshake req_* is returned in X-Mini-Sub2Api-Request-Id; WS operation IDs stay in local usage.
-Response.id is the continuation reference. Public provider request-ID headers use aliases; one bounded
-original provider ID may be retained privately. See the [protocol](../src/protocol/v1/README.md).
+Public `X-Mini-Sub2Api-Request-Id` identifies the HTTP request/WS handshake; WS operation IDs remain
+in local usage. `Response.id` is the continuation reference. Provider request-ID headers use aliases;
+one bounded raw ID may be kept privately. See the [protocol](../src/protocol/v1/README.md).

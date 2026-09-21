@@ -1,6 +1,7 @@
 use axum::http::HeaderMap;
 use bytes::Bytes;
 use futures_util::Stream;
+#[cfg(test)]
 use futures_util::StreamExt;
 use http_body::Frame;
 use mini_sub2api_protocol_v1::DELIVERY_STATE_TRAILER;
@@ -10,21 +11,17 @@ use mini_sub2api_protocol_v1::FailurePhase;
 use mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER;
 use mini_sub2api_protocol_v1::RetryAdvice;
 use std::convert::Infallible;
-use std::pin::Pin;
 
 use crate::error::failure;
 use crate::response_translation::{ResponseStateContext, SseFailureTail};
 
-pub(crate) type UpstreamByteStream =
-    Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+pub(crate) use crate::response_sse_reader::UpstreamByteStream;
+use crate::response_sse_reader::{SseReader, data_payload};
 
 struct TranslationState {
-    upstream: UpstreamByteStream,
-    context: ResponseStateContext,
-    buffer: Vec<u8>,
-    pending: Bytes,
+    reader: SseReader,
+    context: Option<ResponseStateContext>,
     finished: bool,
-    upstream_ended: bool,
     terminal_seen: bool,
     failed_footer_pending: bool,
     failure_tail: Option<SseFailureTail>,
@@ -32,19 +29,34 @@ struct TranslationState {
     output_lifecycle: crate::response_output::OutputLifecycle,
 }
 
+impl Drop for TranslationState {
+    fn drop(&mut self) {
+        self.reader.close();
+        self.failure_tail = None;
+        if let Some(context) = self.context.take() {
+            let _ = context.update_operation(None);
+        }
+    }
+}
+
 pub(crate) fn translated_sse_frames(
     upstream: UpstreamByteStream,
     context: ResponseStateContext,
     maximum: usize,
 ) -> impl Stream<Item = Result<Frame<Bytes>, Infallible>> {
+    translate_reader(SseReader::new(upstream, maximum), context, maximum)
+}
+
+pub(crate) fn translate_reader(
+    reader: SseReader,
+    context: ResponseStateContext,
+    maximum: usize,
+) -> impl Stream<Item = Result<Frame<Bytes>, Infallible>> {
     futures_util::stream::unfold(
         TranslationState {
-            upstream,
-            context,
-            buffer: Vec::new(),
-            pending: Bytes::new(),
+            reader,
+            context: Some(context),
             finished: false,
-            upstream_ended: false,
             terminal_seen: false,
             failed_footer_pending: false,
             failure_tail: None,
@@ -55,37 +67,10 @@ pub(crate) fn translated_sse_frames(
             if state.finished {
                 return None;
             }
-            loop {
-                if let Some(end) = find_event_end(&state.buffer) {
-                    let event = state.buffer.drain(..end).collect::<Vec<_>>();
-                    return Some(finish_event(state, event).await);
-                }
-                if !state.pending.is_empty() {
-                    let take = state
-                        .maximum
-                        .saturating_sub(state.buffer.len())
-                        .min(state.pending.len());
-                    if take == 0 {
-                        return Some(fail(state));
-                    }
-                    state.buffer.extend_from_slice(&state.pending[..take]);
-                    state.pending = state.pending.slice(take..);
-                    continue;
-                }
-                if state.upstream_ended {
-                    if state.buffer.is_empty() {
-                        return (!state.terminal_seen).then(|| fail(state));
-                    }
-                    let event = std::mem::take(&mut state.buffer);
-                    return Some(finish_event(state, event).await);
-                }
-                match state.upstream.next().await {
-                    Some(Ok(bytes)) => {
-                        state.pending = bytes;
-                    }
-                    Some(Err(_)) => return Some(fail(state)),
-                    None => state.upstream_ended = true,
-                }
+            match state.reader.next_event().await {
+                Ok(Some(event)) => Some(finish_event(state, event).await),
+                Ok(None) if state.terminal_seen => None,
+                Ok(None) | Err(_) => Some(fail(state)),
             }
         },
     )
@@ -103,6 +88,11 @@ async fn finish_event(
 
 fn fail(mut state: TranslationState) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
     state.finished = true;
+    state.reader.close();
+    state.failure_tail = None;
+    if let Some(context) = state.context.take() {
+        let _ = context.update_operation(None);
+    }
     let metadata = failure(
         RetryAdvice::Never,
         FailurePhase::UpstreamStream,
@@ -159,7 +149,12 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
         return Err(());
     }
     if kind == Some("error") && !state.terminal_seen {
-        state.failure_tail = state.context.detach_sse_failure().map_err(|_| ())?;
+        state.failure_tail = state
+            .context
+            .as_ref()
+            .expect("live translation context")
+            .detach_sse_failure()
+            .map_err(|_| ())?;
         state.failed_footer_pending = true;
     }
     state
@@ -178,6 +173,8 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
         .flatten();
     let translated = state
         .context
+        .as_ref()
+        .expect("live translation context")
         .translate_sse_value(value, tail)
         .await
         .map_err(|_| ())?;
@@ -192,19 +189,6 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
         state.failure_tail = None;
     }
     Ok(Bytes::from(rewritten))
-}
-
-fn data_payload(event: &str) -> Option<String> {
-    let parts = event
-        .lines()
-        .filter_map(|line| {
-            line.strip_suffix('\r')
-                .unwrap_or(line)
-                .strip_prefix("data:")
-        })
-        .map(|value| value.strip_prefix(' ').unwrap_or(value))
-        .collect::<Vec<_>>();
-    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 fn replace_data_lines(event: &str, translated: &str) -> Result<String, ()> {
@@ -234,6 +218,7 @@ fn replace_data_lines(event: &str, translated: &str) -> Result<String, ()> {
     Ok(output)
 }
 
+#[cfg(test)]
 fn find_event_end(bytes: &[u8]) -> Option<usize> {
     let mut line_start = 0;
     for (index, byte) in bytes.iter().enumerate() {

@@ -21,6 +21,7 @@ type Observer struct {
 	buffer          []byte
 	usage           *storage.TokenUsage
 	terminal        TerminalStatus
+	events          uint64
 }
 
 type TerminalStatus uint8
@@ -116,11 +117,31 @@ func (o *Observer) eventBoundary(chunk []byte) int {
 func (o *Observer) acceptEvent(event []byte) {
 	data := eventData(event)
 	if len(data) != 0 && !bytes.Equal(bytes.TrimSpace(data), []byte("[DONE]")) {
+		if len(bytes.TrimSpace(data)) == 0 {
+			return
+		}
+		o.events++
 		o.acceptJSON(data)
 	}
 }
 
 func (o *Observer) IsStreaming() bool { return o.streaming }
+
+// StreamProgress is a non-destructive snapshot: unlike Usage/TerminalStatus it never
+// flushes a partial event. Only complete nonempty data events advance the sequence.
+func (o *Observer) StreamProgress() (uint64, TerminalStatus) { return o.events, o.terminal }
+
+// A forced tail close cannot treat an unparsed data fragment as a clean completion.
+func (o *Observer) HasPendingSSEData() bool {
+	if !o.streaming {
+		return false
+	}
+	if o.dropping {
+		return true
+	}
+	data := bytes.TrimSpace(eventData(o.buffer))
+	return len(data) != 0 && !bytes.Equal(data, []byte("[DONE]"))
+}
 
 func looksLikeSSE(buffer []byte) bool {
 	trimmed := bytes.TrimLeft(buffer, " \t\r\n")

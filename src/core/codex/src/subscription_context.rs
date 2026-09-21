@@ -390,7 +390,11 @@ impl Scope {
                             .settings
                             .as_ref()
                             .filter(|v| settings.insert(Arc::as_ptr(v) as usize))
-                            .map_or(0, |v| crate::subscription_index::canonical(v).len() * 4)
+                            .map_or(0, |v| {
+                                crate::json_size::encoded_len(v.as_ref())
+                                    .expect("JSON settings encoding")
+                                    * 4
+                            })
                         + record
                             .history
                             .as_ref()
@@ -423,7 +427,9 @@ impl Scope {
                 .settings
                 .as_ref()
                 .filter(|v| settings.insert(Arc::as_ptr(v) as usize))
-                .map_or(0, |v| crate::subscription_index::canonical(v).len() * 4);
+                .map_or(0, |v| {
+                    crate::json_size::encoded_len(v.as_ref()).expect("JSON settings encoding") * 4
+                });
             if let Some(history) = &record.history {
                 cost += history.retained_cost(&mut blocks, Some(&mut items));
             }

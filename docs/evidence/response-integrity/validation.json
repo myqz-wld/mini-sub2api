@@ -1,0 +1,26 @@
+{
+  "commit": "d7c1d5de14d754da1feb576ee0c5cfaf30fb991b",
+  "linux_architecture": "aarch64",
+  "linux_core_tests_passed": 402,
+  "linux_rust_protocol_tests_passed": 6,
+  "linux_go_protocol_tests_passed": true,
+  "linux_go_race_packages_passed": [
+    "mini-sub2api/src/coordinator/cmd/generate-codex-prompts",
+    "mini-sub2api/src/coordinator/integration",
+    "mini-sub2api/src/coordinator/internal/adapter",
+    "mini-sub2api/src/coordinator/internal/buildmeta",
+    "mini-sub2api/src/coordinator/internal/cli",
+    "mini-sub2api/src/coordinator/internal/httpapi",
+    "mini-sub2api/src/coordinator/internal/storage",
+    "mini-sub2api/src/coordinator/internal/usage"
+  ],
+  "linux_tests_non_root": true,
+  "build_network_disabled": true,
+  "linux_release_build_passed": true,
+  "darwin_clean_package_passed": true,
+  "macos_core_tests_passed": 402,
+  "macos_rust_protocol_tests_passed": 6,
+  "macos_go_race_passed": true,
+  "targeted_local_matrix_leaves_passed": 166,
+  "real_provider_calls": 0
+}

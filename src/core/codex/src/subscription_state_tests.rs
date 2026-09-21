@@ -34,6 +34,9 @@ mod partial_output_tests;
 #[path = "subscription_sse_failure_tests.rs"]
 mod sse_failure_tests;
 
+#[path = "subscription_http_lifetime_tests.rs"]
+mod http_lifetime_tests;
+
 const NAMESPACE: &str = "context-admission";
 const OWNER: &str = "acct_context_tests";
 const KEY: &str = "isolated-key";

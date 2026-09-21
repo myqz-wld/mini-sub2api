@@ -44,7 +44,7 @@ curl --no-buffer http://127.0.0.1:8787/v1/responses \
 
 ## Codex client
 
-Add to ~/.codex/config.toml:
+Add to `$CODEX_HOME/config.toml` (default `$HOME/.codex/config.toml`):
 
 ```toml
 [model_providers.mini-sub2api]
@@ -64,36 +64,31 @@ model_provider = "mini-sub2api"
 MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
 ```
 
-Set supports_websockets=false for HTTP only. Other Responses clients use the same base URL/Key.
-OpenCode custom-provider requests and bare full histories can associate without a session ID;
-its enabled built-in OpenAI plugin supplies session-id. See [behavior](docs/BEHAVIOR.md) for matching rules.
+Set `supports_websockets=false` for HTTP only. Other Responses clients use the same base URL/Key.
+OpenCode custom providers and bare clients can associate full histories without a session ID.
 
 ## Main rules
 
-- HTTP stays HTTP; WS stays WS. Subscription HTTP increments require complete local history;
-  WS reuse separately checks the actual settings, input/output and connection.
-- Full-history association survives configuration changes. An exact verified anonymous compaction
-  item can restore its session/thread/window; accepted replacement windows support later increments.
-- Full history expires after three idle hours. Full input can rebuild it; valid live WS references
-  and persisted identities have separate lifetimes.
-- Subscription always requests encrypted reasoning. Caller `include` controls public visibility;
-  Core retains it and restores verified fields it previously hid from matched histories.
-- Preserve valid caller base instructions, developer order and duplicates; never insert a default
-  base. Subscription maps system→developer in place. Lite uses scoped deterministic prefix IDs.
-- Preserve valid caller item times even without item IDs; retained history keeps first-generated
-  times across reference expansion. Same-turn retries/reconnects retain the first routing token.
-- Streaming success requires a consistent terminal event. Errors cannot become JSON success;
-  unfinished, malformed or conflicting output fails while verified SSE prefixes survive later errors
-  and chunking. Started output must finish through item.done or a matching complete final footer.
-  Subscription SSE preserves `error` followed by one valid `response.failed`, including usage,
-  while keeping the request failed and releasing its execution lane on the first error.
-  Body-changing WS controls invalidate stale local history.
-- Workspace/Skills/tools belong to the client. Core does not discover or execute them; native code
-  mode and ordinary direct tools keep their respective protocols.
+- HTTP stays HTTP; WS stays WS. HTTP continuation requires complete local history, which expires
+  after three idle hours or earlier capacity eviction. Full input can rebuild it.
+- Subscription preserves caller instructions and tool order, inserts no default base, and requests
+  encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
+- Success requires consistent terminal/output evidence. Failed or partial output cannot become
+  reusable history; uncertain sends are not automatically replayed.
+- HTTP SSE allows 300 seconds between data events; heartbeats cannot extend it. Completed streams
+  close after a bounded tail, and stalled client writes time out after 120 seconds.
 
 Plain HTTP binds only loopback; other listeners need TLS. Run one service per state directory.
 Vault/identity files are private but unencrypted; request/response bodies are not persisted.
-[Operations](docs/OPERATIONS.md) covers auth, administration and deployment.
+
+| Guide | Contents |
+|---|---|
+| [Behavior](docs/BEHAVIOR.md) | Matching, compaction, instructions, limits and failure semantics |
+| [Operations](docs/OPERATIONS.md) | Authentication, administration and deployment |
+| [Memory](docs/MEMORY.md) | Small-host sizing and OOM diagnosis; context budgets are not RSS caps |
+| [Protocol](src/protocol/v1/README.md) | Private coordinator/Core wire contract |
+| [Architecture](docs/ARCHITECTURE.md) | Runtime ownership, state lifetimes and admission |
+| [Evidence](docs/EVIDENCE.md) | Retained validation and deployment summaries |
 
 ## Validate
 
@@ -106,7 +101,7 @@ bash scripts/test-scaffold-parity.sh
 
 [Capture methods and matrix](src/coordinator/integration/NATIVE_PARITY.md) distinguish native clients,
 bare fixtures and real-provider evidence. Normal suites are loopback-only; real calls require separate authorization.
-Source lives in src/coordinator, src/core/codex and src/protocol/v1; generated output stays in build/.
-The local ignored USER_POLICIES.md records selected policies and historical capture examples.
+Source lives in `src/coordinator`, `src/core/codex` and `src/protocol/v1`; output stays in `build/`.
+Local instructions, deployment overrides and `ref/` records are excluded from distribution.
 
 Personal learning/research software; not an official OpenAI product or intended for commercial/production use.

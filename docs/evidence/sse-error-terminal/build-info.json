@@ -1,0 +1,14 @@
+{
+  "packageName": "mini-sub2api",
+  "version": "0.1.0",
+  "fullCommit": "efb95042bcc375a752bbb1ff6c3d0d8d35bde411",
+  "shortCommit": "efb95042bcc3",
+  "branch": "main",
+  "dirty": false,
+  "buildTimestamp": "2026-09-10T15:33:52Z",
+  "artifacts": [
+    "mini-sub2api",
+    "mini-sub2api-core-codex",
+    "build-info.json"
+  ]
+}

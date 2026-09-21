@@ -1,0 +1,33 @@
+{
+  "commit": "5b2020937885a453fce4f0e3d698c0df0e57bd19",
+  "branch": "main",
+  "source_clean": true,
+  "validated_source_hashes_unchanged": true,
+  "validated_files": 15,
+  "committed_files": 14,
+  "installed_checks": {
+    "mini-sub2api": {
+      "status": "ok",
+      "installedCommit": "5b2020937885a453fce4f0e3d698c0df0e57bd19",
+      "sourceCommit": "5b2020937885a453fce4f0e3d698c0df0e57bd19",
+      "sourceDirty": false
+    },
+    "mini-sub2api-core-codex": {
+      "status": "ok",
+      "installedCommit": "5b2020937885a453fce4f0e3d698c0df0e57bd19",
+      "sourceCommit": "5b2020937885a453fce4f0e3d698c0df0e57bd19",
+      "sourceDirty": false
+    }
+  },
+  "binary_sha256": {
+    "mini-sub2api": "90174860654ddb3d61c8bde64b0fa04802310dc8efb0510d7f529954f29a358c",
+    "mini-sub2api-core-codex": "6b2e50d500167b0379c5e8382ff121659c30b9656accf8ea0135324469d89333",
+    "build-info.json": "5c850dc6d55aa34caff69502899baba7060784033403453883c0d3fe4b363b92"
+  },
+  "push": false,
+  "deployment": false,
+  "reference_workspace_classification": {
+    ".ref/sources/codex-v0.153.4": "intentionally retained pinned source required by native capture fixtures",
+    ".ref/continuation-settings/PLAN.md": "intentionally retained closed/superseded inheritance proposal with completed audit; no active implementation assignment"
+  }
+}

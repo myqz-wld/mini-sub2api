@@ -21,7 +21,20 @@ if find src/coordinator -name '*.go' -print -quit 2>/dev/null | grep -q .; then
 fi
 
 if [ -f src/core/codex/Cargo.toml ]; then
+  # Encode each flag separately so local paths containing spaces remain one rustc argument.
+  rust_flags="${CARGO_ENCODED_RUSTFLAGS-}"
+  if [ "${CARGO_ENCODED_RUSTFLAGS+x}" != x ]; then
+    read -r -a rust_flag_words <<< "${RUSTFLAGS-}"
+    for rust_flag in ${rust_flag_words[@]+"${rust_flag_words[@]}"}; do
+      rust_flags+="${rust_flags:+$'\x1f'}${rust_flag}"
+    done
+  fi
+  for remap in "$HOME=/build-user" "${CARGO_HOME:-$HOME/.cargo}=/cargo" \
+    "${RUSTUP_HOME:-$HOME/.rustup}=/rustup" "$repo_root=."; do
+    rust_flags+="${rust_flags:+$'\x1f'}--remap-path-prefix=$remap"
+  done
   MINI_SUB2API_BUILD_COMMIT="$full_commit" \
+    CARGO_ENCODED_RUSTFLAGS="$rust_flags" \
     mise exec -- cargo build --release -p mini-sub2api-core-codex
   cp build/cargo-target/release/mini-sub2api-core-codex build/bin/
 fi

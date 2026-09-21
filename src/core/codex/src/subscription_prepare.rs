@@ -253,11 +253,17 @@ impl ContextStore {
                 }
             }
         }
-        let reserved = canonical(&Value::Array(evidence.input.clone()))
-            .len()
+        // Object order does not affect encoded length. Count borrowed values before admission
+        // without cloning/sorting full request bodies or allocating a serialization buffer.
+        let reserved = crate::json_size::encoded_len(&evidence.input)
+            .expect("JSON input encoding")
             .saturating_add(restored_bytes)
             .saturating_mul(8)
-            .saturating_add(canonical(&effective_settings).len().saturating_mul(6))
+            .saturating_add(
+                crate::json_size::encoded_len(&effective_settings)
+                    .expect("JSON settings encoding")
+                    .saturating_mul(6),
+            )
             .saturating_add(self.limits.output_items.saturating_mul(2304))
             .saturating_add(8192)
             .saturating_add(dependencies.cost());

@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"mini-sub2api/src/coordinator/internal/adapter"
@@ -38,6 +39,7 @@ type Handler struct {
 	logger       *log.Logger
 	websockets   *websocketManager
 	wsTimeouts   websocketTimeouts
+	httpTimeouts httpStreamTimeouts
 }
 
 func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
@@ -49,6 +51,7 @@ func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
 		requestLimit: int64(protocolv1.MustInferenceLimits().RequestBytes),
 		websockets:   newWebSocketManager(maxWebSocketsPerKey),
 		wsTimeouts:   defaultWebSocketTimeouts(),
+		httpTimeouts: defaultHTTPStreamTimeouts(),
 	}
 }
 
@@ -115,8 +118,10 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		writeOpenAIError(writer, status, code, message, requestID)
 		return
 	}
+	forwardContext, cancelForward := context.WithCancel(request.Context())
+	defer cancelForward()
 	response, err := h.core.Forward(
-		request.Context(), route.AccountRef, route.PseudonymScope, requestID,
+		forwardContext, route.AccountRef, route.PseudonymScope, requestID,
 		allowedRequestHeaders(request.Header), body,
 	)
 	body = nil
@@ -135,9 +140,35 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		writeOpenAIError(writer, status, code, "The upstream service is unavailable.", requestID)
 		return
 	}
-	defer response.Body.Close()
+	upstreamBody := response.Body
+	closeUpstream := sync.OnceFunc(func() {
+		cancelForward()
+		_ = upstreamBody.Close()
+	})
+	defer closeUpstream()
 	providerRequestID := providerRequestIDFromHeaders(response.Header)
-	if coreError, ok := detectCoreError(response, requestID); ok {
+	// Error-envelope inspection happens before streamBody and must also be bounded.
+	// It reads at most 64 KiB; even a trickling JSON error cannot hold it indefinitely.
+	var coreError protocolv1.CoreError
+	var isCoreError bool
+	var inspectionReason streamStopReason
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		inspection := newHTTPStreamGuard(request.Context(), h.httpTimeouts, closeUpstream)
+		coreError, isCoreError = detectCoreError(response, requestID)
+		inspectionReason = inspection.stop()
+	}
+	if inspectionReason != streamStopNone {
+		terminal := storage.RequestUpstreamErr
+		if inspectionReason == streamStopCanceled {
+			terminal = storage.RequestDisconnected
+		}
+		h.logger.Printf("request %s HTTP error inspection ended: %s", requestID, inspectionReason)
+		ttfb := copyResponseHeaders(writer.Header(), response.Header, requestID)
+		h.finish(requestID, started, terminal, http.StatusBadGateway, ttfb, nil, nil, providerRequestID)
+		writeOpenAIError(writer, http.StatusBadGateway, "upstream_unavailable", "The upstream service is unavailable.", requestID)
+		return
+	}
+	if isCoreError {
 		ttfb := copyResponseHeaders(writer.Header(), response.Header, requestID)
 		if coreError.Code == "credential_requires_login" {
 			_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
@@ -153,7 +184,9 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
 	declareFailureTrailers(writer.Header())
 	writer.WriteHeader(response.StatusCode)
-	usage, streamResult := streamBody(writer, response.Body, response.Header.Get("Content-Type"), request.Context())
+	usage, streamResult, stopReason := streamBody(
+		writer, response.Body, response.Header.Get("Content-Type"), request.Context(), h.httpTimeouts, closeUpstream,
+	)
 	if streamResult == streamComplete && responseTerminalFailed(response.Header) {
 		streamResult = streamResponseFailed
 	}
@@ -172,6 +205,13 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	}
 	if streamResult == streamClientDisconnected {
 		terminal = storage.RequestDisconnected
+	}
+	if stopReason != streamStopNone || streamResult != streamComplete {
+		reason := string(stopReason)
+		if reason == "" {
+			reason = string(terminal)
+		}
+		h.logger.Printf("request %s HTTP stream ended: %s", requestID, reason)
 	}
 	h.finish(requestID, started, terminal, response.StatusCode, ttfb, usage, nil, providerRequestID)
 }

@@ -1,0 +1,151 @@
+{
+  "commit": "2ed47f69454e67f518c4c800162bb155c7567b33",
+  "baseline": "7e8977b825fc2243893289dd2b559daecd28805a",
+  "production_trees_identical": {
+    "src/core": "9855d4462531d47e9dbb0ea824370e57688b97d1",
+    "src/protocol": "005ce5e659eeca377c8682ea80e89b781d6f3f64",
+    "src/coordinator/internal": "fb31c42bc7766ca88c15397bbb1fa9d24a59ed53",
+    "src/coordinator/cmd": "7fb7abcdc01c28086046fabc8b40762728e1c152"
+  },
+  "changed_files": [
+    {
+      "path": "README.md",
+      "sha256": "025a4cb5c015b3ee9f9cdd8e348670376518985fa06769c88d078689b1874075"
+    },
+    {
+      "path": "docs/BEHAVIOR.md",
+      "sha256": "e25d0e40f3fd9936dcb4b1288216d1b29cc97269caefa248dedbdd9afb6ad637"
+    },
+    {
+      "path": "docs/OPERATIONS.md",
+      "sha256": "028b9891ced58a42fda9d46c0519ce2b25a8d65cbaac693390d63105c227418c"
+    },
+    {
+      "path": "src/coordinator/integration/NATIVE_PARITY.md",
+      "sha256": "3d797c0c0be0b15d7bdc9d64777772a8f0184b3cfd7aadc6181438d87955dce9"
+    },
+    {
+      "path": "src/coordinator/integration/live_gateway_test.go",
+      "sha256": "3b611c20da3139d446716bad527c27d97dd48c5ed97eab1bca8e748b4e770f2f"
+    },
+    {
+      "path": "src/coordinator/integration/live_memory_scaffold_test.go",
+      "sha256": "98473fce9fa2a620b62f9912fd632a6ce194be4e65cdd3dd2f2bcd650a2082d5"
+    },
+    {
+      "path": "src/coordinator/integration/live_memory_test.go",
+      "sha256": "4a6605c506c7b9d032efa0d6b0a5d494d1ff19bc6844430d7da40001951593d3"
+    },
+    {
+      "path": "src/coordinator/integration/native_final_capture_examples_test.go",
+      "sha256": "6eadfb0813e9117ffe1027affe7f9ecb9ce88c1a28aa2a2c37ab7b31eb9b4f3b"
+    },
+    {
+      "path": "src/coordinator/integration/native_final_environment_test.go",
+      "sha256": "ad125b0a282b47405ddb2559555b16ad836bca658db889b67bbaa495a2ea74e8"
+    },
+    {
+      "path": "src/coordinator/integration/native_final_tool_modes_test.go",
+      "sha256": "f964ff738713606e3f9acc30e5f759b06a4a044f81ea6a7bc5c7add900006055"
+    },
+    {
+      "path": "src/coordinator/integration/native_gateway_test.go",
+      "sha256": "ea6428e66b89d940ad33eac7e568d12e63b2237d7014e784025982490d21a3a6"
+    },
+    {
+      "path": "src/coordinator/integration/native_ordinary_matrix_test.go",
+      "sha256": "1bcb9078bfb4be802063ee1d2dd61bd7f368e5fa0b995df75e9d7d20316319db"
+    },
+    {
+      "path": "src/coordinator/integration/native_scenario_ordinary_context_test.go",
+      "sha256": "798e8b1f0be5e980a2dec442e870e4946f4f752704b3b56119d6c28b1bb57f4c"
+    },
+    {
+      "path": "src/coordinator/integration/native_wire_capture_test.go",
+      "sha256": "b07321bb796bfd73bbf8221c72205a52bed9c4a72cbc20cc169ba48bebab68ca"
+    },
+    {
+      "path": "src/coordinator/integration/scaffold_parity_test.go",
+      "sha256": "0ce3785895b061009f37b1e04bc87d58e3d272e63fc4d7be27297c91e5201226"
+    },
+    {
+      "path": "src/coordinator/integration/scaffold_tool_test.go",
+      "sha256": "471e04d92137e8717654f696f5952e99a618a5aaf24fae06d78567519a5dc906"
+    },
+    {
+      "path": "USER_POLICIES.md",
+      "sha256": "fbe5b86b412b892876f054707e746ca4962b785875118ce6698a0e6786e9486f"
+    }
+  ],
+  "source_largest_lines": 315,
+  "verdicts": {
+    "standard": {
+      "exit_code": 0,
+      "elapsed_seconds": 139.661,
+      "test_summaries": [
+        "test result: ok. 333 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.52s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 332 filtered out; finished in 0.03s"
+      ]
+    },
+    "native-full": {
+      "exit_code": 0,
+      "elapsed_seconds": 464.041,
+      "leaf_count": 841,
+      "passed_leaves": 841,
+      "skipped_leaves": []
+    },
+    "scaffold-full": {
+      "exit_code": 0,
+      "elapsed_seconds": 39.369,
+      "leaf_count": 15,
+      "passed_leaves": 15,
+      "skipped_leaves": []
+    },
+    "live-memory-full": {
+      "exit_code": 0,
+      "elapsed_seconds": 342.708
+    },
+    "live-functional-final": {
+      "exit_code": 0,
+      "elapsed_seconds": 176.052,
+      "leaf_count": 18,
+      "passed_leaves": 18,
+      "skipped_leaves": []
+    },
+    "final-tool-oracle": {
+      "exit_code": 0,
+      "elapsed_seconds": 19.247,
+      "leaf_count": 31,
+      "passed_leaves": 31,
+      "skipped_leaves": []
+    },
+    "all-tag-vet-final": {
+      "exit_code": 0,
+      "elapsed_seconds": 0.287,
+      "test_summaries": []
+    },
+    "linux-go": {
+      "exit_code": 0,
+      "elapsed_seconds": 65.235,
+      "leaf_count": 177,
+      "passed_leaves": 177,
+      "skipped_leaves": []
+    },
+    "linux-rust": {
+      "exit_code": 0,
+      "elapsed_seconds": 26.858,
+      "test_summaries": [
+        "test result: ok. 333 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.15s",
+        "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+      ]
+    },
+    "darwin-build": {
+      "exit_code": 0,
+      "elapsed_seconds": 67.669,
+      "test_summaries": []
+    }
+  }
+}

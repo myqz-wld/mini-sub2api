@@ -2,6 +2,7 @@
 .agent-deck/
 .ref/
 AGENTS.md
+AGENTS.override.md
 CLAUDE.md
 UI_COPY_LANGUAGE.md
 USER_POLICIES.md

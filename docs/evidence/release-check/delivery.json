@@ -1,0 +1,17 @@
+{
+  "documentation_commit": "629a30710e658a49686240dcd673f9706229f311",
+  "implementation_commit": "9ff7843b6392ac85cd5addb5be6caa9ce6c4b723",
+  "origin_main": "9ff7843b6392ac85cd5addb5be6caa9ce6c4b723",
+  "local_distinct_pass": 1546,
+  "real_subscription_pass": 36,
+  "aws_real_cells_pass": 4,
+  "aws_real_turns_per_cell": 2,
+  "aws_deployed_commit": "9ff7843b6392ac85cd5addb5be6caa9ce6c4b723",
+  "backup_created": false,
+  "temporary_key_revoked": true,
+  "remote_stage_removed": true,
+  "local_build_resources_removed": true,
+  "agent_deck_processes_untouched": true,
+  "pinned_native_source_retained_clean": true,
+  "api_key_real_tested": false
+}

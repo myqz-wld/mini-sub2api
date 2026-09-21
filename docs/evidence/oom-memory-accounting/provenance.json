@@ -1,0 +1,10 @@
+{
+  "source_files": 417,
+  "source_archive_sha256": "9f206a3e90804eed4ff98b564ebea2cbbb46f5562c42b9433c74e017e681c33c",
+  "source_manifest_sha256": "7c3e7e506dab8d4ea6173feb21c77c169e88e8aa716f07323aeb74dd32617c45",
+  "registry_checksums_verified": 303,
+  "git_sources": 2,
+  "go_modules": 27,
+  "full_commit": "0aba391ce943c45714fc95e466302b7c3c55ee9b",
+  "dirty": true
+}
