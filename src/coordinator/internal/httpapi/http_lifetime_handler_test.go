@@ -22,6 +22,8 @@ func TestHTTPLifetimeFinalizesHistoryAndCancelsForwardContext(t *testing.T) {
 		status, reason                    string
 	}{
 		{"idle_sse", "text/event-stream", "", ": synthetic-private-body\n\n", 200, 200, storage.RequestUpstreamErr, "event_idle_timeout"},
+		{"first_output", "text/event-stream", "", "data: {\"type\":\"synthetic-private-body\",\"delta\":\"synthetic-private-body\"}\n\n", 200, 200, storage.RequestUpstreamErr, "first_output_timeout"},
+		{"output_idle", "text/event-stream", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"synthetic-private-body\"}\n\n", "data: {\"type\":\"response.in_progress\"}\n\n", 200, 200, storage.RequestUpstreamErr, "output_idle_timeout"},
 		{"terminal_open", "text/event-stream", "data: {\"type\":\"response.completed\"}\n\n", ": synthetic-private-body\n\n", 200, 200, storage.RequestCompleted, "terminal_tail_closed"},
 		{"error_sse", "text/event-stream", "", ": synthetic-private-body\n\n", 503, 503, storage.RequestUpstreamErr, "event_idle_timeout"},
 		{"error_json", "application/json", "{\"error\":\"synthetic-private-body\"", " ", 503, 502, storage.RequestUpstreamErr, "event_idle_timeout"},
@@ -59,8 +61,11 @@ func TestHTTPLifetimeFinalizesHistoryAndCancelsForwardContext(t *testing.T) {
 			if !strings.Contains(logs.String(), test.reason) || strings.Contains(logs.String(), "synthetic-private-body") || strings.Contains(logs.String(), key.Secret) {
 				t.Fatal("timeout diagnostics missing or contain private payloads")
 			}
-			if test.name == "idle_sse" && (response.Trailer.Get(protocolv1.FailurePhaseTrailer) != "upstream_stream" || response.Trailer.Get(protocolv1.RetryAdviceTrailer) != "never") {
+			if (test.name == "idle_sse" || test.name == "first_output" || test.name == "output_idle") && (response.Trailer.Get(protocolv1.FailurePhaseTrailer) != "upstream_stream" || response.Trailer.Get(protocolv1.RetryAdviceTrailer) != "never") {
 				t.Fatal("idle failure lost no-replay metadata")
+			}
+			if test.name != "error_json" && (!strings.Contains(logs.String(), "first_output_ms=") || !strings.Contains(logs.String(), "events=")) {
+				t.Fatal("stream timing/count summary missing")
 			}
 		})
 	}

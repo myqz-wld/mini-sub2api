@@ -52,6 +52,7 @@ fn reader(prefix: &'static str, closed: Arc<AtomicBool>) -> SseReader {
         4096,
         SseTimeouts {
             idle: Duration::from_millis(100),
+            output_idle: Duration::from_millis(100),
             terminal_tail: Duration::from_millis(50),
         },
     )
@@ -79,6 +80,55 @@ async fn idle_failure_releases_transport_and_operation_before_trailer_delivery_f
     );
     assert!(closed.load(Ordering::SeqCst));
     // Do not poll or drop the response stream yet: a slow downstream must not retain the lane.
+    let inner = store.contexts.inner.lock().unwrap();
+    assert!(inner.operations.is_empty());
+    assert!(inner.reservations.is_empty());
+    drop(inner);
+    drop(retained_context);
+}
+
+#[tokio::test(start_paused = true)]
+async fn status_only_timeout_releases_the_operation_before_failure_trailers_are_consumed() {
+    let (_temp, store) = store();
+    let context = context(&store, request(json!([input("start")]))).await;
+    let retained_context = context.clone();
+    let closed = Arc::new(AtomicBool::new(false));
+    let input = stream::unfold((), |_| async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        Some((
+            Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.metadata\"}\n\n",
+            )),
+            (),
+        ))
+    });
+    let reader = SseReader::with_timeouts(
+        Box::pin(WatchedUpstream {
+            inner: Box::pin(input),
+            closed: closed.clone(),
+        }),
+        4096,
+        SseTimeouts {
+            idle: Duration::from_millis(100),
+            output_idle: Duration::from_millis(100),
+            terminal_tail: Duration::from_millis(50),
+        },
+    );
+    let mut frames = Box::pin(translate_reader(reader, context, 4096));
+    let started = tokio::time::Instant::now();
+    let failure = loop {
+        let frame = frames.next().await.unwrap().unwrap();
+        if frame.is_trailers() {
+            break frame;
+        }
+        assert_eq!(store.contexts.inner.lock().unwrap().operations.len(), 1);
+    };
+    assert_eq!(started.elapsed(), Duration::from_millis(100));
+    assert_eq!(
+        failure.trailers_ref().unwrap()[mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER],
+        "never"
+    );
+    assert!(closed.load(Ordering::SeqCst));
     let inner = store.contexts.inner.lock().unwrap();
     assert!(inner.operations.is_empty());
     assert!(inner.reservations.is_empty());

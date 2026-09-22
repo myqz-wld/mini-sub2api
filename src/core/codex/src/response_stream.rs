@@ -2,8 +2,9 @@ use crate::error::CoreFailure;
 use crate::error::failure;
 use crate::request_profile::UpstreamProfile;
 use crate::response_headers::filtered_provider_headers;
+use crate::response_sse_reader::SseReader;
 use crate::response_sse_translation::UpstreamByteStream;
-use crate::response_sse_translation::translated_sse_frames;
+use crate::response_sse_translation::translate_reader;
 use crate::response_translation::ResponseStateContext;
 use axum::body::Body;
 use axum::http::HeaderMap;
@@ -59,6 +60,7 @@ pub(crate) async fn build_http_response(
             ttfb_ms,
             response_state.as_ref(),
             filtered_headers,
+            gateway_request_id,
         )
         .await
         {
@@ -79,6 +81,7 @@ pub(crate) async fn build_http_response(
         downstream_expects_sse,
         response_state,
         filtered_headers,
+        gateway_request_id,
     ) {
         Ok(response) => Ok(response),
         Err(error) => normalized_upstream_failure(
@@ -114,6 +117,7 @@ fn build_streaming_response(
     expects_sse: bool,
     response_state: Option<ResponseStateContext>,
     filtered_headers: HeaderMap,
+    gateway_request_id: &str,
 ) -> Result<Response<Body>, CoreFailure> {
     let status = upstream.status();
     let mut builder = Response::builder().status(status);
@@ -134,8 +138,9 @@ fn build_streaming_response(
     let translate_sse = response_state.is_some() && expects_sse && status.is_success();
     let upstream_stream: UpstreamByteStream = Box::pin(upstream.bytes_stream());
     if translate_sse {
-        let stream = translated_sse_frames(
-            upstream_stream,
+        let stream = translate_reader(
+            SseReader::new(upstream_stream, crate::inference_limits::get().output_bytes)
+                .with_request_id(gateway_request_id),
             response_state.expect("translation context"),
             crate::inference_limits::get().output_bytes,
         );
@@ -179,6 +184,7 @@ async fn build_non_streaming_response(
     ttfb_ms: u128,
     response_state: Option<&ResponseStateContext>,
     mut filtered_headers: HeaderMap,
+    gateway_request_id: &str,
 ) -> Result<Response<Body>, CoreFailure> {
     let mut builder = Response::builder().status(upstream.status());
     filtered_headers.remove(http::header::CONTENT_TYPE);
@@ -190,7 +196,8 @@ async fn build_non_streaming_response(
     let mut stream = crate::response_sse_reader::SseReader::new(
         Box::pin(upstream.bytes_stream()),
         crate::inference_limits::get().output_bytes,
-    );
+    )
+    .with_request_id(gateway_request_id);
     while let Some(event) = stream
         .next_event()
         .await

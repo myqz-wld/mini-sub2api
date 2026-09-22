@@ -184,7 +184,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
 	declareFailureTrailers(writer.Header())
 	writer.WriteHeader(response.StatusCode)
-	usage, streamResult, stopReason := streamBody(
+	usage, streamResult, stopReason, diagnostics := streamBody(
 		writer, response.Body, response.Header.Get("Content-Type"), request.Context(), h.httpTimeouts, closeUpstream,
 	)
 	if streamResult == streamComplete && responseTerminalFailed(response.Header) {
@@ -206,13 +206,11 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	if streamResult == streamClientDisconnected {
 		terminal = storage.RequestDisconnected
 	}
-	if stopReason != streamStopNone || streamResult != streamComplete {
-		reason := string(stopReason)
-		if reason == "" {
-			reason = string(terminal)
-		}
-		h.logger.Printf("request %s HTTP stream ended: %s", requestID, reason)
+	reason := string(stopReason)
+	if reason == "" {
+		reason = string(terminal)
 	}
+	h.logger.Printf("request %s HTTP stream ended: %s outcome=%s %s", requestID, reason, terminal, diagnostics)
 	h.finish(requestID, started, terminal, response.StatusCode, ttfb, usage, nil, providerRequestID)
 }
 

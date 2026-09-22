@@ -4,6 +4,7 @@ use futures_util::stream;
 fn short_timeouts() -> SseTimeouts {
     SseTimeouts {
         idle: Duration::from_millis(100),
+        output_idle: Duration::from_millis(100),
         terminal_tail: Duration::from_millis(50),
     }
 }
@@ -46,7 +47,7 @@ async fn comments_empty_data_done_and_partial_events_cannot_extend_idle() {
 async fn framed_data_events_refresh_idle_without_a_total_duration_cap() {
     let mut reader = SseReader::with_timeouts(
         delayed_repeat(
-            "data: {\"type\":\"response.metadata\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
             Duration::from_millis(60),
         ),
         1024,
@@ -57,6 +58,75 @@ async fn framed_data_events_refresh_idle_without_a_total_duration_cap() {
         assert!(reader.next_event().await.unwrap().is_some());
     }
     assert_eq!(started.elapsed(), Duration::from_millis(300));
+}
+
+#[tokio::test(start_paused = true)]
+async fn status_unknown_and_empty_deltas_cannot_extend_first_output_or_output_idle() {
+    for value in [
+        "data: {\"type\":\"response.metadata\"}\n\n",
+        "data: {\"type\":\"response.in_progress\"}\n\n",
+        "data: {\"type\":\"synthetic.unknown\",\"delta\":\"x\"}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"\"}\n\n",
+    ] {
+        for initial_output in [false, true] {
+            let mut reader = SseReader::with_timeouts(
+                delayed_repeat(value, Duration::from_millis(20)),
+                1024,
+                short_timeouts(),
+            );
+            let started = Instant::now();
+            if initial_output {
+                tokio::time::advance(Duration::from_millis(30)).await;
+                reader.buffer =
+                    b"data: {\"type\":\"response.reasoning_text.delta\",\"delta\":\"x\"}\n\n"
+                        .to_vec();
+                reader.take_event();
+            }
+            loop {
+                match reader.next_event().await {
+                    Ok(Some(_)) => {}
+                    Err(error) => {
+                        assert_eq!(
+                            error,
+                            if initial_output {
+                                SseReadError::OutputIdleTimeout
+                            } else {
+                                SseReadError::FirstOutputTimeout
+                            }
+                        );
+                        break;
+                    }
+                    result => panic!("unexpected read: {result:?}"),
+                }
+            }
+            assert_eq!(
+                started.elapsed(),
+                Duration::from_millis(if initial_output { 130 } else { 100 })
+            );
+            assert!(reader.upstream.is_none());
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn each_output_class_extends_the_output_deadline() {
+    for value in [
+        "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"x\"}\n\n",
+        "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\"}\n\n",
+        "data: {\"type\":\"response.output_audio.delta\",\"delta\":\"x\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\"}}\n\n",
+    ] {
+        let mut reader = SseReader::with_timeouts(
+            delayed_repeat(value, Duration::from_millis(60)),
+            1024,
+            short_timeouts(),
+        );
+        let started = Instant::now();
+        for _ in 0..5 {
+            assert!(reader.next_event().await.unwrap().is_some());
+        }
+        assert_eq!(started.elapsed(), Duration::from_millis(300));
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -155,6 +225,9 @@ fn terminal_detection_matches_json_consumers_without_inspecting_nested_types() {
         (r#"{"type":"response.completed","type":null}"#, false),
         (r#"{"response":{"type":"response.completed"}}"#, false),
     ] {
-        assert_eq!(serde_json::from_str::<EventType>(data).unwrap().0, expected);
+        assert_eq!(
+            sse_progress::classify(data.as_bytes()) == Class::Terminal,
+            expected
+        );
     }
 }

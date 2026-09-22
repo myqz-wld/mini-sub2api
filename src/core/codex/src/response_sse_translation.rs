@@ -39,6 +39,7 @@ impl Drop for TranslationState {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn translated_sse_frames(
     upstream: UpstreamByteStream,
     context: ResponseStateContext,

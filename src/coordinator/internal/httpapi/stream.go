@@ -10,6 +10,7 @@ import (
 
 	"mini-sub2api/src/coordinator/internal/storage"
 	"mini-sub2api/src/coordinator/internal/usage"
+	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
 type streamOutcome int
@@ -28,27 +29,36 @@ func streamBody(
 	ctx context.Context,
 	timeouts httpStreamTimeouts,
 	abort func(),
-) (*storage.TokenUsage, streamOutcome, streamStopReason) {
+) (tokens *storage.TokenUsage, outcome streamOutcome, reason streamStopReason, diagnostics httpStreamDiagnostics) {
 	observer := usage.NewObserver(contentType)
+	diagnostics = newHTTPStreamDiagnostics()
 	guard := newHTTPStreamGuard(ctx, timeouts, abort)
 	defer guard.stop()
+	watchOutput := observer.IsStreaming()
+	if watchOutput {
+		guard.enableOutputDeadline()
+	}
 	controller := http.NewResponseController(writer)
 	buffer := make([]byte, 32*1024)
-	var events uint64
 	for {
 		count, readErr := body.Read(buffer)
 		if count > 0 {
 			chunk := buffer[:count]
 			observer.Observe(chunk)
-			observed, terminal := observer.StreamProgress()
-			guard.observe(!observer.IsStreaming() || observed != events, terminal != usage.TerminalUnknown)
-			events = observed
+			if observer.IsStreaming() && !watchOutput {
+				watchOutput = true
+				guard.enableOutputDeadline()
+			}
+			progress := observer.Progress()
+			guard.observe(!observer.IsStreaming() || progress.Events != diagnostics.progress.Events,
+				progress.Outputs != diagnostics.progress.Outputs, progress.Classes[protocolv1.SSETerminal] > 0)
+			diagnostics.observe(count, progress)
 			// net/http clears the deadline after finishing the response. Leave it in force
 			// through final trailer/connection flushing, including after a write timeout.
 			if err := controller.SetWriteDeadline(time.Now().Add(timeouts.write)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 				guard.stop()
 				abort()
-				return observer.Usage(), streamClientDisconnected, writeStopReason(err)
+				return observer.Usage(), streamClientDisconnected, writeStopReason(err), diagnostics
 			}
 			written, writeErr := writer.Write(chunk)
 			if writeErr == nil && written != len(chunk) {
@@ -62,7 +72,7 @@ func streamBody(
 			if writeErr != nil {
 				guard.stop()
 				abort()
-				return observer.Usage(), streamClientDisconnected, writeStopReason(writeErr)
+				return observer.Usage(), streamClientDisconnected, writeStopReason(writeErr), diagnostics
 			}
 		}
 		if readErr == nil {
@@ -71,22 +81,27 @@ func streamBody(
 		reason := guard.stop()
 		partialTail := observer.HasPendingSSEData()
 		observedUsage := observer.Usage()
-		if reason == streamStopIdle {
-			return observedUsage, streamUpstreamError, reason
+		// Natural EOF may finish the final event. Forced closure must not report an
+		// unfinished fragment as output that arrived before the timeout/cancellation.
+		if reason == streamStopNone && readErr == io.EOF {
+			diagnostics.observe(0, observer.Progress())
+		}
+		if reason == streamStopIdle || reason == streamStopFirstOutput || reason == streamStopOutputIdle {
+			return observedUsage, streamUpstreamError, reason, diagnostics
 		}
 		if reason == streamStopCanceled || (ctx.Err() != nil && reason == streamStopNone) {
-			return observedUsage, streamClientDisconnected, streamStopCanceled
+			return observedUsage, streamClientDisconnected, streamStopCanceled, diagnostics
 		}
 		if reason == streamStopTail {
 			if partialTail {
-				return observedUsage, streamUpstreamError, streamStopPartialTail
+				return observedUsage, streamUpstreamError, streamStopPartialTail, diagnostics
 			}
-			return observedUsage, observedStreamOutcome(observer), reason
+			return observedUsage, observedStreamOutcome(observer), reason, diagnostics
 		}
 		if readErr != io.EOF {
-			return observedUsage, streamUpstreamError, reason
+			return observedUsage, streamUpstreamError, reason, diagnostics
 		}
-		return observedUsage, observedStreamOutcome(observer), reason
+		return observedUsage, observedStreamOutcome(observer), reason, diagnostics
 	}
 }
 

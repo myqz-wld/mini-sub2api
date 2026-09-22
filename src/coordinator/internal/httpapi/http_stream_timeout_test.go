@@ -14,7 +14,7 @@ import (
 )
 
 func shortHTTPTimeouts() httpStreamTimeouts {
-	return httpStreamTimeouts{idle: 100 * time.Millisecond, terminalTail: 70 * time.Millisecond, write: 100 * time.Millisecond}
+	return httpStreamTimeouts{idle: 100 * time.Millisecond, outputIdle: 100 * time.Millisecond, terminalTail: 70 * time.Millisecond, write: 100 * time.Millisecond}
 }
 
 // Closing either end wakes the other; every test joins its producer.
@@ -64,7 +64,7 @@ func TestHTTPStreamTimeoutsDoNotDependOnUpstreamEOF(t *testing.T) {
 			defer cancel()
 			writer := httptest.NewRecorder()
 			started := time.Now()
-			_, outcome, reason := streamBody(writer, body, "text/event-stream", ctx, shortHTTPTimeouts(), abort)
+			_, outcome, reason, _ := streamBody(writer, body, "text/event-stream", ctx, shortHTTPTimeouts(), abort)
 			if outcome != test.outcome || reason != test.reason {
 				t.Fatalf("stream outcome/reason = %v/%q, want %v/%q", outcome, reason, test.outcome, test.reason)
 			}
@@ -83,7 +83,7 @@ func TestHTTPStreamProgressAndNaturalEOF(t *testing.T) {
 	reader, writer := io.Pipe()
 	done := make(chan struct{})
 	defer reader.Close()
-	const event = "data: {\"type\":\"response.metadata\"}\n\n"
+	const event = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n"
 	const terminal = "data: {\"type\":\"response.completed\"}\n\n"
 	go func() {
 		defer close(done)
@@ -101,7 +101,7 @@ func TestHTTPStreamProgressAndNaturalEOF(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	recorder := httptest.NewRecorder()
-	_, outcome, reason := streamBody(recorder, reader, "text/event-stream", ctx, shortHTTPTimeouts(), abort)
+	_, outcome, reason, _ := streamBody(recorder, reader, "text/event-stream", ctx, shortHTTPTimeouts(), abort)
 	<-done
 	if outcome != streamComplete || reason != streamStopNone || aborted.Load() {
 		t.Fatalf("valid progressing stream aborted: %v/%q", outcome, reason)
@@ -117,7 +117,7 @@ func TestHTTPStreamClientCancellationClosesUpstream(t *testing.T) {
 	timer := time.AfterFunc(20*time.Millisecond, cancel)
 	defer timer.Stop()
 	defer cancel()
-	_, outcome, reason := streamBody(httptest.NewRecorder(), body, "text/event-stream", ctx, shortHTTPTimeouts(), abort)
+	_, outcome, reason, _ := streamBody(httptest.NewRecorder(), body, "text/event-stream", ctx, shortHTTPTimeouts(), abort)
 	if outcome != streamClientDisconnected || reason != streamStopCanceled {
 		t.Fatalf("cancellation outcome = %v/%q", outcome, reason)
 	}
@@ -144,8 +144,9 @@ func TestHTTPStreamWriteDeadlineReleasesUpstream(t *testing.T) {
 	var aborted atomic.Bool
 	timeouts := shortHTTPTimeouts()
 	timeouts.idle = time.Second
+	timeouts.outputIdle = time.Second
 	started := time.Now()
-	_, outcome, reason := streamBody(writer, strings.NewReader("data: {}\n\n"), "text/event-stream", context.Background(), timeouts, func() { aborted.Store(true) })
+	_, outcome, reason, _ := streamBody(writer, strings.NewReader("data: {}\n\n"), "text/event-stream", context.Background(), timeouts, func() { aborted.Store(true) })
 	if outcome != streamClientDisconnected || reason != streamStopWriteTimeout || !aborted.Load() {
 		t.Fatalf("blocked write outcome = %v/%q, closed = %t", outcome, reason, aborted.Load())
 	}

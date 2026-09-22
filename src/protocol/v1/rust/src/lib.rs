@@ -1,4 +1,5 @@
 pub mod limits;
+pub mod sse_progress;
 use serde::Deserialize;
 use serde::Serialize;
 

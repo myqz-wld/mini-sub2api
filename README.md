@@ -75,8 +75,9 @@ OpenCode custom providers and bare clients can associate full histories without 
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
 - Success requires consistent terminal/output evidence. Failed or partial output cannot become
   reusable history; uncertain sends are not automatically replayed.
-- HTTP SSE allows 300 seconds between data events; heartbeats cannot extend it. Completed streams
-  close after a bounded tail, and stalled client writes time out after 120 seconds.
+- HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
+  and heartbeats cannot extend it. Completed streams close after a bounded tail; stalled client
+  writes time out after 120 seconds. Logs retain event counts/timings, never payloads.
 
 Plain HTTP binds only loopback; other listeners need TLS. Run one service per state directory.
 Vault/identity files are private but unencrypted; request/response bodies are not persisted.

@@ -126,6 +126,7 @@ Compaction/injection may require a client replacement before full reconstruction
 | Records/session; output items/response | 8,192 each |
 | WS/Key; first-frame / idle / write timeout | 8; 30 s / 5 min / 120 s |
 | HTTP event idle / per-write timeout | 300 s / 120 s |
+| HTTP SSE first output / subsequent output idle | 300 s / 300 s |
 | HTTP terminal tail: Core / coordinator fallback | 1 s / 2 s |
 
 These are accounting budgets, not RSS limits. Reserve essential state before inference and measure
@@ -153,10 +154,14 @@ prove success. Premature EOF preserves delivered bytes and reports `upstream_str
 through failure trailers. Observation follows `outputBytes`, resumes after oversized events, and
 never lets later success overwrite failure. API-key payload bytes remain unchanged.
 
-HTTP SSE idle time resets only on complete, nonempty data events; comments, partial frames and
-`[DONE]` do not reset it. Subscription streaming and JSON aggregation share this guard. From the
-first terminal, Core receives at most one second of additional tail data and validates buffered
-fragments; Go enforces a two-second fallback, including API-key streams. EOF ends earlier. Later
+HTTP SSE has separate event and output timers, starting when response-body observation begins.
+Only complete, nonempty data events reset event idle. The first output must arrive within 300 seconds;
+later output gaps have the same bound. Nonempty text/refusal, reasoning, tool arguments/input/code,
+media payloads and completed output items renew output idle. Status/metadata, unknown events, empty
+payloads, comments, partial frames and `[DONE]` do not. Go and Rust use the same classification fixtures;
+classification is an observation, not completion proof. Subscription SSE/JSON share the Core guard;
+Go also guards API-key SSE. From the first terminal, Core receives at most one second of tail data
+and validates buffered fragments; Go enforces a two-second fallback. EOF ends earlier. Later
 events cannot extend the tail or alter an already closed response. Non-SSE passthrough uses byte
 progress; error-envelope inspection is bounded to 300 seconds. Each downstream write/flush has a
 120-second deadline. Timeouts/cancellation release request-owned resources; progressing streams

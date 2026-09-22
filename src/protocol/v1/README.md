@@ -233,6 +233,11 @@ connection. Pinned tungstenite forks and compression match v0.153.4; Go need not
   event fields are retained. `ApiKeyPassthrough` SSE remains byte-transparent.
 - Client cancellation cancels the internal request and upstream response body.
 
+`fixtures/sse_progress.json` defines matching Go/Rust observations for HTTP output deadlines and
+fixed diagnostic categories. Nonempty text/reasoning/tool/media fields and completed items count as
+output; status, unknown and empty events do not. Classification never proves valid completion or
+changes API-key bytes. [HTTP limits](../../../docs/BEHAVIOR.md#completion-and-recovery) define timing.
+
 ## Responses WebSocket
 
 The readiness capability `capabilities.responsesWebSocket=true` enables:

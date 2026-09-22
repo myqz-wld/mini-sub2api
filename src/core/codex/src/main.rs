@@ -36,6 +36,7 @@ mod request_wire_ids;
 mod response_headers;
 mod response_item_metadata;
 mod response_output;
+mod response_sse_diagnostics;
 mod response_sse_reader;
 mod response_sse_translation;
 mod response_stream;

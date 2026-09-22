@@ -41,8 +41,13 @@ retained in private diagnostics, never exposed publicly.
 ## Diagnosing long requests
 
 HTTP duration covers the request lifecycle, not model computation alone; TTFB measures headers.
-Stream logs pair the gateway request ID with fixed reasons such as `event_idle_timeout`,
-`terminal_tail_closed`, `incomplete_terminal_tail` or `downstream_write_timeout`, without payloads.
+Stream logs pair the gateway request ID with fixed reasons: `event_idle_timeout`, `first_output_timeout`,
+`output_idle_timeout`, `terminal_tail_closed`, `incomplete_terminal_tail` or `downstream_write_timeout`.
+Go logs the final outcome plus bytes, event-category counts and first/last byte/event/output times.
+Core emits `http_sse_observation` for Subscription SSE and JSON aggregation; its `read_end` describes
+the reader, not the validated request outcome. Timings are milliseconds from body observation;
+`-1` means not observed. Status/empty/other events without output explain why a live connection can
+still stall. Logs contain fixed categories, never raw event names, payloads or provider identifiers.
 An idle/truncated upstream is an error; a validated terminal tail can complete normally; client
 cancellation or stalled writes record disconnection. See [timeout limits](BEHAVIOR.md#completion-and-recovery).
 
