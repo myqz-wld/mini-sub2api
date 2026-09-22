@@ -6,8 +6,13 @@ use std::sync::Mutex;
 use crate::request_compaction::PendingCompaction;
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_state_store::RequestStateStore;
+use crate::request_state_store::ResponseEdit;
 use crate::request_state_types::WireIdOwner;
-use crate::response_wire_ids::translate_response_ids;
+use crate::response_id_cache::ResponseCacheSlot;
+
+#[cfg(test)]
+#[path = "response_state_performance_tests.rs"]
+mod performance_tests;
 
 #[path = "response_failure_tail.rs"]
 mod failure_tail;
@@ -22,6 +27,7 @@ pub(crate) struct ResponseStateContext {
     owner: Arc<Mutex<Option<WireIdOwner>>>,
     default_compaction: Option<PendingCompaction>,
     operation: Arc<Mutex<Option<crate::subscription_context::Operation>>>,
+    identity_cache: Arc<Mutex<ResponseCacheSlot>>,
 }
 
 impl ResponseStateContext {
@@ -41,6 +47,7 @@ impl ResponseStateContext {
             owner: Arc::new(Mutex::new(identity.map(owner_from_identity))),
             default_compaction: pending_compaction.cloned(),
             operation: Arc::new(Mutex::new(None)),
+            identity_cache: Arc::new(Mutex::new(ResponseCacheSlot::default())),
         }
     }
 
@@ -48,6 +55,11 @@ impl ResponseStateContext {
         self,
         operation: Option<crate::subscription_context::Operation>,
     ) -> Self {
+        {
+            let mut slot = self.identity_cache.lock().expect("new cache lock");
+            slot.cache = None;
+            slot.enabled = operation.is_some();
+        }
         *self.operation.lock().expect("new operation lock") = operation;
         self
     }
@@ -56,10 +68,17 @@ impl ResponseStateContext {
         &self,
         operation: Option<crate::subscription_context::Operation>,
     ) -> Result<()> {
+        let enabled = operation.is_some();
         *self
             .operation
             .lock()
             .map_err(|_| anyhow::anyhow!("operation state unavailable"))? = operation;
+        let mut slot = self
+            .identity_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("response identity cache unavailable"))?;
+        slot.cache = None;
+        slot.enabled = enabled;
         Ok(())
     }
 
@@ -69,6 +88,10 @@ impl ResponseStateContext {
             .lock()
             .map_err(|_| anyhow::anyhow!("response identity owner lock poisoned"))? =
             identity.map(owner_from_identity);
+        self.identity_cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("response identity cache unavailable"))?
+            .cache = None;
         Ok(())
     }
 
@@ -105,7 +128,7 @@ impl ResponseStateContext {
 
     async fn translate_value_with_compaction(
         &self,
-        mut value: Value,
+        value: Value,
         pending_compaction: Option<&PendingCompaction>,
         terminal: Option<bool>,
         failure_tail: Option<SseFailureTail>,
@@ -145,31 +168,44 @@ impl ResponseStateContext {
         let validation_store = self.store.contexts.clone();
         let validation_operation = operation.clone();
         let failed_tail = failure_tail.is_some();
+        let cache = if failed_tail
+            || terminal.is_some()
+            || !crate::response_delta_ids::DeltaIds::eligible(&value)
+        {
+            None
+        } else {
+            let mut cache = self
+                .identity_cache
+                .lock()
+                .map_err(|_| anyhow::anyhow!("response identity cache unavailable"))?;
+            if cache.enabled && cache.cache.is_none() {
+                cache.cache = self.store.response_cache();
+            }
+            cache.cache.clone()
+        };
         let mut translated = self
             .store
-            .edit(
+            .translate_response(
                 &self.state_namespace,
                 &self.account_ref,
                 &self.downstream_scope,
-                move |editor| {
-                    translate_response_ids(editor, &mut value, owner.as_ref())?;
+                ResponseEdit {
+                    value,
+                    owner,
+                    compaction: pending_compaction,
+                    cache,
+                },
+                move |value| {
                     if let Some(tail) = failure_tail {
-                        tail.validate(&value)?;
+                        tail.validate(value)?;
                     } else {
                         validation_store.validate_event(
                             validation_operation.as_ref(),
-                            &value,
+                            value,
                             terminal,
                         )?;
                     }
-                    if let Some(pending) = pending_compaction {
-                        editor.commit_compaction(
-                            &pending.marker_key,
-                            &pending.thread_id,
-                            pending.target_window,
-                        )?;
-                    }
-                    Ok(value)
+                    Ok(())
                 },
             )
             .await?;

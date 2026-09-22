@@ -75,6 +75,8 @@ OpenCode custom providers and bare clients can associate full histories without 
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
 - Success requires consistent terminal/output evidence. Failed or partial output cannot become
   reusable history; uncertain sends are not automatically replayed.
+- Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state
+  still uses the persistent transaction. See [cache bounds](docs/MEMORY.md#response-identity-work).
 - HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
   and heartbeats cannot extend it. Completed streams close after a bounded tail; stalled client
   writes time out after 120 seconds. [Diagnostic logs](docs/OPERATIONS.md#diagnosing-long-requests)

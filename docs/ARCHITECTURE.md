@@ -40,6 +40,7 @@ Only proven-unsent inference permits bounded recovery; uncertain sends are not s
 | Identity graph | Rust account namespace with isolated Key scopes; typed reversible aliases and lineage | Persistent, bounded; inactive details become pruning-eligible after 30 days |
 | Full context and comparison data | Rust memory; exact HTTP reconstruction and prefix association | Three business-idle hours, earlier capacity eviction; active operations protected |
 | Live WS facts | Socket/session ownership, required mappings, turn token and delivery state | Independent bounded lifetime while the connection/context remains usable |
+| Response ID cache | Bounded pairs for allowlisted flat text/reasoning deltas | Lazy operation-owned memory; cleared on identity/operation changes |
 
 Bulk-history expiry does not prove upstream WS state is gone. Three capabilities stay distinct:
 
@@ -67,6 +68,15 @@ Persist typed aliases before exposing newly projected IDs. Publish complete cont
 public completion; reconcile item events and the final footer once. Unfinished/conflicting output cannot
 form a success baseline. Compaction commits only after matching terminal and required item proof.
 The [behavior guide](BEHAVIOR.md#completion-and-recovery) defines exact failure-tail and replacement rules.
+
+Ordinary flat deltas can resolve every typed ID carrier from a bounded cache under the existing
+account file lock. Cache identity includes namespace, credential owner, Key scope and response owner;
+file device/inode, length, nanosecond modification/change times and day must also match. Hits retain
+per-event lifecycle validation and context observation. Unknown/nested carriers, misses, file/day
+changes and terminal/compaction events use the full transaction. Seed only after a successful stable
+read; writes must be re-read before reuse. No full ledger or event body is cached. Unchanged private
+reads preserve file timestamps, and unchanged full transactions skip serialization. Non-Unix targets
+fall back to full transactions. [Memory guidance](MEMORY.md#response-identity-work) gives bounds/tests.
 
 Network reads, semantic progress and total request time are different boundaries. The provider HTTP
 client has a 15-second connect timeout and a 300-second read timeout; neither establishes a total

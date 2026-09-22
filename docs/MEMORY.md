@@ -69,6 +69,23 @@ copies just to measure size. [Tests](../src/core/codex/src/json_size.rs) cover w
 escapes, large strings and error propagation. Retained history and other request copies still cost RAM;
 passing allocation/accounting tests does not establish that every workload fits a small host.
 
+## Response identity work
+
+Each response cache has 64 fixed ID-pair slots and a 16 KiB dynamic allocation budget, including
+conservative string-allocation overhead. A shared 2 MiB store budget includes fixed cache structures;
+exhaustion or eviction falls back to the complete transaction. These limits do not cap total RSS.
+Caches are allocated only for eligible deltas, retain no bodies/full ledgers, and are released on
+operation teardown; an already running blocking transaction keeps ownership only until it finishes.
+File changes, deletion, permission changes, day rollover and identity changes prevent stale reuse.
+
+Run the synthetic 13 MiB identity-ledger benchmark locally; it exercises one/two concurrent streams
+without provider calls and verifies cache budget release. Linux also checks process read counters to
+detect repeated full-ledger reads. Results measure local ID translation, not upstream generation:
+
+```bash
+mise exec -- cargo test --release -p mini-sub2api-core-codex benchmark_large_identity_state_deltas -- --ignored --nocapture --test-threads=1
+```
+
 ## Separate boot failures
 
 - Xray: inspect `systemctl status xray.service --no-pager -l` and

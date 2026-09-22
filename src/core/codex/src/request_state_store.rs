@@ -13,6 +13,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::request_state_editor::RequestStateEditor;
@@ -30,9 +31,17 @@ const RECORD_MAXIMUM_BYTES: u64 = 1024 * 1024;
 const STATE_SUFFIX: &str = ".request-state.json";
 const LOCK_SUFFIX: &str = ".request-state.lock";
 
+#[path = "request_state_response.rs"]
+mod response;
+pub(crate) use response::ResponseEdit;
+#[path = "request_state_transaction.rs"]
+mod transaction;
+use transaction::{edit_locked, edit_under_lock};
+
 #[derive(Clone)]
 pub(crate) struct RequestStateStore {
     accounts_dir: PathBuf,
+    response_cache_budget: Arc<crate::response_id_cache::CacheBudget>,
     pub(crate) contexts: crate::subscription_context::ContextStore,
 }
 
@@ -40,6 +49,7 @@ impl RequestStateStore {
     pub(crate) fn new(accounts_dir: PathBuf) -> Self {
         Self {
             accounts_dir,
+            response_cache_budget: Arc::new(Default::default()),
             contexts: crate::subscription_context::ContextStore::new(
                 mini_sub2api_protocol_v1::limits::InferenceLimits::load()
                     .expect("valid operator inference limits"),
@@ -215,67 +225,6 @@ fn cleanup_unowned_request_states(accounts_dir: &Path, active: &BTreeSet<String>
     Ok(())
 }
 
-fn edit_locked<R, F>(
-    accounts_dir: &Path,
-    account_namespace: &str,
-    owner_account_ref: &str,
-    downstream_scope: &str,
-    now_unix_ms: i64,
-    contexts: &crate::subscription_context::ContextStore,
-    operation: F,
-) -> Result<R>
-where
-    F: FnOnce(&mut RequestStateEditor<'_>) -> Result<R>,
-{
-    let state_ref = LookupKeyFactory::account_state_ref(account_namespace);
-    let _lock = lock_state(accounts_dir, &state_ref)?;
-    let path = state_path(accounts_dir, &state_ref);
-    let existing = read_optional_state(&path)?;
-    let created = existing.is_none();
-    let mut state = match existing {
-        Some(state) => state,
-        None => {
-            let mut owners = owners_for_state_ref(
-                accounts_dir,
-                &LookupKeyFactory::account_state_ref(account_namespace),
-            )?;
-            owners.insert(owner_account_ref.to_string());
-            PersistedRequestState::new(owners)
-        }
-    };
-    state.validate()?;
-    let keys = LookupKeyFactory::new(account_namespace, downstream_scope);
-    let day = now_unix_ms / 86_400_000;
-    let mut editor =
-        RequestStateEditor::new(&mut state, keys, owner_account_ref, day, now_unix_ms)?;
-    let output = operation(&mut editor)?;
-    let mut summary = editor.finish();
-    contexts.protect_aliases(&state, &mut summary.protected)?;
-    let mut changed = summary.changed | state.prune(day, &summary.protected)?;
-    let mut bytes = serde_json::to_vec(&state).context("encoding request state")?;
-    while bytes.len() as u64 > MAX_REQUEST_STATE_BYTES {
-        anyhow::ensure!(
-            state.evict_one(&summary.protected),
-            "request state cannot fit within the size limit"
-        );
-        changed = true;
-        bytes = serde_json::to_vec(&state).context("encoding pruned request state")?;
-    }
-    if created || changed {
-        if !created {
-            state.revision = next_revision(state.revision)?;
-            bytes = serde_json::to_vec(&state).context("encoding revised request state")?;
-        }
-        state.validate()?;
-        anyhow::ensure!(
-            bytes.len() as u64 <= MAX_REQUEST_STATE_BYTES,
-            "request state is too large"
-        );
-        write_bytes_atomically(accounts_dir, &path, &bytes)?;
-    }
-    Ok(output)
-}
-
 fn read_optional_state(path: &Path) -> Result<Option<PersistedRequestState>> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -291,8 +240,10 @@ fn read_optional_state(path: &Path) -> Result<Option<PersistedRequestState>> {
         "request state is too large"
     );
     #[cfg(unix)]
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .context("setting request state permissions")?;
+    if metadata.permissions().mode() & 0o7777 != 0o600 {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .context("setting request state permissions")?;
+    }
     let file = File::open(path).context("opening request state")?;
     let mut bytes = Vec::new();
     file.take(MAX_REQUEST_STATE_BYTES + 1)
