@@ -6,6 +6,7 @@ mod codex_auth_import;
 mod codex_instructions;
 mod codex_user_agent;
 mod error;
+mod error_diagnostics;
 mod fingerprint;
 mod fingerprint_projection;
 mod http_body;
@@ -20,6 +21,7 @@ mod oauth_login;
 mod reasoning_visibility;
 mod request_compaction;
 mod request_defaults;
+mod request_diagnostics;
 mod request_identity;
 mod request_identity_evidence;
 mod request_identity_projection;
@@ -78,6 +80,7 @@ use clap::Parser;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
+        .with_ansi(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),

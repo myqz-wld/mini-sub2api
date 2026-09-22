@@ -60,6 +60,15 @@ pub(crate) fn model_profile(model: &str) -> ModelProfile {
         .unwrap_or(FALLBACK_PROFILE)
 }
 
+pub(crate) fn diagnostic_model(model: &str) -> &'static str {
+    let model = model.rsplit_once('/').map_or(model, |(_, suffix)| suffix);
+    MODEL_PROFILES
+        .iter()
+        .filter(|(slug, _)| model.starts_with(slug))
+        .max_by_key(|(slug, _)| slug.len())
+        .map_or("other", |(slug, _)| *slug)
+}
+
 fn find_model_by_longest_prefix(model: &str) -> Option<ModelProfile> {
     MODEL_PROFILES
         .iter()
@@ -102,6 +111,7 @@ pub(crate) fn merge_request_defaults(
     profile: ModelProfile,
     include_stream: bool,
 ) {
+    crate::request_diagnostics::record_settings(object, false);
     object
         .entry("store".to_string())
         .or_insert(Value::Bool(false));
@@ -123,6 +133,7 @@ pub(crate) fn merge_request_defaults(
     merge_reasoning(object, profile);
     merge_text(object, profile);
     merge_include(object);
+    crate::request_diagnostics::record_settings(object, true);
 }
 
 fn merge_reasoning(object: &mut Map<String, Value>, profile: ModelProfile) {

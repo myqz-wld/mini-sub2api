@@ -71,7 +71,11 @@ pub(crate) fn translate_reader(
             match state.reader.next_event().await {
                 Ok(Some(event)) => Some(finish_event(state, event).await),
                 Ok(None) if state.terminal_seen => None,
-                Ok(None) | Err(_) => Some(fail(state)),
+                Ok(None) => {
+                    state.reader.processing("missing_terminal");
+                    Some(fail(state))
+                }
+                Err(_) => Some(fail(state)),
             }
         },
     )
@@ -128,15 +132,25 @@ fn fail(mut state: TranslationState) -> (Result<Frame<Bytes>, Infallible>, Trans
 }
 
 async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result<Bytes, ()> {
-    let text = std::str::from_utf8(&event).map_err(|_| ())?;
+    state.reader.processing("sse_utf8");
+    let text = std::str::from_utf8(&event).map_err(|error| {
+        state.reader.observe_error(&error, "sse_utf8");
+    })?;
     let data = data_payload(text);
     let Some(data) = data else {
+        state.reader.processing("none");
         return Ok(Bytes::from(event));
     };
     if data.trim().is_empty() || data.trim() == "[DONE]" {
+        state.reader.processing("none");
         return Ok(Bytes::from(event));
     }
-    let value: serde_json::Value = serde_json::from_str(&data).map_err(|_| ())?;
+    state.reader.processing("sse_json");
+    let value: serde_json::Value = serde_json::from_str(&data).map_err(|error| {
+        state.reader.observe_error(&error, "sse_json");
+    })?;
+    state.reader.terminal(&value);
+    state.reader.processing("output_lifecycle");
     if state.terminal_seen && crate::response_output::OutputLifecycle::is_output_event(&value) {
         return Err(());
     }
@@ -172,13 +186,19 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     let tail = (failed_footer || kind == Some("error"))
         .then_some(state.failure_tail.as_ref())
         .flatten();
+    state.reader.processing("response_translation");
     let translated = state
         .context
         .as_ref()
         .expect("live translation context")
         .translate_sse_value(value, tail)
         .await
-        .map_err(|_| ())?;
+        .map_err(|error| {
+            state
+                .reader
+                .observe_error(error.as_ref(), "response_translation");
+        })?;
+    state.reader.processing("response_encoding");
     let translated = serde_json::to_string(&translated).map_err(|_| ())?;
     let rewritten = replace_data_lines(text, &translated)?;
     if rewritten.len() > state.maximum {
@@ -189,6 +209,7 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
         state.failed_footer_pending = false;
         state.failure_tail = None;
     }
+    state.reader.processing("none");
     Ok(Bytes::from(rewritten))
 }
 

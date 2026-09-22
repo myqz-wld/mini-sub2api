@@ -1,3 +1,7 @@
+#[path = "server_http.rs"]
+mod http_forward;
+use http_forward::responses_inner;
+
 use crate::error::CoreFailure;
 use crate::fingerprint::FingerprintMode;
 use crate::fingerprint::FingerprintSnapshot;
@@ -132,171 +136,6 @@ async fn responses(
     }
 }
 
-async fn responses_inner(
-    peer: SocketAddr,
-    state: &AppState,
-    headers: HeaderMap,
-    request: Request<Body>,
-) -> std::result::Result<Response<Body>, CoreFailure> {
-    let identity = validate_internal_request(peer, state, &headers)?;
-    let gateway_request_id =
-        header_text(&headers, REQUEST_ID_HEADER).ok_or(CoreFailure::InvalidRequest)?;
-    let caller = CallerKind::from_headers(&headers);
-    let account_ref = identity.account_ref;
-    let pseudonym_scope = identity.pseudonym_scope;
-    let body = to_bytes(
-        request.into_body(),
-        crate::inference_limits::get().request_bytes,
-    )
-    .await
-    .map_err(|_| CoreFailure::InvalidRequest)?;
-    let account_lock = account_lock(state, &account_ref).await;
-
-    let _guard = account_lock.lock().await;
-    let resolved = resolve_auth(state, &account_ref, None).await?;
-    drop(_guard);
-    let profile = UpstreamProfile::select(caller, resolved.auth.credential_kind());
-    let state_namespace = resolved.state_namespace.clone();
-    let mut forward_headers = headers;
-    let body = if profile.emulates_codex() {
-        decode_emulated_request_body(
-            &mut forward_headers,
-            body,
-            crate::inference_limits::get().request_bytes,
-        )
-        .map_err(|()| CoreFailure::InvalidRequest)?
-    } else {
-        body
-    };
-    let downstream_expects_sse = request_expects_sse(&body);
-    let (forward_headers, body, resolved_identity, pending_compaction, operation) =
-        if profile.emulates_codex() {
-            let prepared = prepare_stateful_codex_request(
-                profile,
-                EmulationTransport::Http,
-                &forward_headers,
-                body,
-                crate::inference_limits::get().request_bytes,
-                CodexStateContext {
-                    force_lite: false,
-                    admission: None,
-                    binding: None,
-                    socket_id: None,
-                    account_ref: &account_ref,
-                    state_namespace: &state_namespace,
-                    downstream_scope: &pseudonym_scope,
-                    fingerprint_mode: resolved.fingerprint.mode(),
-                    store: state.vault.request_state(),
-                },
-                false,
-            )
-            .await
-            .map_err(|error| match error {
-                StatefulPrepareError::InvalidRequest => CoreFailure::InvalidRequest,
-                StatefulPrepareError::StateUnavailable => CoreFailure::StateUnavailable,
-            })?;
-            (
-                prepared.headers,
-                prepared.body,
-                prepared.resolved_identity,
-                prepared.pending_compaction,
-                prepared.operation,
-            )
-        } else {
-            (forward_headers, body, None, None, None)
-        };
-    let (forward_headers, body) = if resolved.fingerprint.mode() == FingerprintMode::Device
-        && profile.uses_identity_state()
-    {
-        let installation_id = resolved_identity
-            .as_ref()
-            .map(|identity| identity.installation_id.as_str())
-            .ok_or(CoreFailure::Internal)?;
-        let projected = project_http_device(
-            forward_headers,
-            body,
-            &resolved.fingerprint,
-            installation_id,
-            crate::inference_limits::get().request_bytes,
-        )
-        .map_err(|_| CoreFailure::InvalidRequest)?;
-        (projected.headers, projected.body)
-    } else {
-        (forward_headers, body)
-    };
-    let started = Instant::now();
-    let mut upstream = send_upstream(
-        &resolved.transport,
-        &forward_headers,
-        &resolved.upstream_url,
-        &resolved.auth,
-        profile,
-        body.clone(),
-    )
-    .await?;
-    if upstream.status() == StatusCode::UNAUTHORIZED && profile.uses_oauth_refresh() {
-        let failed_access_token = match &resolved.auth {
-            ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
-            ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
-        };
-        let _guard = account_lock.lock().await;
-        let retry = resolve_auth(state, &account_ref, Some(&failed_access_token)).await?;
-        drop(_guard);
-        let retry_headers = headers_for_retry(&forward_headers);
-        upstream = send_upstream(
-            &retry.transport,
-            &retry_headers,
-            &retry.upstream_url,
-            &retry.auth,
-            profile,
-            body,
-        )
-        .await?;
-        if upstream.status() == StatusCode::UNAUTHORIZED {
-            return build_http_failure_response(
-                upstream,
-                started.elapsed().as_millis(),
-                &gateway_request_id,
-                &CoreFailure::UpstreamAuthFailed,
-            );
-        }
-    }
-    let ttfb_ms = started.elapsed().as_millis();
-    if let Some(operation) = &operation
-        && let Some(token) = upstream
-            .headers()
-            .get("x-codex-turn-state")
-            .and_then(|v| v.to_str().ok())
-    {
-        state
-            .vault
-            .request_state()
-            .contexts
-            .learn_turn(operation, token)
-            .map_err(|_| CoreFailure::StateUnavailable)?;
-    }
-    let response_state = profile.uses_identity_state().then(|| {
-        ResponseStateContext::new(
-            &account_ref,
-            &state_namespace,
-            &pseudonym_scope,
-            state.vault.request_state(),
-            resolved_identity.as_ref(),
-            pending_compaction.as_ref(),
-        )
-        .with_operation(operation)
-    });
-    build_http_response(
-        upstream,
-        ttfb_ms,
-        downstream_expects_sse,
-        profile,
-        response_state,
-        &gateway_request_id,
-    )
-    .await
-}
-
 pub(crate) async fn resolve_auth(
     state: &AppState,
     account_ref: &str,
@@ -364,26 +203,6 @@ pub(crate) async fn resolve_auth(
         fingerprint,
         state_namespace,
         transport,
-    })
-}
-
-async fn send_upstream(
-    transport: &CredentialTransportContext,
-    inbound_headers: &HeaderMap,
-    upstream_url: &str,
-    auth: &ResolvedAuth,
-    profile: UpstreamProfile,
-    body: bytes::Bytes,
-) -> std::result::Result<reqwest::Response, CoreFailure> {
-    let client = transport.http_client_for_url(upstream_url);
-    let request =
-        build_upstream_request(client, inbound_headers, upstream_url, auth, profile, body)?;
-    client.execute(request).await.map_err(|error| {
-        if error.is_connect() {
-            CoreFailure::UpstreamConnectFailed
-        } else {
-            CoreFailure::UpstreamDeliveryUnknown
-        }
     })
 }
 

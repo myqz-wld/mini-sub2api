@@ -40,24 +40,51 @@ retained in private diagnostics, never exposed publicly.
 
 ## Diagnosing long requests
 
-HTTP duration covers the request lifecycle, not model computation alone; TTFB measures headers.
-Stream logs pair the gateway request ID with fixed reasons: `event_idle_timeout`, `first_output_timeout`,
-`output_idle_timeout`, `terminal_tail_closed`, `incomplete_terminal_tail` or `downstream_write_timeout`.
-Go logs the final outcome plus bytes, event-category counts and first/last byte/event/output times.
-Core emits `http_sse_observation` for Subscription SSE and JSON aggregation; its `read_end` describes
-the reader, not the validated request outcome. Timings are milliseconds from body observation;
-`-1` means not observed. Status/empty/other events without output explain why a live connection can
-still stall. Logs contain fixed categories, never raw event names, payloads or provider identifiers.
-An idle/truncated upstream is an error; a validated terminal tail can complete normally; client
-cancellation or stalled writes record disconnection. See [timeout limits](BEHAVIOR.md#completion-and-recovery).
+Start with the public `X-Mini-Sub2Api-Request-Id`; it joins coordinator and Core logs:
+
+```bash
+sudo journalctl -u mini-sub2api.service --since '30 minutes ago' -o cat --no-pager | rg -F 'req_EXAMPLE'
+```
+
+| Evidence | Meaning |
+|---|---|
+| `http_request_started`, `http_forward_started` | Accepted request, then buffered body forwarded; `request_bytes` and `body_tag` help recognize repeated attempts. |
+| `core_http_progress` | Waiting phase: credential lock/refresh, normalization or upstream headers. |
+| `upstream_headers`, `upstream_auth_retry` | HTTP status, attempt 1/2 and time since the initial send; retry 2 is the existing OAuth 401 refresh path. Subscription span fields show allowlisted model/effort before and after defaults. API-key passthrough does not parse extra metadata. |
+| `core_http_response` | Response constructed or failed; `response_ready` only means handoff, not inference completion. |
+| `http_sse_progress`, `http_stream_progress` | Core/Go body bytes, event classes and first/last byte/event/output times. Core also reports byte/output idle time. |
+| `transport_error`, `request_failure` | Layer/phase, typed I/O/HTTP/TLS category and available OS/TLS/HTTP2 numeric codes. HTTP2 includes reset/GOAWAY and remote flags. Error-source traversal stops at 16 links. |
+| `http_sse_observation` | Core reader end, processing stage, terminal kind and allowlisted provider error code. A received terminal still requires validation. |
+| `http_stream_finished`, `request_finished` | Go stop reason/outcome, downstream bytes/write time, duration and history-save result; Core failure trailers are logged separately. |
+
+`event_idle_timeout`, `first_output_timeout`, `output_idle_timeout` and `downstream_write_timeout`
+identify local limits; `missing_terminal` distinguishes EOF without completion. `core_http_canceled`
+means the handler was dropped before response construction; correlate the Go outcome to identify
+caller cancellation. `read_end=reader_dropped` alone cannot distinguish cancellation from validation
+failure: check `processing_stage`, transport errors and the final outcome. `terminal_tail_closed`
+can complete normally after validation. See [timeout limits](BEHAVIOR.md#completion-and-recovery).
+
+Timings are milliseconds: stream times start at body observation; total duration includes all stages
+and TTFB measures headers. `-1` means unobserved, `none` means no recorded category, and `other` means
+unclassified. Text/reasoning counts prove activity, not useful progress or completion. A reset/TLS
+category cannot establish a provider's internal policy; if lower-level evidence is unavailable, the
+cause remains unknown. Logs contain no raw errors, URLs, payloads, event names, Keys or provider IDs.
+
+`body_tag` is a 96-bit HMAC over the existing body, scoped to the downstream Key and random process
+instance. Equal tags within one `instance` suggest byte-identical input, not proof of automatic retry.
+Different Keys/restarts do not correlate; entropy failure disables the tag. Protect logs as operational
+metadata. Normal requests produce a fixed number of lifecycle lines; each active progress phase/layer
+emits at most once per minute. Core wakes its existing read/wait loop; Go reports on forwarded chunks.
+There are no new per-request background tasks, body copies, caches or per-event logs. Correlation
+scans input once with constant extra memory. Keep journal rotation/size limits appropriate to request
+volume; the application adds no separate log files or retention store.
 
 The 2026-09-21 investigation found an 11.4-hour request with headers after 741 ms, no recorded token
 usage and a final client-disconnected status. Loopback tests reproduced heartbeat-only and
 completed-but-open responses waiting for transport EOF before the lifetime repair. This established
 the missing bounds; retained production metadata cannot identify the exact upstream event sequence.
 An in-progress usage row alone does not prove Core still holds an execution lane or memory reservation.
-Correlate gateway request IDs, fixed termination reasons and proxy cancellation times without storing
-traffic bodies. The [HTTP lifetime tests](../src/coordinator/integration/responses_http_lifetime_test.go)
+The [HTTP lifetime tests](../src/coordinator/integration/responses_http_lifetime_test.go)
 cover the repaired behavior through the actual Go/Core loopback path.
 
 ## Deployment

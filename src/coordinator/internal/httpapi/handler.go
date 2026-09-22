@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"mini-sub2api/src/coordinator/internal/adapter"
+	"mini-sub2api/src/coordinator/internal/diagnostics"
 	"mini-sub2api/src/coordinator/internal/storage"
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
@@ -40,6 +41,7 @@ type Handler struct {
 	websockets   *websocketManager
 	wsTimeouts   websocketTimeouts
 	httpTimeouts httpStreamTimeouts
+	diagnostics  *diagnostics.Correlator
 }
 
 func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
@@ -52,6 +54,7 @@ func NewHandler(store *storage.Store, core Core, logger *log.Logger) *Handler {
 		websockets:   newWebSocketManager(maxWebSocketsPerKey),
 		wsTimeouts:   defaultWebSocketTimeouts(),
 		httpTimeouts: defaultHTTPStreamTimeouts(),
+		diagnostics:  diagnostics.NewCorrelator(),
 	}
 }
 
@@ -91,8 +94,10 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 			return
 		}
 		writeOpenAIError(writer, http.StatusInternalServerError, "internal_error", "The request could not be authenticated.", requestID)
+		h.logger.Printf("event=request_failure request_id=%s phase=authentication %s", requestID, diagnostics.Error(err))
 		return
 	}
+	h.logger.Printf("event=http_request_started request_id=%s instance=%s", requestID, h.diagnostics.Instance)
 	if route.Adapter != "codex" {
 		h.finish(requestID, started, storage.RequestUpstreamErr, http.StatusBadGateway, nil, nil, nil, nil)
 		writeOpenAIError(writer, http.StatusBadGateway, "adapter_unavailable", "The selected adapter is unavailable.", requestID)
@@ -102,6 +107,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	body, err := io.ReadAll(request.Body)
 	if err != nil {
 		status := http.StatusBadRequest
+		h.logger.Printf("event=request_failure request_id=%s phase=request_body %s", requestID, diagnostics.Error(err))
 		code := "invalid_request"
 		message := "The request body is invalid."
 		var tooLarge *http.MaxBytesError
@@ -118,6 +124,8 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		writeOpenAIError(writer, status, code, message, requestID)
 		return
 	}
+	h.logger.Printf("event=http_forward_started request_id=%s instance=%s body_tag=%s request_bytes=%d", requestID,
+		h.diagnostics.Instance, h.diagnostics.BodyTag(route.APIKeyID, body), len(body))
 	forwardContext, cancelForward := context.WithCancel(request.Context())
 	defer cancelForward()
 	response, err := h.core.Forward(
@@ -127,6 +135,8 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	body = nil
 	if err != nil {
 		status := http.StatusBadGateway
+		h.logger.Printf("event=request_failure request_id=%s phase=core_forward client_canceled=%t elapsed_ms=%d %s",
+			requestID, request.Context().Err() != nil, h.clock().Sub(started).Milliseconds(), diagnostics.Error(err))
 		code := "upstream_unavailable"
 		terminal := storage.RequestUpstreamErr
 		if errors.Is(err, adapter.ErrUnavailable) {
@@ -140,6 +150,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		writeOpenAIError(writer, status, code, "The upstream service is unavailable.", requestID)
 		return
 	}
+	h.logger.Printf("event=core_response_headers request_id=%s http_status=%d elapsed_ms=%d", requestID, response.StatusCode, h.clock().Sub(started).Milliseconds())
 	upstreamBody := response.Body
 	closeUpstream := sync.OnceFunc(func() {
 		cancelForward()
@@ -162,13 +173,15 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 		if inspectionReason == streamStopCanceled {
 			terminal = storage.RequestDisconnected
 		}
-		h.logger.Printf("request %s HTTP error inspection ended: %s", requestID, inspectionReason)
+		h.logger.Printf("request %s HTTP error inspection ended: %s event=request_failure phase=error_envelope request_id=%s stop_reason=%s", requestID, inspectionReason, requestID, inspectionReason)
 		ttfb := copyResponseHeaders(writer.Header(), response.Header, requestID)
 		h.finish(requestID, started, terminal, http.StatusBadGateway, ttfb, nil, nil, providerRequestID)
 		writeOpenAIError(writer, http.StatusBadGateway, "upstream_unavailable", "The upstream service is unavailable.", requestID)
 		return
 	}
 	if isCoreError {
+		h.logger.Printf("event=core_rejected request_id=%s error_code=%s phase=%s retry=%s delivery=%s", requestID,
+			coreError.Code, coreError.Phase, coreError.RetryAdvice, coreError.DeliveryState)
 		ttfb := copyResponseHeaders(writer.Header(), response.Header, requestID)
 		if coreError.Code == "credential_requires_login" {
 			_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
@@ -184,13 +197,17 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
 	declareFailureTrailers(writer.Header())
 	writer.WriteHeader(response.StatusCode)
-	usage, streamResult, stopReason, diagnostics := streamBody(
+	usage, streamResult, stopReason, streamDiagnostics := streamBodyObserved(
 		writer, response.Body, response.Header.Get("Content-Type"), request.Context(), h.httpTimeouts, closeUpstream,
+		func(snapshot httpStreamDiagnostics) {
+			h.logger.Printf("event=http_stream_progress request_id=%s %s", requestID, snapshot)
+		},
 	)
 	if streamResult == streamComplete && responseTerminalFailed(response.Header) {
 		streamResult = streamResponseFailed
 	}
 	if failure, ok := failureFromTrailers(response.Trailer); ok {
+		h.logger.Printf("event=core_stream_failure request_id=%s phase=%s retry=%s delivery=%s", requestID, failure.Phase, failure.RetryAdvice, failure.DeliveryState)
 		publishFailureTrailers(writer.Header(), failure)
 		streamResult = streamUpstreamError
 	} else if streamResult == streamUpstreamError {
@@ -210,7 +227,7 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 	if reason == "" {
 		reason = string(terminal)
 	}
-	h.logger.Printf("request %s HTTP stream ended: %s outcome=%s %s", requestID, reason, terminal, diagnostics)
+	h.logger.Printf("request %s HTTP stream ended: %s event=http_stream_finished request_id=%s stop_reason=%s outcome=%s %s", requestID, reason, requestID, reason, terminal, streamDiagnostics)
 	h.finish(requestID, started, terminal, response.StatusCode, ttfb, usage, nil, providerRequestID)
 }
 
@@ -250,8 +267,10 @@ func (h *Handler) finish(
 		ProviderRequestID: providerRequestID,
 	})
 	if err != nil {
-		h.logger.Printf("request %s history finalization failed: %v", requestID, err)
+		h.logger.Printf("event=request_failure request_id=%s phase=history_finalization %s", requestID, diagnostics.Error(err))
 	}
+	h.logger.Printf("event=request_finished request_id=%s outcome=%s http_status=%d duration_ms=%d usage_present=%t history_saved=%t", requestID,
+		status, httpStatus, completed.Sub(started).Milliseconds(), usage != nil, err == nil)
 }
 
 func newRequestID() (string, error) {

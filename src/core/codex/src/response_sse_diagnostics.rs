@@ -5,6 +5,11 @@ use tokio::time::Instant;
 pub(crate) struct SseDiagnostics {
     pub request_id: Option<String>,
     pub read_end: &'static str,
+    pub processing_stage: &'static str,
+    pub error_kind: &'static str,
+    pub terminal_kind: &'static str,
+    pub provider_code: &'static str,
+    next_report: Instant,
     started: Instant,
     bytes: u64,
     events: u64,
@@ -24,6 +29,11 @@ impl SseDiagnostics {
         Self {
             request_id: None,
             read_end: "reader_dropped",
+            processing_stage: "none",
+            error_kind: "none",
+            terminal_kind: "none",
+            provider_code: "none",
+            next_report: Instant::now() + crate::request_diagnostics::PROGRESS_INTERVAL,
             started: Instant::now(),
             bytes: 0,
             events: 0,
@@ -41,6 +51,29 @@ impl SseDiagnostics {
 
     fn elapsed_ms(&self) -> i64 {
         self.started.elapsed().as_millis().min(i64::MAX as u128) as i64
+    }
+
+    pub fn report_deadline(&self) -> Instant {
+        self.next_report
+    }
+
+    pub fn report_if_due(&mut self) {
+        if Instant::now() >= self.next_report {
+            self.emit("http_sse_progress");
+            self.next_report = Instant::now() + crate::request_diagnostics::PROGRESS_INTERVAL;
+        }
+    }
+
+    pub fn observe_error(
+        &mut self,
+        error: &(dyn std::error::Error + 'static),
+        phase: &'static str,
+    ) {
+        let details = crate::error_diagnostics::ErrorDetails::observe(error);
+        self.error_kind = details.kind;
+        if let Some(id) = &self.request_id {
+            details.log(id, phase);
+        }
     }
 
     pub fn received(&mut self, bytes: usize) {
@@ -73,17 +106,22 @@ impl SseDiagnostics {
             }
         }
     }
-}
-
-impl Drop for SseDiagnostics {
-    fn drop(&mut self) {
+    fn emit(&self, event: &'static str) {
         let Some(request_id) = &self.request_id else {
             return;
         };
         tracing::info!(
-            event = "http_sse_observation",
+            event,
             request_id,
-            read_end = self.read_end,
+            read_end = if event == "http_sse_progress" {
+                "reading"
+            } else {
+                self.read_end
+            },
+            processing_stage = self.processing_stage,
+            error_kind = self.error_kind,
+            terminal_kind = self.terminal_kind,
+            provider_code = self.provider_code,
             elapsed_ms = self.elapsed_ms(),
             bytes = self.bytes,
             events = self.events,
@@ -105,8 +143,24 @@ impl Drop for SseDiagnostics {
             last_event_ms = self.last_event_ms,
             first_output_ms = self.first_output_ms,
             last_output_ms = self.last_output_ms,
+            byte_idle_ms = if self.last_byte_ms < 0 {
+                self.elapsed_ms()
+            } else {
+                self.elapsed_ms() - self.last_byte_ms
+            },
+            output_idle_ms = if self.last_output_ms < 0 {
+                self.elapsed_ms()
+            } else {
+                self.elapsed_ms() - self.last_output_ms
+            },
             "HTTP SSE read observation"
         );
+    }
+}
+
+impl Drop for SseDiagnostics {
+    fn drop(&mut self) {
+        self.emit("http_sse_observation");
     }
 }
 

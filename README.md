@@ -77,7 +77,8 @@ OpenCode custom providers and bare clients can associate full histories without 
   reusable history; uncertain sends are not automatically replayed.
 - HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
   and heartbeats cannot extend it. Completed streams close after a bounded tail; stalled client
-  writes time out after 120 seconds. Logs retain event counts/timings, never payloads.
+  writes time out after 120 seconds. [Diagnostic logs](docs/OPERATIONS.md#diagnosing-long-requests)
+  correlate request stages, model/effort, typed failures and minute-spaced progress without payloads.
 
 Plain HTTP binds only loopback; other listeners need TLS. Run one service per state directory.
 Vault/identity files are private but unencrypted; request/response bodies are not persisted.
@@ -85,7 +86,7 @@ Vault/identity files are private but unencrypted; request/response bodies are no
 | Guide | Contents |
 |---|---|
 | [Behavior](docs/BEHAVIOR.md) | Matching, compaction, instructions, limits and failure semantics |
-| [Operations](docs/OPERATIONS.md) | Authentication, administration and deployment |
+| [Operations](docs/OPERATIONS.md) | Authentication, request diagnosis, administration and deployment |
 | [Memory](docs/MEMORY.md) | Small-host sizing and OOM diagnosis; context budgets are not RSS caps |
 | [Protocol](src/protocol/v1/README.md) | Private coordinator/Core wire contract |
 | [Architecture](docs/ARCHITECTURE.md) | Runtime ownership, state lifetimes and admission |

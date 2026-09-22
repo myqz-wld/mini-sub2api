@@ -9,6 +9,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"mini-sub2api/src/coordinator/internal/diagnostics"
 	"mini-sub2api/src/coordinator/internal/storage"
 	"mini-sub2api/src/coordinator/internal/usage"
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
@@ -366,7 +367,7 @@ func (s *websocketSession) finishOperation(operation *websocketOperation, status
 		ProviderRequestID: operation.providerRequestID,
 	})
 	if err != nil {
-		s.handler.logger.Printf("request %s history finalization failed: %v", operation.requestID, err)
+		s.handler.logger.Printf("event=request_failure request_id=%s phase=history_finalization %s", operation.requestID, diagnostics.Error(err))
 	}
 }
 

@@ -90,8 +90,38 @@ impl SseReader {
         self.pending = Bytes::new();
     }
 
+    pub(crate) fn processing(&mut self, stage: &'static str) {
+        self.diagnostics.processing_stage = stage;
+    }
+
+    pub(crate) fn observe_error(
+        &mut self,
+        error: &(dyn std::error::Error + 'static),
+        phase: &'static str,
+    ) {
+        self.diagnostics.observe_error(error, phase);
+    }
+
+    pub(crate) fn terminal(&mut self, value: &serde_json::Value) {
+        let kind = value.get("type").and_then(serde_json::Value::as_str);
+        self.diagnostics.terminal_kind = match kind {
+            Some("response.completed") => "completed",
+            Some("response.failed") => "failed",
+            Some("response.incomplete") => "incomplete",
+            Some("error") => "error",
+            _ => return,
+        };
+        self.diagnostics.provider_code = crate::request_diagnostics::provider_code(value);
+    }
+
+    pub(crate) fn aggregated_terminal(&mut self, kind: &'static str, value: &serde_json::Value) {
+        self.diagnostics.terminal_kind = kind;
+        self.diagnostics.provider_code = crate::request_diagnostics::provider_code(value);
+    }
+
     pub(crate) async fn next_event(&mut self) -> Result<Option<Vec<u8>>, SseReadError> {
         loop {
+            self.diagnostics.report_if_due();
             if self.upstream.is_some() && Instant::now() >= self.deadline() {
                 if self.terminal_deadline.is_some() {
                     // Stop receiving new bytes, but validate the bounded tail already received.
@@ -150,7 +180,7 @@ impl SseReader {
                 }
                 continue;
             }
-            let deadline = self.deadline();
+            let deadline = self.deadline().min(self.diagnostics.report_deadline());
             let Some(upstream) = self.upstream.as_mut() else {
                 return Ok((!self.buffer.is_empty()).then(|| self.take_event()));
             };
@@ -159,8 +189,9 @@ impl SseReader {
                     self.diagnostics.received(bytes.len());
                     self.pending = bytes;
                 }
-                Ok(Some(Err(_))) => {
+                Ok(Some(Err(error))) => {
                     self.diagnostics.read_end = "upstream_read_error";
+                    self.diagnostics.observe_error(&error, "upstream_body");
                     self.close();
                     return Err(SseReadError::Upstream);
                 }

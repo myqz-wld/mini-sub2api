@@ -7,27 +7,29 @@ import (
 )
 
 type httpStreamTimeouts struct {
-	idle         time.Duration
-	outputIdle   time.Duration
-	terminalTail time.Duration
-	write        time.Duration
+	idle           time.Duration
+	outputIdle     time.Duration
+	terminalTail   time.Duration
+	write          time.Duration
+	progressReport time.Duration
 }
 
 func defaultHTTPStreamTimeouts() httpStreamTimeouts {
-	return httpStreamTimeouts{idle: 300 * time.Second, outputIdle: 300 * time.Second, terminalTail: 2 * time.Second, write: 120 * time.Second}
+	return httpStreamTimeouts{idle: 300 * time.Second, outputIdle: 300 * time.Second, terminalTail: 2 * time.Second, write: 120 * time.Second, progressReport: time.Minute}
 }
 
 type streamStopReason string
 
 const (
-	streamStopNone         streamStopReason = ""
-	streamStopIdle         streamStopReason = "event_idle_timeout"
-	streamStopFirstOutput  streamStopReason = "first_output_timeout"
-	streamStopOutputIdle   streamStopReason = "output_idle_timeout"
-	streamStopTail         streamStopReason = "terminal_tail_closed"
-	streamStopCanceled     streamStopReason = "client_canceled"
-	streamStopPartialTail  streamStopReason = "incomplete_terminal_tail"
-	streamStopWriteTimeout streamStopReason = "downstream_write_timeout"
+	streamStopNone            streamStopReason = ""
+	streamStopIdle            streamStopReason = "event_idle_timeout"
+	streamStopFirstOutput     streamStopReason = "first_output_timeout"
+	streamStopOutputIdle      streamStopReason = "output_idle_timeout"
+	streamStopTail            streamStopReason = "terminal_tail_closed"
+	streamStopCanceled        streamStopReason = "client_canceled"
+	streamStopPartialTail     streamStopReason = "incomplete_terminal_tail"
+	streamStopWriteTimeout    streamStopReason = "downstream_write_timeout"
+	streamStopMissingTerminal streamStopReason = "missing_terminal"
 )
 
 // The watcher never accesses response bytes or the ResponseWriter. Its cancellation/Close

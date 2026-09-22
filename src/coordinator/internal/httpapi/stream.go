@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	diag "mini-sub2api/src/coordinator/internal/diagnostics"
 	"mini-sub2api/src/coordinator/internal/storage"
 	"mini-sub2api/src/coordinator/internal/usage"
 	protocolv1 "mini-sub2api/src/protocol/v1/go"
@@ -30,6 +31,12 @@ func streamBody(
 	timeouts httpStreamTimeouts,
 	abort func(),
 ) (tokens *storage.TokenUsage, outcome streamOutcome, reason streamStopReason, diagnostics httpStreamDiagnostics) {
+	return streamBodyObserved(writer, body, contentType, ctx, timeouts, abort, nil)
+}
+
+func streamBodyObserved(writer http.ResponseWriter, body io.Reader, contentType string, ctx context.Context,
+	timeouts httpStreamTimeouts, abort func(), report func(httpStreamDiagnostics),
+) (tokens *storage.TokenUsage, outcome streamOutcome, reason streamStopReason, diagnostics httpStreamDiagnostics) {
 	observer := usage.NewObserver(contentType)
 	diagnostics = newHTTPStreamDiagnostics()
 	guard := newHTTPStreamGuard(ctx, timeouts, abort)
@@ -40,6 +47,7 @@ func streamBody(
 	}
 	controller := http.NewResponseController(writer)
 	buffer := make([]byte, 32*1024)
+	nextReport := time.Now().Add(timeouts.progressReport)
 	for {
 		count, readErr := body.Read(buffer)
 		if count > 0 {
@@ -56,11 +64,14 @@ func streamBody(
 			// net/http clears the deadline after finishing the response. Leave it in force
 			// through final trailer/connection flushing, including after a write timeout.
 			if err := controller.SetWriteDeadline(time.Now().Add(timeouts.write)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				diagnostics.failurePhase, diagnostics.failure = "write_deadline", diag.Error(err)
 				guard.stop()
 				abort()
 				return observer.Usage(), streamClientDisconnected, writeStopReason(err), diagnostics
 			}
+			writeStarted := time.Now()
 			written, writeErr := writer.Write(chunk)
+			diagnostics.bytesWritten += uint64(max(written, 0))
 			if writeErr == nil && written != len(chunk) {
 				writeErr = io.ErrShortWrite
 			}
@@ -69,16 +80,25 @@ func streamBody(
 					writeErr = err
 				}
 			}
+			diagnostics.writeTime += time.Since(writeStarted)
 			if writeErr != nil {
+				diagnostics.failurePhase, diagnostics.failure = "downstream_write", diag.Error(writeErr)
 				guard.stop()
 				abort()
 				return observer.Usage(), streamClientDisconnected, writeStopReason(writeErr), diagnostics
+			}
+			if report != nil && timeouts.progressReport > 0 && !time.Now().Before(nextReport) {
+				report(diagnostics)
+				nextReport = time.Now().Add(timeouts.progressReport)
 			}
 		}
 		if readErr == nil {
 			continue
 		}
 		reason := guard.stop()
+		if readErr != io.EOF {
+			diagnostics.failurePhase, diagnostics.failure = "core_body", diag.Error(readErr)
+		}
 		partialTail := observer.HasPendingSSEData()
 		observedUsage := observer.Usage()
 		// Natural EOF may finish the final event. Forced closure must not report an
@@ -101,7 +121,11 @@ func streamBody(
 		if readErr != io.EOF {
 			return observedUsage, streamUpstreamError, reason, diagnostics
 		}
-		return observedUsage, observedStreamOutcome(observer), reason, diagnostics
+		result := observedStreamOutcome(observer)
+		if result == streamUpstreamError && observer.IsStreaming() {
+			reason = streamStopMissingTerminal
+		}
+		return observedUsage, result, reason, diagnostics
 	}
 }
 

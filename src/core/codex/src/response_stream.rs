@@ -149,17 +149,19 @@ fn build_streaming_response(
             .map_err(|_| CoreFailure::UpstreamResponseFailed);
     }
     let stream = futures_util::stream::unfold(
-        (upstream_stream, false),
-        |(mut upstream_stream, finished)| async move {
+        (upstream_stream, false, gateway_request_id.to_owned()),
+        |(mut upstream_stream, finished, request_id)| async move {
             if finished {
                 return None;
             }
             match upstream_stream.next().await {
                 Some(Ok(bytes)) => Some((
                     Ok::<Frame<bytes::Bytes>, Infallible>(Frame::data(bytes)),
-                    (upstream_stream, false),
+                    (upstream_stream, false, request_id),
                 )),
-                Some(Err(_)) => {
+                Some(Err(error)) => {
+                    crate::error_diagnostics::ErrorDetails::observe(&error)
+                        .log(&request_id, "upstream_body_passthrough");
                     let metadata = failure(
                         RetryAdvice::Never,
                         FailurePhase::UpstreamStream,
@@ -167,7 +169,7 @@ fn build_streaming_response(
                     );
                     Some((
                         Ok(Frame::trailers(failure_trailers(metadata))),
-                        (upstream_stream, true),
+                        (upstream_stream, true, request_id),
                     ))
                 }
                 None => None,
@@ -203,19 +205,29 @@ async fn build_non_streaming_response(
         .await
         .map_err(|_| CoreFailure::UpstreamResponseFailed)?
     {
+        stream.processing("aggregate_buffer_limit");
         append_bounded(
             &mut bytes,
             &event,
             crate::inference_limits::get().output_bytes,
         )?;
+        stream.processing("none");
     }
+    stream.processing("response_aggregation");
     let terminal = aggregation::prepare_terminal(&bytes, response_state).await?;
     let terminal_kind = terminal.kind;
     let response = terminal.response;
-    let body = serde_json::to_vec(&response).map_err(|_| CoreFailure::UpstreamResponseFailed)?;
+    stream.aggregated_terminal(terminal_kind.as_str(), &response);
+    stream.processing("response_encoding");
+    let body = serde_json::to_vec(&response).map_err(|error| {
+        stream.observe_error(&error, "response_encoding");
+        CoreFailure::UpstreamResponseFailed
+    })?;
+    stream.processing("aggregate_body_limit");
     if body.len() > crate::inference_limits::get().output_bytes {
         return Err(CoreFailure::UpstreamResponseFailed);
     }
+    stream.processing("none");
     builder
         .header(http::header::CONTENT_TYPE, "application/json")
         .header(CORE_TTFB_HEADER, ttfb_ms.to_string())
