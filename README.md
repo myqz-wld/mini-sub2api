@@ -125,6 +125,10 @@ bash scripts/test-scaffold-parity.sh
 [Capture methods and matrix](src/coordinator/integration/NATIVE_PARITY.md) distinguish native clients,
 bare fixtures and real-provider evidence. Normal suites are loopback-only; real calls require separate authorization.
 Source lives in `src/coordinator`, `src/core/codex` and `src/protocol/v1`; output stays in `build/`.
-Local instructions, deployment overrides and `ref/` records are excluded from distribution.
+Keep retained reference sources, comparison tools and validation records under the local `ref/`
+directory. `.ref/` holds temporary work only; archive useful results and remove scratch files when
+the task finishes. Its pre-commit reminder remains advisory. Remove obsolete releases and completed
+task outputs from `build/`; Cargo caches can be regenerated when needed.
+Local instructions, deployment overrides, `.ref/` and `ref/` are excluded from distribution.
 
 Personal learning/research software; not an official OpenAI product or intended for commercial/production use.

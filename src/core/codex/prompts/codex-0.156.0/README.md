@@ -11,7 +11,7 @@ catalog no longer includes gpt-5.2 or gpt-5.4-mini; normal prefix/fallback selec
 ## Offline regeneration
 
 ```bash
-bash scripts/generate-codex-prompts.sh --codex-source .ref/sources/codex-v0.156.0 --check
+bash scripts/generate-codex-prompts.sh --codex-source ref/sources/codex-v0.156.0 --check
 ```
 
 Omit `--check` to regenerate; `--output build/codex-prompts` writes a separate copy.

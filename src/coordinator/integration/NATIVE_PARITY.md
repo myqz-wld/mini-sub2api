@@ -16,7 +16,9 @@ Pinned clients: Codex **0.156.0** (`fe74a774532af67b5a4a3dec03ce9469e17f89af`) a
 Clients are verified on macOS arm64. Standard suites use loopback mocks and never fall back to providers.
 Code Mode execution requires the matching 0.156.0 `codex-code-mode-host` companion in the CLI's
 installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NATIVE_CODEX_BINARY`;
-`MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout.
+`MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout, defaulting to
+`ref/sources/codex-v0.156.0`. Retain the CLI and its companion together under
+`ref/tools/codex-v0.156.0`; `.ref/` is reserved for temporary work.
 
 ## Method
 
@@ -111,7 +113,7 @@ use neutral temporary paths; default test launchers remain loopback-only with no
 
 ```bash
 MINI_SUB2API_LIVE_SUBSCRIPTION=1 \
-MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/.ref/tools/codex-v0.156.0/codex" \
+MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.156.0/codex" \
   mise exec -- go test -tags=nativeparity,liveparity -race -count=1 -timeout=15m \
   ./src/coordinator/integration \
   -run '^TestLiveSubscription(Conversation|MemoryBare|ToolAndSchema|ToolReconnect)$' -v

@@ -20,7 +20,7 @@ func nativeSource(t *testing.T) string {
 	t.Helper()
 	source := os.Getenv("MINI_SUB2API_CODEX_SOURCE")
 	if source == "" {
-		source = filepath.Join(nativeRepository(), ".ref", "sources", "codex-v0.156.0")
+		source = filepath.Join(nativeRepository(), "ref", "sources", "codex-v0.156.0")
 	}
 	source, err := filepath.Abs(source)
 	if err != nil {
