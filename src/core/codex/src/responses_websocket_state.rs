@@ -241,18 +241,9 @@ impl ResponsesWebSocketState {
             };
         };
         if kind == OperationKind::HiddenSetup
-            && event.get("type").and_then(Value::as_str) == Some("response.metadata")
             && self.setup_turn_state.is_none()
-            && let Some(token) = event
-                .get("headers")
-                .and_then(Value::as_object)
-                .and_then(|headers| {
-                    headers
-                        .iter()
-                        .find(|(key, _)| key.eq_ignore_ascii_case("x-codex-turn-state"))
-                })
-                .and_then(|(_, value)| value.as_str())
-            && crate::request_state_types::validate_wire_id(token).is_ok()
+            && let Some(token) = crate::subscription_routing::metadata_token(event)
+            && crate::subscription_routing::validate_token(token).is_ok()
         {
             self.setup_turn_state = Some(token.to_string());
         }
@@ -334,17 +325,19 @@ impl ResponsesWebSocketState {
     }
 
     pub(crate) fn retained_bytes(&self) -> usize {
-        self.baseline.as_ref().map_or(0, |b| {
-            b.request.cost()
-                + b.output
-                    .iter()
-                    .map(|v| serde_json::to_vec(v).map_or(0, |b| b.len() * 4 + 64))
-                    .sum::<usize>()
-        }) + self
-            .planned
-            .as_ref()
-            .and_then(|p| p.request.as_ref())
-            .map_or(0, RequestSnapshot::cost)
+        self.setup_turn_state.as_ref().map_or(0, String::len)
+            + self.baseline.as_ref().map_or(0, |b| {
+                b.request.cost()
+                    + b.output
+                        .iter()
+                        .map(|v| serde_json::to_vec(v).map_or(0, |b| b.len() * 4 + 64))
+                        .sum::<usize>()
+            })
+            + self
+                .planned
+                .as_ref()
+                .and_then(|p| p.request.as_ref())
+                .map_or(0, RequestSnapshot::cost)
             + self.active.as_ref().map_or(0, |a| {
                 a.request.as_ref().map_or(0, RequestSnapshot::cost)
                     + a.output_bytes * 4

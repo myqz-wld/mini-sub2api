@@ -185,76 +185,6 @@ impl ContextStore {
         })
     }
 
-    pub(crate) fn learn_turn(&self, operation: &Operation, token: &str) -> anyhow::Result<()> {
-        crate::request_state_types::validate_wire_id(token)?;
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
-        let Some(active) = inner.operations.get(&operation.0.id) else {
-            return Ok(());
-        };
-        let Some(turn) = &active.record.identity.turn_id else {
-            return Ok(());
-        };
-        if turn.is_empty() {
-            return Ok(());
-        }
-        let (scope, turn) = (
-            active.scope.clone(),
-            format!("{}:{}", active.record.branch, turn),
-        );
-        inner
-            .scopes
-            .entry(scope)
-            .or_default()
-            .routing
-            .entry(turn)
-            .or_insert_with(|| token.to_string());
-        Ok(())
-    }
-
-    pub(crate) fn learn_response_turn(
-        &self,
-        operation: &Operation,
-        token: &str,
-    ) -> anyhow::Result<()> {
-        // Native HTTP learns routing only from response headers; response.metadata supplies
-        // this state on WebSocket streams. A shared event parser must preserve that boundary.
-        if operation.0.transport != crate::request_normalizer::EmulationTransport::WebSocket {
-            return Ok(());
-        }
-        crate::request_state_types::validate_wire_id(token)?;
-        {
-            let mut inner = self
-                .inner
-                .lock()
-                .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
-            if let Some(active) = inner.operations.get_mut(&operation.0.id)
-                && active.record.identity.request_kind == "prewarm"
-                && active.record.socket.is_some()
-            {
-                active
-                    .record
-                    .startup_token
-                    .get_or_insert_with(|| token.to_string());
-                return Ok(());
-            }
-        }
-        self.learn_turn(operation, token)
-    }
-
-    pub(crate) fn turn_token(&self, operation: &Operation) -> Option<String> {
-        let inner = self.inner.lock().ok()?;
-        let active = inner.operations.get(&operation.0.id)?;
-        let turn = active.record.identity.turn_id.as_ref()?;
-        inner
-            .scopes
-            .get(&active.scope)?
-            .routing
-            .get(&format!("{}:{}", active.record.branch, turn))
-            .cloned()
-    }
     pub(crate) fn new(limits: InferenceLimits) -> Self {
         let inner = Arc::new(Mutex::new(Inner {
             scopes: HashMap::new(),
@@ -409,6 +339,11 @@ impl Scope {
                 .sum::<usize>()
             + self.index.values().map(Radix::cost).sum::<usize>()
             + self.checkpoint_index_cost(None)
+            + self
+                .routing
+                .iter()
+                .map(|(key, token)| key.len() + token.len())
+                .sum::<usize>()
             + self.settings_pool.len() * 128
             + (self.sessions.len()
                 + self.aliases.len()
@@ -440,7 +375,17 @@ impl Scope {
                 cost += history.retained_cost(&mut blocks, Some(&mut items));
             }
         }
-        cost + self.index.get(&Some(session.into())).map_or(0, Radix::cost)
+        cost + self
+            .routing
+            .iter()
+            .filter(|(key, _)| {
+                key.split_once(':')
+                    .and_then(|(_, turn)| self.turns.get(turn))
+                    .is_some_and(|owner| owner == session)
+            })
+            .map(|(key, token)| 1024 + key.len() + token.len())
+            .sum::<usize>()
+            + self.index.get(&Some(session.into())).map_or(0, Radix::cost)
             + self.checkpoint_index_cost(Some(session))
             + self
                 .aliases

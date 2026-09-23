@@ -3,6 +3,61 @@ use super::*;
 const META: &str = "internal_chat_message_metadata_passthrough";
 
 #[tokio::test]
+async fn long_routing_tokens_are_charged_and_keep_the_first_value() {
+    let (_temp, store) = store();
+    let prepared = prepare(&store, request(json!([input("routing budget")])))
+        .await
+        .unwrap();
+    let operation = prepared.operation.as_ref().unwrap();
+    let session = &prepared.resolved_identity.as_ref().unwrap().session_id;
+    let key = ContextStore::scope_key(NAMESPACE, KEY);
+    let before = {
+        let inner = store.contexts.inner.lock().unwrap();
+        (
+            inner.scopes[&key].cost(),
+            inner.scopes[&key].session_cost(session),
+        )
+    };
+    let token = "synthetic-opaque-token-".repeat(200);
+    store.contexts.learn_turn(operation, &token).unwrap();
+    store
+        .contexts
+        .learn_turn(
+            operation,
+            &"x".repeat(crate::subscription_routing::MAX_ROUTING_TOKEN_BYTES + 1),
+        )
+        .unwrap();
+    assert_eq!(
+        store.contexts.turn_token(operation).as_deref(),
+        Some(token.as_str())
+    );
+    let inner = store.contexts.inner.lock().unwrap();
+    assert!(inner.scopes[&key].cost() >= before.0 + token.len());
+    assert!(inner.scopes[&key].session_cost(session) >= before.1 + token.len());
+}
+
+#[tokio::test]
+async fn routing_tokens_cannot_exceed_an_active_sessions_memory_budget() {
+    let (_temp, mut store) = store();
+    let mut limits = (*store.contexts.limits).clone();
+    limits.global_bytes = 32 * 1024;
+    limits.key_bytes = 32 * 1024;
+    limits.session_bytes = 32 * 1024;
+    store.contexts.limits = std::sync::Arc::new(limits);
+    let prepared = prepare(&store, request(json!([input("routing budget")])))
+        .await
+        .unwrap();
+    let operation = prepared.operation.as_ref().unwrap();
+    assert!(
+        store
+            .contexts
+            .learn_turn(operation, &"x".repeat(48 * 1024))
+            .is_err()
+    );
+    assert!(store.contexts.turn_token(operation).is_none());
+}
+
+#[tokio::test]
 async fn caller_time_survives_without_an_item_id_in_responses_and_lite() {
     for model in ["gpt-5.4", "gpt-5.6-sol"] {
         let (_temp, store) = store();

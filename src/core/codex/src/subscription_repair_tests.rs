@@ -46,6 +46,43 @@ fn response_context(
 }
 
 #[tokio::test]
+async fn synthesized_ws_routing_token_is_not_pinned_to_the_last_field() {
+    let (_temp, store) = store();
+    let token = "synthetic-routing-token".repeat(40);
+    let mut observed_nonterminal_slot = false;
+    // Independent synthesized maps exercise the old deterministic append-at-end regression.
+    for sample in 0..16 {
+        let socket = store.contexts.open_socket().unwrap();
+        let mut body = request(json!([input("synthetic order probe")]));
+        body["client_metadata"] = json!({
+            "session_id":format!("order-{sample}"),
+            "turn_id":format!("turn-{sample}")
+        });
+        let first = websocket_request(&store, body.clone(), &socket.id, None)
+            .await
+            .unwrap();
+        store
+            .contexts
+            .learn_turn(first.operation.as_ref().unwrap(), &token)
+            .unwrap();
+        response_context(&store,&first).translate_value(json!({"type":"response.completed","response":{"id":format!("resp_order_{sample}"),"output":[]}})).await.unwrap();
+        let next = websocket_request(&store, body, &socket.id, first.resolved_identity.as_ref())
+            .await
+            .unwrap();
+        assert!(!next.native_client_metadata);
+        let value: Value = serde_json::from_slice(&next.body).unwrap();
+        let metadata = value["client_metadata"].as_object().unwrap();
+        assert_eq!(metadata["x-codex-turn-state"], token);
+        observed_nonterminal_slot |=
+            metadata.keys().next_back().map(String::as_str) != Some("x-codex-turn-state");
+    }
+    assert!(
+        observed_nonterminal_slot,
+        "routing state must participate in native-style randomized metadata ordering"
+    );
+}
+
+#[tokio::test]
 async fn bound_header_only_child_keeps_its_branch_but_uses_the_later_frames_window() {
     let (_temp, store) = store();
     let socket = store.contexts.open_socket().unwrap();
@@ -131,7 +168,8 @@ async fn startup_routing_is_adopted_once_only_after_completion_on_its_own_socket
             .translate_value(json!({"type":"response.created","response":{"id":"resp_startup"}}))
             .await
             .unwrap();
-        for token in ["startup-first", "startup-later"] {
+        let startup = "startup-first".repeat(80);
+        for token in [startup.as_str(), "startup-later"] {
             response
                 .translate_value(
                     json!({"type":"response.metadata","headers":{"x-codex-turn-state":token}}),
@@ -170,7 +208,7 @@ async fn startup_routing_is_adopted_once_only_after_completion_on_its_own_socket
             .await
             .unwrap();
         let expected = if matches!(mode, "completed" | "expired-history") {
-            Some("startup-first")
+            Some(startup.as_str())
         } else {
             None
         };

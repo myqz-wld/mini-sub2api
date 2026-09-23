@@ -69,6 +69,13 @@ Negative controls preserve explicit IDs, substantive content/decoration, Key iso
 
 ## Evidence and limits
 
+The 0.156.0 continuation follow-up passed 26 real Subscription cases: 12 native direct/gateway/
+captured-gateway conversations, 8 ordinary five-turn memory cases, 4 tool/schema cases and 2 tool
+reconnect cases. All use gpt-5.5/Astra. Four captured-gateway cases additionally compare 18 paired
+real-provider requests with the recursive ordered/scalar and complete header-shape assertions.
+Long-token HTTP/WS/prewarm/capacity regressions and relay security checks run without providers.
+See [the findings and connection limits](../../../docs/CODEX_COMPATIBILITY.md#real-upstream-continuation-evidence).
+
 Historical validation covered 1,546 local leaves and 36 real Subscription cells (18 functional +
 18 five-turn memory cases on gpt-5.5/Astra), with no real API-key credential. Execution snapshots
 are recoverable from Git history; detailed local review records remain excluded from distribution.
@@ -83,3 +90,28 @@ all-model entitlement or exhaustive environment Cartesian coverage is claimed.
 HTTP/1.1/WS shape equality and macOS ClientHello checks do not certify Linux TLS, negotiated HTTP/2
 SETTINGS/HPACK, packet timing or remote classification. Detailed findings are in
 [Codex compatibility](../../../docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
+
+## Opt-in live continuation run
+
+After explicit authorization for real Subscription usage, supply the pinned CLI/host and an
+existing unexpired login (default `$HOME/.codex/auth.json`, or `MINI_SUB2API_LIVE_AUTH_FILE`). The
+fixture imports only access credentials into disposable state, verifies the original login remains
+unchanged and never prints payloads or tokens. It does not renew credentials. Native direct workspaces
+use neutral temporary paths; default test launchers remain loopback-only with no provider fallback.
+
+```bash
+MINI_SUB2API_LIVE_SUBSCRIPTION=1 \
+MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/.ref/tools/codex-v0.156.0/codex" \
+  mise exec -- go test -tags=nativeparity,liveparity -race -count=1 -timeout=15m \
+  ./src/coordinator/integration \
+  -run '^TestLiveSubscription(Conversation|MemoryBare|ToolAndSchema|ToolReconnect)$' -v
+```
+
+The authenticated capture relay targets only the fixed official backend; it keeps raw frames and
+bodies in memory and bounds requests, capture sizes and lifetimes. Its Go TLS/HTTP/1.1 connection is
+not a native TLS fingerprint oracle. Relay rejection and byte-preservation checks need no live login:
+
+```bash
+mise exec -- go test -tags=nativeparity,liveparity -race \
+  ./src/coordinator/integration -run '^TestLiveRelay' -v
+```

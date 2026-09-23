@@ -111,6 +111,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         }
     };
     let operation = prepared.operation;
+    let native_client_metadata = prepared.native_client_metadata;
     let synthesized_item_ids = prepared.synthesized_item_ids;
     let pending_compaction = prepared.pending_compaction;
     let mut upstream_headers = prepared.headers;
@@ -323,6 +324,13 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
     if let Some(token) = turn_state.as_ref().and_then(|value| value.to_str().ok()) {
         value["client_metadata"]["x-codex-turn-state"] =
             serde_json::Value::String(token.to_string());
+        if !native_client_metadata
+            && let Some(metadata) = value
+                .get_mut("client_metadata")
+                .and_then(serde_json::Value::as_object_mut)
+        {
+            crate::request_identity::randomize_synthesized_client_metadata(metadata);
+        }
     }
     debug_assert!(!continuation.public_create_attempted());
     let text = match plan_public_text_with_state(

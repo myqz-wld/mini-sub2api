@@ -75,6 +75,9 @@ OpenCode custom providers and bare clients can associate full histories without 
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
 - Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the
   [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
+- Authorized [real upstream tests](docs/CODEX_COMPATIBILITY.md#real-upstream-continuation-evidence)
+  cover multi-turn memory, tool outputs and WS reconnects; long opaque routing tokens have a
+  separate bounded budget and no longer hit the logical-ID length limit.
 - Success requires consistent terminal/output evidence. Failed or partial output cannot become
   reusable history; uncertain sends are not automatically replayed.
 - Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state

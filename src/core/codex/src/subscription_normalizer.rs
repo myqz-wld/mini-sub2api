@@ -188,6 +188,7 @@ pub(crate) async fn prepare_stateful_codex_request(
     )
     .await?;
     prepared.rebuilt_reference = explicit_delta && full_send;
+    prepared.native_client_metadata = native_metadata_order.is_some();
     let operation = prepared.operation.as_ref().ok_or(Error::StateUnavailable)?;
     let Some(token) = store.turn_token(operation) else {
         return Ok(prepared);
@@ -204,19 +205,24 @@ pub(crate) async fn prepare_stateful_codex_request(
     let mut value: Value =
         serde_json::from_slice(&prepared.body).map_err(|_| Error::InvalidRequest)?;
     value["client_metadata"]["x-codex-turn-state"] = Value::String(token);
-    if let Some(order) = native_metadata_order
-        && let Some(metadata) = value
-            .get_mut("client_metadata")
-            .and_then(Value::as_object_mut)
+    if let Some(metadata) = value
+        .get_mut("client_metadata")
+        .and_then(Value::as_object_mut)
     {
-        // Replacing an untrusted routing token must not move the native HashMap's wire slot.
-        let mut existing = std::mem::take(metadata);
-        for name in order {
-            if let Some(value) = existing.shift_remove(&name) {
-                metadata.insert(name, value);
+        if let Some(order) = native_metadata_order {
+            // Replacing an untrusted routing token must not move the native HashMap's wire slot.
+            let mut existing = std::mem::take(metadata);
+            for name in order {
+                if let Some(value) = existing.shift_remove(&name) {
+                    metadata.insert(name, value);
+                }
             }
+            metadata.extend(existing);
+        } else {
+            // Native serializes a HashMap after adding routing state. Appending this key to an
+            // already randomized JSON map would create a stable last-field fingerprint.
+            crate::request_identity::randomize_synthesized_client_metadata(metadata);
         }
-        metadata.extend(existing);
     }
     prepared.body = Bytes::from(serde_json::to_vec(&value).map_err(|_| Error::InvalidRequest)?);
     if prepared.body.len() > assembly_limit {

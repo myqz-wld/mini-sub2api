@@ -240,6 +240,9 @@ async fn expired_http_context_rejects_delta_before_delivery_and_accepts_a_full_r
 #[path = "server_native_metadata_tests.rs"]
 mod native_metadata;
 
+#[path = "server_routing_token_tests.rs"]
+mod routing_tokens;
+
 #[tokio::test]
 async fn aggregated_http_retains_item_events_when_terminal_omits_output() {
     let captures = Arc::new(Mutex::new(Vec::<Value>::new()));

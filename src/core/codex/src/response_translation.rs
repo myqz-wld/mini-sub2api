@@ -144,12 +144,7 @@ impl ResponseStateContext {
             .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
             .clone();
         if let Some(operation) = &operation
-            && value.get("type").and_then(Value::as_str) == Some("response.metadata")
-            && let Some(headers) = value.get("headers").and_then(Value::as_object)
-            && let Some(token) = headers
-                .iter()
-                .find(|(name, _)| name.eq_ignore_ascii_case("x-codex-turn-state"))
-                .and_then(|(_, value)| value.as_str())
+            && let Some(token) = crate::subscription_routing::metadata_token(&value)
         {
             self.store.contexts.learn_response_turn(operation, token)?;
         }

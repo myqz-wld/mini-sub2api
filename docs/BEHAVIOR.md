@@ -70,6 +70,10 @@ still requires the same session, including remote-only continuation.
 Retain the first upstream turn token across same-turn retries/reconnects. HTTP learns it from
 response headers and replays it only in headers; WS also learns `response.metadata` tokens and
 carries the selected token in `response.create` metadata, preserving a native carrier's key order.
+Synthesized metadata includes the token in native-style randomized key ordering. Routing tokens are
+opaque header values with a separate 64 KiB limit, retain the first value (including an empty one),
+and consume actual retained-state budget; the 512-byte logical-ID limit does not apply. WS metadata
+accepts a string or the first array value, matching the pinned native parser.
 Failed-turn facts follow idle expiry/capacity; admitted work is protected. Completed prewarm may
 transfer its token only to the first business turn on that socket/thread. Hidden setup updates the
 business frame before sending. Native memory-consolidation turn/root-turn IDs are projected when

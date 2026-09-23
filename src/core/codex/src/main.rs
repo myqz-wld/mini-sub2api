@@ -68,6 +68,7 @@ mod subscription_index;
 mod subscription_normalizer;
 mod subscription_prepare;
 mod subscription_request;
+mod subscription_routing;
 mod terminal_detection;
 #[cfg(test)]
 mod test_support;

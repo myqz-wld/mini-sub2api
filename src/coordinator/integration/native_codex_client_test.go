@@ -190,6 +190,11 @@ websocket_connect_timeout_ms = 3000
 	for _, key := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
 		command.Env = append(command.Env, key+"="+denied.URL)
 	}
+	return startNativeProcess(t, options, ctx, cancel, command)
+}
+
+func startNativeProcess(t *testing.T, options nativeOptions, ctx context.Context, cancel context.CancelFunc, command *exec.Cmd) *nativeClient {
+	t.Helper()
 	input, err := command.StdinPipe()
 	if err != nil {
 		cancel()
@@ -206,7 +211,7 @@ websocket_connect_timeout_ms = 3000
 		t.Fatal("start isolated native test process")
 	}
 	readTimeout := 15 * time.Second
-	if deadline > 30*time.Second {
+	if options.deadline > 30*time.Second {
 		readTimeout = 90 * time.Second
 	}
 	client := &nativeClient{t: t, input: input, events: make(chan map[string]any, 128), readTimeout: readTimeout, observe: options.observe}

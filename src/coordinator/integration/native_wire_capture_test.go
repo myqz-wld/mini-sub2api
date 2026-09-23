@@ -40,6 +40,7 @@ type nativeCapture struct {
 	metadataOnlyFooter bool
 	codeModeLoop       bool
 	httpRoutingToken   bool
+	longRoutingToken   bool
 }
 
 func newNativeCapture(t *testing.T) *nativeCapture {
@@ -130,9 +131,14 @@ func (c *nativeCapture) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	c.mu.Lock()
 	withRoutingToken := c.httpRoutingToken
+	longToken := c.longRoutingToken
 	c.mu.Unlock()
 	if withRoutingToken {
-		w.Header().Set("X-Codex-Turn-State", "native-header-token")
+		token := "native-header-token"
+		if longToken {
+			token += strings.Repeat("x", 780)
+		}
+		w.Header().Set("X-Codex-Turn-State", token)
 	}
 	for _, event := range events {
 		encoded, _ := json.Marshal(event)
@@ -168,7 +174,11 @@ func (c *nativeCapture) capture(r *http.Request, body, encoded []byte, connectio
 			output = append(output, map[string]any{"type": "message", "id": fmt.Sprintf("msg_native_%d", c.business), "role": "assistant", "phase": "final_answer", "content": []any{map[string]any{"type": "output_text", "text": "synthetic answer"}}})
 		}
 	}
-	events := []map[string]any{{"type": "response.created", "response": map[string]any{"id": id}}, {"type": "response.metadata", "headers": map[string]any{"x-codex-turn-state": "native-routing-token"}}}
+	routingToken := "native-routing-token"
+	if c.longRoutingToken {
+		routingToken += strings.Repeat("x", 780)
+	}
+	events := []map[string]any{{"type": "response.created", "response": map[string]any{"id": id}}, {"type": "response.metadata", "headers": map[string]any{"x-codex-turn-state": routingToken}}}
 	for index, item := range output {
 		events = append(events, map[string]any{"type": "response.output_item.done", "output_index": index, "item": item})
 	}

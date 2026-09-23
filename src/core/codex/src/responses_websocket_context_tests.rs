@@ -18,10 +18,10 @@ async fn context_upstream(
             } else {
                 json!({"type":"message","id":format!("msg_context_{n}"),"role":"assistant","content":[{"type":"output_text","text":"answer"}]})
             };
-            let token = if n == 1 {"routing-first"} else {"routing-later"};
+            let token = if n == 1 {"routing-first".repeat(80)} else {"routing-later".into()};
             for event in [
                 json!({"type":"response.created","response":{"id":format!("resp_wscontext_{n}"),"session_id":session,"metadata":{"x-codex-turn-state":token}}}),
-                json!({"type":"response.metadata","headers":{"x-codex-turn-state":token}}),
+                json!({"type":"response.metadata","headers":{"x-codex-turn-state":[token,"ignored-array-tail"]}}),
                 json!({"type":"response.metadata","headers":{"x-codex-turn-state":"routing-ignored"}}),
                 json!({"type":"response.output_item.done","output_index":0,"item":output}),
                 json!({"type":"response.completed","response":{"id":format!("resp_wscontext_{n}"),"session_id":session,"output":[output],"metadata":{"x-codex-turn-state":"routing-ignored"}}}),
@@ -164,7 +164,7 @@ async fn live_ws_continues_without_bulk_history_and_retains_only_its_turn_token(
         for index in [1, 2] {
             assert_eq!(
                 values[index]["client_metadata"]["x-codex-turn-state"],
-                "routing-first"
+                "routing-first".repeat(80)
             );
             assert_eq!(
                 values[index]["client_metadata"]["turn_id"],

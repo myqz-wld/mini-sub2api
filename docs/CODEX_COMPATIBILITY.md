@@ -67,7 +67,7 @@ The same assertion now runs in the native message and transport-lifecycle compar
 | Surface | Verified rule / correction |
 |---|---|
 | WS envelope | `stream` follows `store`; it was incorrectly appended after other fields. |
-| `client_metadata` | Native uses a randomized Rust `HashMap`; independent CLI processes produce different key orders. Preserve each complete native carrier's incoming order, including the slot replaced by a trusted routing token. Synthesized carriers remain randomized. |
+| `client_metadata` | Native uses a randomized Rust `HashMap`; independent CLI processes produce different key orders. Preserve each complete native carrier's incoming order, including the slot replaced by a trusted routing token. Synthesized carriers include learned routing state in randomization, including after hidden WS setup; the token is not always appended last. |
 | HTTP routing token | Learn it from response headers and replay it only as a header. Do not learn it from SSE `response.metadata` or add it to HTTP JSON. |
 | Lite setup | Native `additional_tools` has no message metadata; its base message has an empty metadata object. Generated setup follows that shape; proven native prefixes retain supplied fields without invented `turn_id`/`create_time`. Business-item metadata remains intact. |
 | No-tool ordinary requests | Emit `tools: []` when the caller omits tools, matching the native non-Lite builder. Lite still omits top-level tools. Explicit caller `null` follows the existing caller-control policy. |
@@ -100,16 +100,55 @@ for the native child. Raw bounded captures stayed in memory; retained results co
   After the final omitted-tools correction, all 114 affected native cases and the standard suite
   passed again, including the strict built-in captures.
 
-These checks establish local client/gateway compatibility. They do not establish live-provider
-acceptance, model entitlement or remote fingerprint classification. Subscription rewrites scoped
+These loopback checks establish local client/gateway compatibility. The separately authorized live
+checks below establish provider acceptance for their tested scenarios. Subscription rewrites scoped
 identities, credentials and turn timestamps; complete payloads/compressed bytes consequently differ.
-The wire-order fixture uses HTTP/1.1 and WS; TLS evidence covers macOS ClientHello capabilities,
-not Linux, negotiated HTTP/2 SETTINGS/HPACK or packet timing. Bare/third-party requests retain the
-documented caller-control policy (including explicit nulls and omitted bases) and acquire no native
-environment or Code Mode runtime. They are not claimed to reproduce every default CLI request.
+
+## Real upstream continuation evidence
+
+On 2026-09-22, explicit authorization enabled isolated tests against the Codex Subscription backend
+using an existing login. The official 0.156.0 CLI ran both directly and through the gateway; Astra
+used its matching Code Mode host and actual nested tool callbacks. Refresh tokens were not copied,
+the original login was verified unchanged, and raw requests/responses remained memory-only.
+
+| Live matrix | Passed cases | Assertion |
+|---|---:|---|
+| Native direct / gateway / captured gateway × gpt-5.5 / Astra × HTTP / WS configuration | 12 | Three user turns, exactly one real tool callback, and a remembered synthetic label/count without restating them |
+| Ordinary caller × two models × SSE / WS × full / referenced history | 8 | Five turns, state changes and reasoning visibility/restoration through both continuation forms |
+| Ordinary tool / schema × two models × SSE / WS | 4 | Actual tool output round trip and requested structured result |
+| Tool return after closing the original WS × two models | 2 | Referenced tool result restored on a new socket, followed by a successful new user turn |
+
+The four captured-gateway cases compared **18 paired requests** (8 HTTP, 10 WS) at native ingress
+and Core egress before forwarding to the real provider. Assertions cover recursive JSON field order,
+presence/null/empty values, scalar content with scoped identity/timestamp projection, and complete
+header order/casing with stable values. Native-direct WS is a requested capability and can fall back;
+the captured cases assert the actual HTTP/WS transport. Repeated validation runs are not extra cases.
+
+Live testing found a concrete failure that short mock tokens missed: an upstream HTTP 200 supplied
+a **780-byte** `x-codex-turn-state`, which exceeded the gateway's 512-byte logical-ID validator and
+became a gateway 503. Routing state now has separate HTTP-header validation and a **64 KiB** bound;
+persisted logical IDs retain their 512-byte bound. Tokens stay memory-only and consume actual
+Core/Key/session state budget. Native first-token ownership, string/first-array metadata values and
+present empty strings are preserved. Long-token HTTP, WS, prewarm, turn-reset and capacity regressions
+now run locally, including official CLI captures with long synthetic tokens.
+
+The relay preserves request bodies/zstd, WS frames and header bytes except destination/path/Host;
+it requires the same live credential before forwarding. Its TLS connection uses Go and HTTP/1.1,
+so paired live captures prove the application request checks above, not native TLS/HTTP/2 equivalence.
+Direct CLI and ordinary gateway live cases use their own provider connections. Rejection, frame-byte
+preservation and request-bound tests for the relay use synthetic credentials with no provider dial.
+
+Neither these live cases nor macOS ClientHello checks certify Linux TLS, negotiated HTTP/2
+SETTINGS/HPACK, packet timing or remote fingerprint classification. Live coverage uses two models
+at low reasoning effort; all-model entitlement, forced live compaction and exhaustive failure paths
+remain outside this run. Bare/third-party requests retain the documented caller-control policy
+(including explicit nulls and omitted bases) and acquire no native environment or Code Mode runtime.
+They are not claimed to reproduce every default CLI request.
 
 ## Local validation
 
-Rust workspace tests (472 Core + 7 protocol), Go tests with the race detector, formatting, clippy,
-vet, exact upstream prompt regeneration and the release build passed. Installed-artifact checks and scans of the
-generated binaries found no private home/repository prefixes or deployment identifiers.
+Rust workspace tests (478 Core + 7 protocol), Go tests with the race detector, formatting, clippy
+and vet passed after the live-routing corrections. Affected actual-CLI loopback captures passed
+again with long routing tokens and strict wire checks. The release build and installed-artifact
+checks passed; binary scans found no private home/repository prefixes or deployment identifiers.
+Exact upstream prompt regeneration was verified during the initial 0.156.0 alignment.

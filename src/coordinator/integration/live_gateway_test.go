@@ -29,14 +29,25 @@ func newLiveSubscriptionGateway(t *testing.T) nativeGateway {
 }
 
 func newLiveSubscriptionGatewayBounded(t *testing.T, maxHTTP int32) nativeGateway {
+	return newLiveSubscriptionGatewayAt(t, maxHTTP, "https://chatgpt.com/backend-api/codex/responses", false)
+}
+
+func newLiveSubscriptionGatewayAt(t *testing.T, maxHTTP int32, upstream string, httpOnly bool) nativeGateway {
 	t.Helper()
+	if upstream != "https://chatgpt.com/backend-api/codex/responses" {
+		assertLoopbackURL(t, upstream)
+	}
 	if maxHTTP < 1 || maxHTTP > 64 {
 		t.Fatal("live fixture HTTP bound must be between 1 and 64")
 	}
 	if os.Getenv("MINI_SUB2API_LIVE_SUBSCRIPTION") != "1" {
 		t.Fatal("live Subscription requires explicit opt-in")
 	}
-	t.Setenv("RUST_LOG", "off")
+	logs := "off"
+	if os.Getenv("MINI_SUB2API_LIVE_DIAGNOSTICS") == "1" {
+		logs = "off,mini_sub2api_core_codex::request_diagnostics=info,mini_sub2api_core_codex::server::http_forward=info,mini_sub2api_core_codex::response_sse_diagnostics=info"
+	}
+	t.Setenv("RUST_LOG", logs)
 	authPath := os.Getenv("MINI_SUB2API_LIVE_AUTH_FILE")
 	if authPath == "" {
 		home, err := os.UserHomeDir()
@@ -70,7 +81,7 @@ func newLiveSubscriptionGatewayBounded(t *testing.T, maxHTTP int32) nativeGatewa
 	coreDir := filepath.Join(stateDir, "core-codex")
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, binary, "credential", "import-codex-auth", "--state-dir", coreDir, "--auth-file", authPath, "--upstream-url", "https://chatgpt.com/backend-api/codex/responses")
+	command := exec.CommandContext(ctx, binary, "credential", "import-codex-auth", "--state-dir", coreDir, "--auth-file", authPath, "--upstream-url", upstream)
 	command.Stderr = io.Discard
 	output, err := command.Output()
 	if err != nil {
@@ -96,6 +107,13 @@ func newLiveSubscriptionGatewayBounded(t *testing.T, maxHTTP int32) nativeGatewa
 	handler := httpapi.NewHandler(store, supervisor, nil)
 	var calls atomic.Int32
 	guard := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/backend-api/codex/responses" {
+			if httpOnly && r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			r.URL.Path = "/v1/responses"
+		}
 		if r.Method == http.MethodPost && calls.Add(1) > maxHTTP {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return

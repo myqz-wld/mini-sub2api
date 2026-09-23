@@ -376,7 +376,7 @@ pub(crate) fn has_complete_native_client_metadata(value: &Value) -> bool {
     .all(|name| metadata.get(*name).and_then(Value::as_str).is_some())
 }
 
-fn randomize_synthesized_client_metadata(metadata: &mut Map<String, Value>) {
+pub(crate) fn randomize_synthesized_client_metadata(metadata: &mut Map<String, Value>) {
     let mut source = std::mem::take(metadata);
     let mut randomized = HashMap::new();
     for name in [

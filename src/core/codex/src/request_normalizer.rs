@@ -28,6 +28,7 @@ pub struct PreparedEmulatedRequest {
     pub(crate) pending_compaction: Option<PendingCompaction>,
     pub(crate) operation: Option<crate::subscription_context::Operation>,
     pub(crate) rebuilt_reference: bool,
+    pub(crate) native_client_metadata: bool,
 }
 
 pub(crate) struct CodexStateContext<'a> {
@@ -197,6 +198,7 @@ pub(crate) async fn prepare_identity_request(
                         pending_compaction: projection.pending_compaction,
                         operation,
                         rebuilt_reference: false,
+                        native_client_metadata: false,
                     })
                 })()
                 .map_err(classify_projection_error)
@@ -287,6 +289,7 @@ fn prepare_codex_overlay(
         pending_compaction: None,
         operation: None,
         rebuilt_reference: false,
+        native_client_metadata: false,
     })
 }
 

@@ -24,6 +24,7 @@ func TestNative1560WireShapeCapture(t *testing.T) {
 					capture := newNativeCapture(t)
 					capture.mu.Lock()
 					capture.httpRoutingToken = repeat == 1
+					capture.longRoutingToken = repeat == 1
 					capture.mu.Unlock()
 					gateway := newNativeGatewayForWireShape(t, capture.server.URL, true, !ws)
 					options := nativeOptions{endpoint: gateway.server.URL, metadataEndpoint: capture.server.URL, bearer: gateway.secret, model: model, ws: ws, builtinOpenAI: true, base: "Synthetic ordered wire probe"}
