@@ -330,7 +330,7 @@ func assertCallerToolWire(t *testing.T, node *nativeJSONShape, value any, path s
 	t.Helper()
 	object, _ := value.(map[string]any)
 	kind, _ := object["type"].(string)
-	orders := map[string][]string{"function": {"type", "name", "description", "strict", "allowed_callers", "defer_loading", "parameters", "output_schema"}, "namespace": {"type", "name", "description", "tools"}, "custom": {"type", "name", "description", "allowed_callers", "defer_loading", "format"}}
+	orders := map[string][]string{"function": {"type", "name", "description", "strict", "allowed_callers", "defer_loading", "parameters"}, "namespace": {"type", "name", "description", "tools"}, "custom": {"type", "name", "description", "allowed_callers", "defer_loading", "format"}}
 	if order, ok := orders[kind]; ok {
 		assertCallerObject(t, node, order, []string{"type", "name", "description"}, path)
 	}
@@ -358,7 +358,7 @@ func assertCallerSchemaWire(t *testing.T, node *nativeJSONShape, path string) {
 	if node == nil || node.kind != "object" {
 		return
 	}
-	assertCallerObject(t, node, []string{"$ref", "type", "description", "encrypted", "enum", "items", "properties", "required", "additionalProperties", "anyOf", "oneOf", "allOf", "$defs", "definitions"}, nil, path)
+	assertCallerObject(t, node, []string{"$ref", "type", "description", "encrypted", "enum", "items", "minItems", "properties", "required", "additionalProperties", "anyOf", "oneOf", "allOf", "$defs", "definitions"}, nil, path)
 	for _, name := range []string{"properties", "$defs", "definitions"} {
 		if properties := node.fields[name]; properties != nil && properties.kind == "object" {
 			if !slices.IsSorted(properties.keys) {

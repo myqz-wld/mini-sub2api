@@ -36,6 +36,9 @@ fn filter_container(object: &mut Map<String, Value>, request_id: &str) {
     if object.get("type").and_then(Value::as_str) == Some("error") {
         // Responses also permits a flat error event. Keep its envelope/correlation fields,
         // but never provider messages, arbitrary error extensions or diagnostic identifiers.
+        if object.get("error").is_some_and(Value::is_null) {
+            object.remove("error");
+        }
         if !object.contains_key("error") {
             let error = public_error(Some(object));
             object.insert("code".into(), error["code"].clone());
@@ -49,6 +52,7 @@ fn filter_container(object: &mut Map<String, Value>, request_id: &str) {
                     | "code"
                     | "message"
                     | "response_id"
+                    | "stream_id"
                     | "sequence_number"
                     | "status"
                     | "headers"
@@ -71,11 +75,10 @@ fn filter_container(object: &mut Map<String, Value>, request_id: &str) {
         {
             object.remove("sequence_number");
         }
-        if object
-            .get("response_id")
-            .is_some_and(|value| !value.is_string())
-        {
-            object.remove("response_id");
+        for name in ["response_id", "stream_id"] {
+            if object.get(name).is_some_and(|value| !value.is_string()) {
+                object.remove(name);
+            }
         }
     }
 }
@@ -220,6 +223,24 @@ fn retry_delay(message: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nullable_flat_errors_remain_sanitized_and_invalid_correlation_shapes_are_removed() {
+        let mut event = json!({"type":"error","error":null,"code":"rate_limit_exceeded",
+            "message":"synthetic-private Try again in 2s", "stream_id":{"private":"value"},
+            "response_id":42,"debug":"synthetic-private"});
+        filter_response(&mut event, "req_test");
+        assert_eq!(
+            event,
+            json!({"type":"error","code":"rate_limit_exceeded",
+            "message":"The upstream request failed. Try again in 2s."})
+        );
+        let mut completed =
+            json!({"type":"response.completed","response":{"error":null,"output":[]}});
+        let original = completed.clone();
+        filter_response(&mut completed, "req_test");
+        assert_eq!(completed, original);
+    }
 
     #[test]
     fn retry_delay_survives_without_provider_text_or_extensions() {

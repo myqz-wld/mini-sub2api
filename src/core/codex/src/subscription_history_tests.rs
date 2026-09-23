@@ -3,6 +3,9 @@ use super::*;
 #[path = "subscription_history_config_tests.rs"]
 mod config_tests;
 
+#[path = "subscription_history_metadata_tests.rs"]
+mod metadata_tests;
+
 fn assistant() -> Value {
     json!({"type":"message","id":"msg_history","status":"completed","role":"assistant",
         "content":[{"type":"output_text","text":"answer","annotations":[],"logprobs":[]}]})

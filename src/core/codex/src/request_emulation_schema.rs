@@ -40,6 +40,7 @@ pub(super) fn canonicalize(value: &mut Value) {
             "encrypted",
             "enum",
             "items",
+            "minItems",
             "properties",
             "required",
             "additionalProperties",

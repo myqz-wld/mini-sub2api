@@ -102,9 +102,15 @@ impl WebSocketConnector {
 
     pub(crate) async fn connect(
         &self,
-        request: Request,
+        mut request: Request,
         config: WebSocketConfig,
     ) -> Result<WebSocketHandshake, WebSocketError> {
+        let uri = request.uri().clone();
+        if !request.headers().contains_key(http::header::COOKIE)
+            && let Some(cookies) = crate::cloudflare_cookies::request_header(&uri)
+        {
+            request.headers_mut().insert(http::header::COOKIE, cookies);
+        }
         let proxy = self.resolve_proxy(&request)?;
         let tls_config = self.fresh_tls_config()?;
         let result = tokio::time::timeout(
@@ -118,6 +124,15 @@ impl WebSocketConnector {
                 "websocket connection timed out",
             ))
         })?;
+        match &result {
+            Ok((_, response)) => {
+                crate::cloudflare_cookies::store_response(&uri, response.headers())
+            }
+            Err(WebSocketError::Http(response)) => {
+                crate::cloudflare_cookies::store_response(&uri, response.headers());
+            }
+            Err(_) => {}
+        }
         match result {
             Ok((socket, response)) => Ok(WebSocketHandshake::Connected {
                 socket: Box::new(socket),
@@ -388,3 +403,7 @@ fn take_next_address(addresses: &mut VecDeque<SocketAddr>) -> io::Result<SocketA
 #[cfg(test)]
 #[path = "websocket_connector_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "websocket_cookie_tests.rs"]
+mod cookie_tests;

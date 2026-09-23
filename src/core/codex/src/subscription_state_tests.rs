@@ -28,6 +28,9 @@ mod history_expiry_tests;
 #[path = "subscription_history_import_tests.rs"]
 mod history_import_tests;
 
+#[path = "subscription_compatibility_tests.rs"]
+mod compatibility_tests;
+
 #[path = "subscription_compaction_tests.rs"]
 mod compaction_tests;
 

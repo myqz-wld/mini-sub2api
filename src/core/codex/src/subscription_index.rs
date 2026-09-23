@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 mod history_match;
 pub(crate) use history_match::{
     candidate_key, completion_items_compatible, completion_key, hidden_ciphertext_compatible,
-    ids_compatible,
+    ids_compatible, metadata_compatible,
 };
 
 pub(crate) fn canonical(value: &Value) -> Vec<u8> {
@@ -102,7 +102,7 @@ impl Interner {
             return item;
         }
         let key = self.key(candidate_key(&value));
-        let lookup_key = if crate::reasoning_visibility::ciphertext(&value).is_some() {
+        let lookup_key = if history_match::needs_history_projection(&value) {
             self.key(history_match::history_lookup_key(&value))
         } else {
             Arc::clone(&key)
@@ -125,7 +125,7 @@ impl Interner {
     }
 
     pub(crate) fn lookup_history(&self, value: &Value) -> Option<u64> {
-        if crate::reasoning_visibility::ciphertext(value).is_some() {
+        if history_match::needs_history_projection(value) {
             self.lookup_bytes(history_match::history_lookup_key(value))
         } else {
             self.lookup(value)

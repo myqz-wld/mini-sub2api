@@ -48,7 +48,29 @@ pub(crate) fn ids_compatible(request: &Value, saved: &Value) -> bool {
 pub(crate) fn history_lookup_key(item: &Value) -> Vec<u8> {
     let mut item = item.clone();
     crate::reasoning_visibility::remove_ciphertext(&mut item);
+    // Lookup tolerates omitted server decoration; exact interning/completion keys do not.
+    if is_assistant_message(&item)
+        && let Some(object) = item.as_object_mut()
+    {
+        object.remove("metadata");
+    }
     candidate_key(&item)
+}
+
+pub(super) fn needs_history_projection(item: &Value) -> bool {
+    crate::reasoning_visibility::ciphertext(item).is_some()
+        || (is_assistant_message(item) && item.get("metadata").is_some())
+}
+
+pub(crate) fn metadata_compatible(request: &Value, saved: &Value) -> bool {
+    !is_assistant_message(request)
+        || request.get("metadata").is_none()
+        || request.get("metadata") == saved.get("metadata")
+}
+
+fn is_assistant_message(item: &Value) -> bool {
+    item.get("type").and_then(Value::as_str) == Some("message")
+        && item.get("role").and_then(Value::as_str) == Some("assistant")
 }
 
 pub(crate) fn hidden_ciphertext_compatible(request: &Value, saved: &Value, hidden: bool) -> bool {

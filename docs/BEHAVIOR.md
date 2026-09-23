@@ -46,6 +46,9 @@ Compare normalized caller input and retained public-ID output before upstream id
   arguments and ciphertext; object-key order is irrelevant.
 - Ignore empty annotations/logprobs on assistant `output_text` and completed status on
   message/direct-tool items. Nonempty decoration remains significant.
+- An assistant message's top-level `metadata` may be omitted during lookup. Explicit metadata
+  conflicts remain significant; stored histories and provider completion checks remain exact.
+  This does not ignore nested business metadata or metadata on user/tool items.
 - Message IDs may be omitted; direct-tool item IDs may be omitted only with the same valid
   `call_id`. Explicit and other resource/reference IDs remain strict.
 - Validate IDs/dependencies before longest-prefix selection. Calls require nonblank IDs; each result

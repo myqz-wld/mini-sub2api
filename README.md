@@ -77,6 +77,8 @@ OpenCode custom providers and bare clients can associate full histories without 
   after three idle hours or earlier capacity eviction. Full input can rebuild it.
 - Anonymous full history can import old turn identities after expiry or restart once message/tool
   dependencies are self-contained; original session ownership and scoped aliases remain intact.
+- History lookup tolerates omitted assistant-message metadata; supplied conflicts remain
+  significant and matching stays within the current Key.
 - Subscription preserves caller instructions and tool order, inserts no default base, and requests
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
 - Valid caller turn-start timestamps survive normalization; omitted values reuse the recorded turn
@@ -87,8 +89,11 @@ OpenCode custom providers and bare clients can associate full histories without 
   header order/casing against independently captured 0.156.0 baselines. Late identity insertion
   and automatic WS continuation preserve native field positions.
 - Subscription response metadata headers use the public HTTP header policy. Protocol errors
-  expose reviewed codes and generic messages; supported numeric retry delays survive. Private SSE
+  preserve stream correlation, reviewed codes and generic messages, including flat errors with
+  `error: null`; supported numeric retry delays survive. Private SSE
   IDs/comments/extensions are removed. Model text, tool content and API-key bodies remain opaque.
+- HTTPS and WSS share allowlisted infrastructure routing cookies, including `__oailb`, with
+  secure/domain/path/expiry checks. Account and login cookies are never stored in that shared jar.
 - Authorized [real upstream tests](docs/CODEX_COMPATIBILITY.md#real-upstream-continuation-evidence)
   cover multi-turn memory, tool outputs and WS reconnects; long opaque routing tokens have a
   separate bounded budget and no longer hit the logical-ID length limit.

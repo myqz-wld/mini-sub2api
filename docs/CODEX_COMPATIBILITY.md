@@ -61,6 +61,11 @@ Header-only sandbox/workspace input remains a gateway compatibility boundary: ge
 metadata can replace that header input. It is not the normal native 0.156.0 HTTP request shape.
 This timestamp change does not expand sandbox/workspace header fallback or alter permission policy.
 
+Empty or partial body turn metadata receives missing generated `model` and `reasoning_effort`
+values. Explicit values survive; complete native metadata remains byte-stable. Native sparse
+memory and startup-prewarm shapes keep their existing exceptions. Final identity projection
+derives header metadata from the canonical body; header-only model/effort extras do not override it.
+
 ## Complete history after expiry or restart
 
 When anonymous callers replay complete content after local history is gone, old per-item turn
@@ -181,6 +186,8 @@ The same assertion now runs in the native message and transport-lifecycle compar
 | WS envelope | `stream` follows `store`; it was incorrectly appended after other fields. |
 | `client_metadata` | Native uses a randomized Rust `HashMap`; independent CLI processes produce different key orders. Preserve each complete native carrier's incoming order, including the slot replaced by a trusted routing token. Synthesized carriers include learned routing state in randomization, including after hidden WS setup; the token is not always appended last. |
 | HTTP routing token | Learn it from response headers and replay it only as a header. Do not learn it from SSE `response.metadata` or add it to HTTP JSON. |
+| Infrastructure cookies | HTTPS and WSS share the restricted jar, including `__oailb`. Successful and rejected upgrades refresh it; explicit Cookie headers take precedence. Host/path/secure/expiry checks apply, and account/authentication cookies are excluded. |
+| Function/schema serialization | Omit local `function.output_schema`, including namespace children. Place `minItems` after `items` and before composition/object fields, matching native schema serialization and Lite UUIDv5 input bytes. Response text schemas and schema property names remain intact. |
 | Lite setup | Native `additional_tools` has no message metadata; its base message has an empty metadata object. Generated setup follows that shape; proven native prefixes retain supplied fields without invented `turn_id`/`create_time`. Business-item metadata remains intact. |
 | No-tool ordinary requests | Emit `tools: []` when the caller omits tools, matching the native non-Lite builder. Lite still omits top-level tools. Explicit caller `null` follows the existing caller-control policy. |
 | Built-in provider | OpenAI adds `Version: 0.156.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
@@ -233,7 +240,9 @@ rate-limit and timing headers remain protocol-visible.
 Schema-owned errors in JSON/SSE/WS retain a fixed vocabulary of native error codes/types, replace
 provider messages with a generic message and discard arbitrary error extensions. The native rate
 limit parser's numeric retry delay is retained with a one-day bound, without surrounding provider
-text. Subscription SSE preserves matching event names and data, strips event IDs/retry extensions
+text. Error events preserve translated `stream_id` correlation; `error: null` is treated as an
+absent nested error so flat `code/message` are sanitized and retained. Subscription SSE preserves
+matching event names and data, strips event IDs/retry extensions
 and normalizes comments/empty heartbeats. API-key response bodies/frames keep their existing
 transparent behavior. User metadata, model text, tool arguments/results and ciphertext are opaque;
 this boundary does not claim arbitrary-content DLP.

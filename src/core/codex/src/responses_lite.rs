@@ -207,3 +207,7 @@ fn reorder(object: &mut Map<String, Value>, order: &[&str]) {
 #[cfg(test)]
 #[path = "responses_lite_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "responses_schema_order_tests.rs"]
+mod schema_order_tests;

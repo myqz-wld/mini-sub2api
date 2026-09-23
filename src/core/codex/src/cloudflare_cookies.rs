@@ -1,11 +1,14 @@
+use http::HeaderMap;
+use http::Uri;
+use http::header::SET_COOKIE;
 use reqwest::cookie::CookieStore;
 use reqwest::cookie::Jar;
 use reqwest::header::HeaderValue;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
-// This process-wide store intentionally accepts only Cloudflare infrastructure
-// cookies. Account, session, authentication, and arbitrary application cookies
+// This process-wide store accepts only Cloudflare infrastructure cookies and
+// the __oailb routing cookie. Account, session, authentication, and application cookies
 // must never be added to this allowlist.
 static STORE: LazyLock<Arc<ChatGptCloudflareCookieStore>> =
     LazyLock::new(|| Arc::new(ChatGptCloudflareCookieStore::default()));
@@ -39,6 +42,26 @@ impl CookieStore for ChatGptCloudflareCookieStore {
 
 pub(crate) fn apply(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
     builder.cookie_provider(Arc::clone(&STORE))
+}
+
+pub(crate) fn request_header(uri: &Uri) -> Option<HeaderValue> {
+    let mut header = STORE.cookies(&cookie_url(uri)?)?;
+    header.set_sensitive(true);
+    Some(header)
+}
+
+pub(crate) fn store_response(uri: &Uri, headers: &HeaderMap) {
+    if let Some(url) = cookie_url(uri) {
+        STORE.set_cookies(&mut headers.get_all(SET_COOKIE).iter(), &url);
+    }
+}
+
+fn cookie_url(uri: &Uri) -> Option<reqwest::Url> {
+    let mut url = reqwest::Url::parse(&uri.to_string()).ok()?;
+    if url.scheme() == "wss" {
+        url.set_scheme("https").ok()?;
+    }
+    is_chatgpt_cookie_url(&url).then_some(url)
 }
 
 fn is_chatgpt_cookie_url(url: &reqwest::Url) -> bool {
@@ -93,6 +116,7 @@ fn is_allowed_cloudflare_cookie_name(name: &str) -> bool {
             | "__cfruid"
             | "__cfseq"
             | "__cfwaitingroom"
+            | "__oailb"
             | "_cfuvid"
             | "cf_clearance"
             | "cf_ob_info"
@@ -104,6 +128,42 @@ fn is_allowed_cloudflare_cookie_name(name: &str) -> bool {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn routing_cookie_preserves_secure_host_path_and_expiry_boundaries() {
+        let store = ChatGptCloudflareCookieStore::default();
+        let uri: Uri = "wss://cookie-unit.chatgpt.com/backend-api/responses"
+            .parse()
+            .unwrap();
+        let url = cookie_url(&uri).unwrap();
+        let routing = HeaderValue::from_static("__oailb=synthetic; Path=/backend-api; Secure");
+        let session = HeaderValue::from_static("session=private; Path=/; Secure");
+        store.set_cookies(&mut [&routing, &session].into_iter(), &url);
+        assert_eq!(store.cookies(&url).unwrap(), "__oailb=synthetic");
+        assert!(
+            store
+                .cookies(&reqwest::Url::parse("https://cookie-unit.chatgpt.com/outside").unwrap())
+                .is_none()
+        );
+        assert!(
+            store
+                .cookies(
+                    &reqwest::Url::parse("https://other.chatgpt.com/backend-api/responses")
+                        .unwrap()
+                )
+                .is_none()
+        );
+        for uri in [
+            "ws://cookie-unit.chatgpt.com/backend-api/responses",
+            "wss://api.openai.com/v1/responses",
+            "wss://chatgpt.com.evil.example/responses",
+        ] {
+            assert!(cookie_url(&uri.parse().unwrap()).is_none());
+        }
+        let expired = HeaderValue::from_static("__oailb=; Path=/backend-api; Max-Age=0; Secure");
+        store.set_cookies(&mut [&expired].into_iter(), &url);
+        assert!(store.cookies(&url).is_none());
+    }
 
     #[test]
     fn stores_only_cloudflare_cookies_for_https_chatgpt_hosts() {

@@ -9,7 +9,6 @@ const DOCUMENTED_TOOL_FIELDS: &[&str] = &[
     "allowed_callers",
     "defer_loading",
     "parameters",
-    "output_schema",
     "vector_store_ids",
     "filters",
     "max_num_results",
@@ -90,10 +89,8 @@ fn canonicalize_nested(object: &mut Map<String, Value>, kind: Option<&str>) {
             *child = canonical_tool(std::mem::take(child));
         }
     }
-    for name in ["parameters", "output_schema"] {
-        if let Some(schema) = object.get_mut(name) {
-            super::schema::canonicalize(schema);
-        }
+    if let Some(schema) = object.get_mut("parameters") {
+        super::schema::canonicalize(schema);
     }
     if let Some(format) = object.get_mut("format").and_then(Value::as_object_mut) {
         reorder(format, &["type", "syntax", "definition"]);
@@ -242,7 +239,6 @@ fn fields_for_kind(kind: Option<&str>) -> &'static [&'static str] {
             "allowed_callers",
             "defer_loading",
             "parameters",
-            "output_schema",
         ],
         Some("custom") => &[
             "type",

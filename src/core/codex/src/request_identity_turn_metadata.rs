@@ -3,6 +3,8 @@ use crate::lifecycle_carriers::turn_metadata_rules;
 use serde_json::Map;
 use serde_json::Value;
 
+const GENERATED_EXTRAS: &[&str] = &["model", "reasoning_effort"];
+
 pub(crate) fn bounded_turn_metadata(raw: &str) -> Option<String> {
     let mut value = serde_json::from_str::<Value>(raw).ok()?;
     value.as_object_mut()?.retain(|name, value| {
@@ -40,7 +42,10 @@ pub(super) fn complete_turn_metadata(raw: &str, generated: &str) -> Option<Strin
     let generated = generated.as_object()?;
     let complete = turn_metadata_rules()
         .filter(|rule| rule.normal_required())
-        .all(|rule| existing.contains_key(rule.name));
+        .all(|rule| existing.contains_key(rule.name))
+        && GENERATED_EXTRAS
+            .iter()
+            .all(|name| !generated.contains_key(*name) || existing.contains_key(*name));
     if complete && !stripped {
         return Some(raw.to_string());
     }
@@ -61,6 +66,13 @@ fn encode_reordered(
         }
     }
     existing.extend(remainder);
+    for name in GENERATED_EXTRAS {
+        if !existing.contains_key(*name)
+            && let Some(value) = generated.and_then(|generated| generated.get(*name))
+        {
+            existing.insert((*name).to_string(), value.clone());
+        }
+    }
     to_ascii_json_string(&Value::Object(std::mem::take(existing))).ok()
 }
 
@@ -103,6 +115,33 @@ fn is_complete_native_prewarm_metadata(metadata: &Map<String, Value>) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn complete_metadata_backfills_known_extras_and_keeps_complete_native_bytes() {
+        let generated = json!({"installation_id":"installation","session_id":"session",
+            "thread_id":"thread","agent_name":"/root","window_id":"thread:0",
+            "request_kind":"turn","auto_review_enabled":false,
+            "node_repl_auto_review_required":false,"node_repl_disabled":false,
+            "turn_started_at_unix_ms":1,"model":"gpt-5.4","reasoning_effort":"high"});
+        let mut partial = generated.clone();
+        partial.as_object_mut().unwrap().remove("model");
+        partial.as_object_mut().unwrap().remove("reasoning_effort");
+        let completed =
+            complete_turn_metadata(&partial.to_string(), &generated.to_string()).unwrap();
+        let value: Value = serde_json::from_str(&completed).unwrap();
+        assert_eq!(value["model"], "gpt-5.4");
+        assert_eq!(value["reasoning_effort"], "high");
+        let raw = serde_json::to_string_pretty(&value).unwrap();
+        assert_eq!(
+            complete_turn_metadata(&raw, &generated.to_string()).unwrap(),
+            raw
+        );
+        let memory = r#"{ "request_kind": "memory", "sandbox": "none" }"#;
+        assert_eq!(
+            complete_turn_metadata(memory, &generated.to_string()).unwrap(),
+            memory
+        );
+    }
 
     #[test]
     fn app_server_string_extras_survive_completion_and_ascii_header_encoding() {
