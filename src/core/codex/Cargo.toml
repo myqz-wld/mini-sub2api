@@ -8,12 +8,12 @@ license.workspace = true
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
-bytes = "=1.11.1"
+bytes = "=1.12.1"
 chrono = { version = "=0.4.43", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 fs2 = "0.4"
 flate2 = { version = "=1.1.8", default-features = false, features = ["zlib-rs"] }
-futures-util = "=0.3.32"
+futures-util = "=0.3.34"
 hmac = "=0.12.1"
 http = "=1.4.0"
 http-body = "=1.0.1"
@@ -48,14 +48,14 @@ webbrowser = "1"
 zlib-rs = { version = "=0.5.5", default-features = false }
 zstd = "=0.13.3"
 
-# Match Codex 0.156.0's Linux bindings; GNU keeps the platform OpenSSL library.
+# Match Codex 0.156.0's Linux bindings; scripts/cargo.sh pins static OpenSSL 3.6.4.
 # Other platforms keep their native TLS backend without an extra OpenSSL dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = "=0.10.75"
 openssl-sys = "=0.9.111"
 
-# Match the native CLI's vendored OpenSSL policy for its Linux musl release targets.
-# Cargo.lock pins openssl-src to the same source release as Codex 0.156.0.
+# Retain the upstream musl feature graph. Like Codex's release workflow,
+# scripts/cargo.sh overrides its older openssl-src with verified OpenSSL 3.6.4.
 [target.x86_64-unknown-linux-musl.dependencies]
 openssl-sys = { version = "=0.9.111", features = ["vendored"] }
 

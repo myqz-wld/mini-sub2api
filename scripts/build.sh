@@ -35,8 +35,8 @@ if [ -f src/core/codex/Cargo.toml ]; then
   done
   MINI_SUB2API_BUILD_COMMIT="$full_commit" \
     CARGO_ENCODED_RUSTFLAGS="$rust_flags" \
-    mise exec -- cargo build --release -p mini-sub2api-core-codex
-  cp build/cargo-target/release/mini-sub2api-core-codex build/bin/
+    mise exec -- bash scripts/cargo.sh build --release -p mini-sub2api-core-codex
+  cp "build/cargo-target/${CARGO_BUILD_TARGET:+$CARGO_BUILD_TARGET/}release/mini-sub2api-core-codex" build/bin/
 fi
 
 build/bin/mini-sub2api --check-installed >/dev/null

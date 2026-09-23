@@ -48,7 +48,7 @@ func buildCurrentCore() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(
-		ctx, "cargo", "build", "--locked", "-p", "mini-sub2api-core-codex",
+		ctx, "bash", "scripts/cargo.sh", "build", "-p", "mini-sub2api-core-codex",
 	)
 	command.Dir = repositoryRoot
 	command.Env = append(os.Environ(), "CARGO_NET_OFFLINE=true")
@@ -64,7 +64,7 @@ func buildCurrentCore() (string, error) {
 		return "", fmt.Errorf("cargo build failed: %w\n%s", err, output)
 	}
 	path := filepath.Join(
-		repositoryRoot, "build", "cargo-target", "debug", "mini-sub2api-core-codex",
+		repositoryRoot, "build", "cargo-target", os.Getenv("CARGO_BUILD_TARGET"), "debug", "mini-sub2api-core-codex",
 	)
 	if err := validateCoreBinary(path); err != nil {
 		return "", err

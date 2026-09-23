@@ -98,32 +98,70 @@ streamed and local compaction remain covered.
 
 ## Linux TLS builds
 
-Linux HTTP uses the same native-TLS backend as the pinned CLI. Its OpenSSL dependency graph now
-matches Codex 0.156.0 by version, registry source and checksum:
+Linux HTTP uses the native-TLS backend. The compatibility target is the **official Linux release**
+of Codex 0.156.0, whose musl build supplies OpenSSL 3.6.4 outside Cargo. Its unchanged Cargo.lock
+still contains OpenSSL 3.6.3; comparing lockfiles alone previously missed the actual release library.
+The [official changelog](https://learn.chatgpt.com/docs/changelog) records the musl update.
+The exact configuration and SHA-256 come from `.github/scripts/install-musl-openssl.sh` at the
+source commit above; `.github/workflows/rust-release.yml` supplies the AWS-LC musl setting.
 
 | Dependency | Pinned version |
 |---|---|
 | `openssl` Rust bindings | `0.10.75` |
 | `openssl-sys` | `0.9.111` |
-| `openssl-src` for vendored builds | `300.6.1+3.6.3` (OpenSSL `3.6.3`) |
+| Linked OpenSSL C library | `3.6.4`, static |
+| OpenSSL source archive SHA-256 | `9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef` |
+| Locked `openssl-src` fallback | `300.6.1+3.6.3`; bypassed by the release build |
 
-GNU/Linux retains system-library discovery. The `x86_64-unknown-linux-musl` and
-`aarch64-unknown-linux-musl` targets enable `openssl-sys/vendored`, matching the upstream target
-rules. Keep `Cargo.lock` and build with `--locked`; use a suitable target C compiler/linker plus
-Make and Perl for musl. OpenSSL's explicit build-environment overrides still apply.
+`scripts/cargo.sh` prepares this exact library for x86_64/aarch64 GNU and musl targets, sets all
+target-specific OpenSSL discovery/static-link options and adds `--locked`. GNU also uses the pinned
+library as a deliberate gateway policy; a plain upstream GNU source build can use system OpenSSL.
+The Core build script rejects a different OpenSSL version or missing static-link selection, and a
+Linux runtime test verifies the linked version. macOS/Windows keep their native HTTP TLS backends.
 
-GNU's linked system OpenSSL version remains platform-owned; matching Rust bindings alone does not
-pin that library or certify TLS fingerprint equality. macOS/Windows native HTTP TLS and rustls WS
-configuration are unchanged. Codex's custom-CA-triggered HTTP switch to rustls remains outside this
-dependency alignment.
+On a Linux build host, install a suitable target C compiler/linker, Make, Perl, curl, sha256sum and
+flock. `CC_<target_with_underscores>`, `TARGET_CC` or `CC` selects the OpenSSL compiler; each must
+name one executable. Native builds default to `cc`, same-architecture musl cross-builds to
+`musl-gcc`. Explicit Cargo `--target` and `CARGO_BUILD_TARGET` select the library target.
 
-Linux ARM64 validation passed 479 Core + 7 protocol tests on GNU and 480 Core + 7 protocol tests
-on musl, under an unprivileged user with external networking disconnected. The new loopback HTTPS
-test rejects untrusted certificates and wrong hostnames before sending HTTP, then verifies a valid
-request. The musl runtime test confirms OpenSSL 3.6.3. The x86_64 musl feature graph was checked;
-this run did not build or execute an x86_64 artifact.
-Both ARM64 release binaries run: ELF inspection confirms GNU links system `libssl.so.3` and
-`libcrypto.so.3`, while musl has no dynamic-library dependencies. GNU clippy also passed.
+```bash
+# Online preparation once per compiler/target/configuration; no provider traffic.
+mise exec -- bash scripts/prepare-openssl.sh aarch64-unknown-linux-gnu
+# Keep the same entry point for build, check, clippy and test.
+mise exec -- bash scripts/cargo.sh test --workspace --offline
+```
+
+The source download uses HTTPS, retries and a fixed checksum. A lock serializes preparation;
+incomplete builds are rebuilt, and the cache key includes the preparation script, target, compiler
+version and C flags. `--offline`, `--frozen` and `CARGO_NET_OFFLINE=true` prohibit source downloads;
+a missing source archive fails offline, and a checksum mismatch stops rebuilding. Neither case
+falls back to a system library. Standard Go integration tests
+use this same entry point offline, so prepare the cache first. Native sources/logs stay under
+`build/native-openssl/` and are not distribution inputs. OpenSSL installs into a staging directory
+with portable embedded paths; C and Rust path mapping protect release binaries from local prefixes.
+
+The related audit checked 43 selected package identities (versions, source and checksums) across
+reqwest/native-tls, hyper/h2, rustls/webpki/AWS-LC, upstream WebSocket forks, serde/JSON,
+bytes/futures, zstd and zlib-rs. `bytes` was still pinned to 1.11.1 and futures to 0.3.32; these now
+match upstream 1.12.1 and 0.3.34. The selected packages match the pinned source. Additional
+tungstenite versions belong to inbound Axum or test clients. CLI, build helpers and other
+platform/transitive dependencies remain project-owned; this is not a full lockfile identity claim.
+The build entry disables zstd system discovery and AWS-LC system-library autodetection, enforces
+static AWS-LC, and disables AWS-LC jitter entropy on musl as the official release does.
+
+Validation on Linux ARM64 runs as an unprivileged user with container networking disconnected.
+GNU and musl each pass 496 Core and 7 protocol tests, including real loopback HTTPS trust/hostname
+checks and the linked OpenSSL 3.6.4 assertion. GNU clippy, cache-concurrency checks and shell
+failure-path checks pass. On macOS, the standard test script passes 494 Core/7 protocol tests,
+clippy, Go vet/race tests and hostile-proxy OAuth coverage; the release build and installed checks
+pass. One existing manual resource benchmark remains ignored. Both musl architecture feature
+graphs were checked; no x86_64 artifact was built or executed in this validation.
+Both ARM64 release binaries execute successfully. ELF inspection shows GNU depends only on
+libgcc_s/libm/libc, with no shared libssl/libcrypto; musl has no shared-library dependencies.
+Both contain the OpenSSL 3.6.4 identity and pass build-prefix scans.
+
+Matching versions and build configuration does not certify byte-identical TLS fingerprints.
+Codex's custom-CA-triggered HTTP switch to rustls remains outside this dependency alignment.
 
 ## Field order and presence
 

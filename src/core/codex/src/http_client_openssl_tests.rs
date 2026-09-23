@@ -125,8 +125,7 @@ async fn linux_native_tls_requires_trust_and_hostname_before_sending_http() {
     }
 }
 
-#[cfg(target_env = "musl")]
 #[test]
-fn linux_musl_links_the_pinned_native_openssl_release() {
-    assert_eq!(openssl::version::number(), 0x3060_0030);
+fn linux_links_the_pinned_native_openssl_release() {
+    assert_eq!(openssl::version::number(), 0x3060_0040);
 }

@@ -22,8 +22,10 @@ build/bin/mini-sub2api --check-installed
 ```
 
 Ship both binaries and build-info.json from build/bin together. Installed checks never fetch Git remotes.
-Linux OpenSSL bindings match Codex 0.156.0. GNU builds use system OpenSSL; the x86_64/aarch64
-musl targets vendor the pinned OpenSSL 3.6.3 source. See [Linux TLS builds](docs/CODEX_COMPATIBILITY.md#linux-tls-builds).
+Linux x86_64/aarch64 GNU and musl builds statically link checksum-verified OpenSSL 3.6.4,
+matching the Codex 0.156.0 Linux release library. Build/test scripts enforce Cargo.lock and cache
+native sources under build/. Linux needs a target C compiler, Make, Perl, curl, sha256sum and flock;
+prepare the cache before offline testing. See [Linux TLS builds](docs/CODEX_COMPATIBILITY.md#linux-tls-builds).
 
 ## Start
 
