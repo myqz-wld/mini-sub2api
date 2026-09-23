@@ -98,6 +98,12 @@ streamed and local compaction remain covered.
 
 ## Linux TLS builds
 
+The project pins Rust 1.95.0 through `mise.toml`, matching the upstream
+`codex-rs/rust-toolchain.toml` and official 0.156.0 release workflow. This removes
+the compiler-version difference; it does not claim a measured wire improvement.
+The gateway retains its existing Cargo release profile, so this is not full
+build-environment identity with the upstream CLI.
+
 Linux HTTP uses the native-TLS backend. The compatibility target is the **official Linux release**
 of Codex 0.156.0, whose musl build supplies OpenSSL 3.6.4 outside Cargo. Its unchanged Cargo.lock
 still contains OpenSSL 3.6.3; comparing lockfiles alone previously missed the actual release library.

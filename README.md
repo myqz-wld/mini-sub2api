@@ -12,7 +12,7 @@ No account pool, automatic switching, Chat Completions or admin HTTP API.
 
 ## Build
 
-Go 1.26.4 and Rust 1.96.0 are pinned through mise:
+Go 1.26.4 and Rust 1.95.0 are pinned through mise. Rust matches Codex 0.156.0:
 
 ```bash
 mise install
