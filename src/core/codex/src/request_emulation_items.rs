@@ -60,6 +60,16 @@ pub(super) fn canonicalize_item(object: &mut Map<String, Value>) {
     reorder(object, fields_for_kind(kind.as_deref()));
 }
 
+// Identity projection can add an ID after the semantic normalization pass. Reorder only
+// the item envelope; never rebuild tools/schema bytes used by native deterministic IDs.
+pub(super) fn order_projected_item(object: &mut Map<String, Value>) {
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    reorder_preserving(object, fields_for_kind(kind.as_deref()));
+}
+
 pub(super) fn item_id_prefix(kind: &str) -> Option<&'static str> {
     match kind {
         "additional_tools" => Some("at"),

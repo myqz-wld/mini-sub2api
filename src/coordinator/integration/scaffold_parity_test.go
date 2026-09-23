@@ -73,6 +73,7 @@ func TestOpenCodeResponsesCapture(t *testing.T) {
 					}
 					assertScaffoldCustomSession(t, packets[i], session)
 					assertScaffoldMessageParity(t, packets[i], wire)
+					assertCallerWireContract(t, packets[i], wire, capture.tap.packets(t)[i])
 					if wire.value["previous_response_id"] != nil {
 						t.Fatal("OpenCode Subscription HTTP sent an incremental reference")
 					}

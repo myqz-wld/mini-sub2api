@@ -112,6 +112,75 @@ not an allowlist of observed differences.
 
 ## Actual CLI capture evidence
 
+### Ordinary and third-party wire checks
+
+Bare JSON/SSE/WS clients and actual OpenCode 1.18.29 now use an ordered wire oracle in addition to
+their existing content/continuation checks. Request/item field order is read from the pinned native
+Rust definitions and calibrated against independent actual CLI captures with the built-in OpenAI
+provider. The baseline includes a tool loop and a second user turn. Full header names, order and
+original casing are compared, including separately captured HTTP routing-token variants; stable
+header values are checked separately from credentials, scoped identities and runtime values.
+
+Checks cover top-level presence, explicit nulls, absent/empty bases, ordinary/Lite item envelopes,
+tool and schema ordering, nested serialized turn metadata and default boolean/identity carriers.
+The synthetic flat `client_metadata` map retains native random ordering; it is not sorted to match
+one CLI process. Caller business values remain checked by the existing message/tool oracles.
+
+These checks exposed late mutations that earlier unordered comparisons missed: scoped IDs added
+after Lite-prefix/tool-return normalization and `previous_response_id` inserted by automatic WS
+continuation appeared at the end of objects. Final Subscription projection/setup/continuation now
+restores protocol field order without reconstructing tool/schema bytes or opaque content.
+
+Explicit gateway policies remain part of the oracle: absent bases stay absent; caller nullable
+controls are not conflated with omission; unsupported Subscription metadata/sampling/output controls
+are removed; `stream_options` retains only supported sequential reasoning-summary delivery.
+Complete and incremental WS requests are validated as separate native schemas: a missing reference
+requires complete input, while null/empty references and a suffix without its reference fail.
+This is protocol alignment under those policies, not a claim that arbitrary third-party prompts,
+tool catalogs or execution environments reproduce a complete default native request.
+
+### Subscription response privacy
+
+The public header policy also applies to `headers` in response metadata/error events. Unknown,
+credential, cookie and installation headers are removed; provider request IDs use gateway aliases.
+The HTTP request ID is used for HTTP metadata and the gateway connection ID for WS metadata.
+Routing state is learned privately before filtering. Existing allowed routing-state, model,
+rate-limit and timing headers remain protocol-visible.
+
+Schema-owned errors in JSON/SSE/WS retain a fixed vocabulary of native error codes/types, replace
+provider messages with a generic message and discard arbitrary error extensions. The native rate
+limit parser's numeric retry delay is retained with a one-day bound, without surrounding provider
+text. Subscription SSE preserves matching event names and data, strips event IDs/retry extensions
+and normalizes comments/empty heartbeats. API-key response bodies/frames keep their existing
+transparent behavior. User metadata, model text, tool arguments/results and ciphertext are opaque;
+this boundary does not claim arbitrary-content DLP.
+Incomplete-response reasons are also restricted to known protocol categories. The error regression
+derives 13 classifications from the pinned SSE consumer, including fatal `invalid_prompt`, so
+redaction cannot accidentally turn those categories into generic native retryable errors.
+
+### Caller validation on 2026-09-23
+
+- The 12 bare ordered-wire cases and 18 actual OpenCode cases pass. The broader native/OpenCode
+  run initially passed 1,109 of 1,111 leaves; its two failures exposed the missing fatal error code.
+  All 24 failure/recovery cases subsequently passed, alongside the 13 new source-derived error
+  cases and the final 88-case affected matrix. Together these provide final passing evidence for
+  1,124 distinct native/OpenCode leaves; overlapping reruns are not additional cases.
+- Standard checks passed 481 Core tests (one opt-in benchmark ignored), 7 protocol tests, all Go
+  race packages, formatting, Clippy and vet. Final privacy changes also passed focused checks.
+- Eighteen real Subscription cases passed on gpt-5.5/Astra: 12 bare five-turn JSON/SSE/WS ×
+  full/reference cases, plus actual OpenCode text, read-tool and five-turn memory on both models.
+  Their 78 paired business requests (60 bare, 18 OpenCode) passed ordered wire checks. Four hidden
+  WS setup requests are separate from that business count. Original login contents stayed unchanged.
+- Initial live fixtures shared a 12-request relay across too many bare cases; each five-turn case
+  now gets its own bounded relay. The WS oracle was also corrected to validate legitimate full
+  fallback separately from incremental requests, with missing-reference negative controls. Affected
+  live cases were repeated successfully; these were fixture changes, not relaxed delivery bounds.
+
+The live relay still uses Go TLS/HTTP/1.1. These application-level captures do not certify negotiated
+TLS/HTTP2 fingerprints. No real API-key credential or additional third-party client was available.
+
+### Native client captures
+
 The official CLI and matching code-mode-host ran in isolated configuration/project directories with
 synthetic credentials. Auth/inference endpoints were loopback mocks, with outbound networking blocked
 for the native child. Raw bounded captures stayed in memory; retained results contain no payloads.

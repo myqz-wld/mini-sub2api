@@ -266,9 +266,9 @@ func TestCodexProfilesTranslateStreamingAndAggregatedTerminalFailures(t *testing
 						t.Fatalf("terminal provider response ID crossed: %#v", response)
 					}
 					errorObject, _ := response["error"].(map[string]any)
-					if errorObject["message"] != "opaque resp_raw conversation_raw" ||
-						errorObject["id"] != "opaque_nested_id" {
-						t.Fatalf("opaque HTTP terminal error changed: %#v", errorObject)
+					if errorObject["message"] != "The upstream request failed." ||
+						errorObject["code"] != "upstream_response_failed" || len(errorObject) != 2 {
+						t.Fatal("Subscription terminal error crossed the public privacy boundary")
 					}
 					record := waitForProfileRequestRecord(
 						t, fixture.store, profile.keyID,

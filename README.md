@@ -77,6 +77,12 @@ OpenCode custom providers and bare clients can associate full histories without 
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
 - Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the
   [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
+- Bare and actual OpenCode captures also check ordered protocol objects and complete upstream
+  header order/casing against independently captured 0.156.0 baselines. Late identity insertion
+  and automatic WS continuation preserve native field positions.
+- Subscription response metadata headers use the public HTTP header policy. Protocol errors
+  expose reviewed codes and generic messages; supported numeric retry delays survive. Private SSE
+  IDs/comments/extensions are removed. Model text, tool content and API-key bodies remain opaque.
 - Authorized [real upstream tests](docs/CODEX_COMPATIBILITY.md#real-upstream-continuation-evidence)
   cover multi-turn memory, tool outputs and WS reconnects; long opaque routing tokens have a
   separate bounded budget and no longer hit the logical-ID length limit.

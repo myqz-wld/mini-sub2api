@@ -18,6 +18,14 @@ pub(crate) use overlay::filter_subscription_fields;
 
 pub(crate) use request_identity::CodexTransport as EmulationTransport;
 
+pub(crate) fn finalize_wire_order(
+    object: &mut serde_json::Map<String, Value>,
+    transport: EmulationTransport,
+) {
+    crate::responses_lite::order_projected_items(object);
+    overlay::canonicalize_request_order(object, transport);
+}
+
 #[derive(Debug)]
 pub struct PreparedEmulatedRequest {
     pub headers: HeaderMap,
@@ -165,6 +173,7 @@ pub(crate) async fn prepare_identity_request(
                         &mut prepared_headers,
                         &projection.identity,
                     )?;
+                    finalize_wire_order(&mut object, transport);
                     let admission = admission
                         .map(|(mut plan, format)| {
                             plan.capture_input_metadata(&object);

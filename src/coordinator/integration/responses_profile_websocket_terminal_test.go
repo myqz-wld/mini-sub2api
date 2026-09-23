@@ -11,7 +11,7 @@ import (
 	"mini-sub2api/src/coordinator/internal/storage"
 )
 
-func TestCodexProfilesTranslateTerminalFailuresWithoutTraversingOpaqueErrors(t *testing.T) {
+func TestCodexProfilesTranslateTerminalFailuresAndSanitizeErrors(t *testing.T) {
 	fixture := newResponsesProfileWebSocketFixtureWithResponder(
 		t,
 		func(connection *websocket.Conn, payload []byte, responseID string) {
@@ -87,9 +87,9 @@ func TestCodexProfilesTranslateTerminalFailuresWithoutTraversingOpaqueErrors(t *
 					}
 				}
 				errorObject := terminalErrorObject(public)
-				if errorObject["message"] != "opaque resp_raw conversation_raw" ||
-					errorObject["id"] != "opaque_nested_id" {
-					t.Fatalf("opaque error object changed: %#v", errorObject)
+				if errorObject["message"] != "The upstream request failed." ||
+					errorObject["code"] != "upstream_response_failed" || len(errorObject) != 2 {
+					t.Fatal("Subscription terminal error crossed the public privacy boundary")
 				}
 				assertProfileWebSocketDiagnosticHistory(
 					t, fixture.store, profile.keyID, capture.ProviderRequestID, 1,

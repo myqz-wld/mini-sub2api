@@ -223,6 +223,7 @@ pub(super) async fn responses_inner(
                 resolved_identity.as_ref(),
                 pending_compaction.as_ref(),
             )
+            .with_gateway_request_id(&gateway_request_id)
             .with_operation(operation)
         });
         diagnostics.phase("response_construction");

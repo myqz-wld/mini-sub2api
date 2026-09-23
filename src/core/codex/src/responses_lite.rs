@@ -110,6 +110,14 @@ pub(crate) fn item_id_prefix(kind: &str) -> Option<&'static str> {
     items::item_id_prefix(kind)
 }
 
+pub(crate) fn order_projected_items(request: &mut Map<String, Value>) {
+    if let Some(items) = request.get_mut("input").and_then(Value::as_array_mut) {
+        for item in items.iter_mut().filter_map(Value::as_object_mut) {
+            items::order_projected_item(item);
+        }
+    }
+}
+
 pub(crate) fn canonicalize_request_items(
     request: &mut Map<String, Value>,
     default_image_detail: Option<&str>,

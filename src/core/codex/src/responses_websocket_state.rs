@@ -138,7 +138,7 @@ impl ResponsesWebSocketState {
         };
         frame.insert("input".to_string(), Value::Array(prefix));
         frame.insert("generate".to_string(), Value::Bool(false));
-        let frame = Value::Object(frame);
+        let mut frame = Value::Object(frame);
         let request = request_snapshot(&frame, synthesized_item_ids)?;
 
         self.planned = Some(PlannedOperation {
@@ -147,6 +147,12 @@ impl ResponsesWebSocketState {
             pending_compaction: None,
         });
         self.setup_phase = OperationPhase::Planned;
+        if let Some(object) = frame.as_object_mut() {
+            crate::request_normalizer::finalize_wire_order(
+                object,
+                crate::request_normalizer::EmulationTransport::WebSocket,
+            );
+        }
         Some(HiddenSetupPlan { frame })
     }
 
@@ -209,6 +215,14 @@ impl ResponsesWebSocketState {
             PublicCreateMode::Full
         };
 
+        if self.profile.emulates_codex()
+            && let Some(object) = frame.as_object_mut()
+        {
+            crate::request_normalizer::finalize_wire_order(
+                object,
+                crate::request_normalizer::EmulationTransport::WebSocket,
+            );
+        }
         self.planned = Some(PlannedOperation {
             kind: OperationKind::PublicCreate,
             request: request_snapshot,

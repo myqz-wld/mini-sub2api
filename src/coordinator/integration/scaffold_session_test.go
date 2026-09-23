@@ -39,6 +39,7 @@ func TestOpenCodeBuiltInSessionHeader(t *testing.T) {
 					}
 					if subscription {
 						assertScaffoldMessageParity(t, packet, wires[i])
+						assertCallerWireContract(t, packet, wires[i], capture.tap.packets(t)[i])
 					} else if !bytes.Equal(packet.payload, wires[i].encodedBody) {
 						t.Fatal("API-key built-in provider payload changed")
 					}

@@ -20,6 +20,7 @@ pub(crate) use failure_tail::SseFailureTail;
 
 #[derive(Clone)]
 pub(crate) struct ResponseStateContext {
+    gateway_request_id: String,
     account_ref: String,
     state_namespace: String,
     downstream_scope: String,
@@ -40,6 +41,7 @@ impl ResponseStateContext {
         pending_compaction: Option<&PendingCompaction>,
     ) -> Self {
         Self {
+            gateway_request_id: String::new(),
             account_ref: account_ref.to_string(),
             state_namespace: state_namespace.to_string(),
             downstream_scope: downstream_scope.to_string(),
@@ -49,6 +51,11 @@ impl ResponseStateContext {
             operation: Arc::new(Mutex::new(None)),
             identity_cache: Arc::new(Mutex::new(ResponseCacheSlot::default())),
         }
+    }
+
+    pub(crate) fn with_gateway_request_id(mut self, request_id: &str) -> Self {
+        self.gateway_request_id = request_id.into();
+        self
     }
 
     pub(crate) fn with_operation(
@@ -216,6 +223,7 @@ impl ResponseStateContext {
                 .reasoning_visibility
                 .filter_response(&mut translated);
         }
+        crate::response_privacy::filter_response(&mut translated, &self.gateway_request_id);
         Ok(translated)
     }
 

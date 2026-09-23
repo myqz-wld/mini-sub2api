@@ -17,6 +17,7 @@ import (
 
 type nativeJSONShape struct {
 	kind   string
+	scalar any
 	keys   []string
 	fields map[string]*nativeJSONShape
 	items  []*nativeJSONShape
@@ -62,6 +63,7 @@ func readNativeJSONShape(t *testing.T, data []byte) *nativeJSONShape {
 				t.Fatal("unterminated captured JSON container")
 			}
 		case string:
+			node.scalar = value
 			node.kind = "string"
 			if value == "" {
 				node.kind = "empty_string"

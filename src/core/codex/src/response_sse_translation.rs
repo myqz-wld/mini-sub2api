@@ -139,11 +139,15 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     let data = data_payload(text);
     let Some(data) = data else {
         state.reader.processing("none");
-        return Ok(Bytes::from(event));
+        return Ok(Bytes::from_static(b":\n\n"));
     };
-    if data.trim().is_empty() || data.trim() == "[DONE]" {
+    if data.trim().is_empty() {
         state.reader.processing("none");
-        return Ok(Bytes::from(event));
+        return Ok(Bytes::from_static(b":\n\n"));
+    }
+    if data.trim() == "[DONE]" {
+        state.reader.processing("none");
+        return Ok(Bytes::from_static(b"data: [DONE]\n\n"));
     }
     state.reader.processing("sse_json");
     let value: serde_json::Value = serde_json::from_str(&data).map_err(|error| {
@@ -199,8 +203,9 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
                 .observe_error(error.as_ref(), "response_translation");
         })?;
     state.reader.processing("response_encoding");
-    let translated = serde_json::to_string(&translated).map_err(|_| ())?;
-    let rewritten = replace_data_lines(text, &translated)?;
+    let event_type = translated.get("type").and_then(serde_json::Value::as_str);
+    let encoded = serde_json::to_string(&translated).map_err(|_| ())?;
+    let rewritten = replace_data_lines(text, &encoded, event_type)?;
     if rewritten.len() > state.maximum {
         return Err(());
     }
@@ -213,7 +218,11 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     Ok(Bytes::from(rewritten))
 }
 
-fn replace_data_lines(event: &str, translated: &str) -> Result<String, ()> {
+fn replace_data_lines(
+    event: &str,
+    translated: &str,
+    event_type: Option<&str>,
+) -> Result<String, ()> {
     let mut output = String::with_capacity(event.len().max(translated.len() + 16));
     let mut replaced = false;
     for segment in event.split_inclusive('\n') {
@@ -230,7 +239,12 @@ fn replace_data_lines(event: &str, translated: &str) -> Result<String, ()> {
                 }
                 replaced = true;
             }
-        } else {
+        } else if content.is_empty()
+            || content.strip_prefix("event:").is_some_and(|name| {
+                let name = name.trim();
+                !name.is_empty() && Some(name) == event_type
+            })
+        {
             output.push_str(segment);
         }
     }

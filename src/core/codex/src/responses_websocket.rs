@@ -215,6 +215,7 @@ pub(crate) async fn relay(
                 identity.as_ref(),
                 None,
             )
+            .with_gateway_request_id(&header_text(&headers, REQUEST_ID_HEADER).unwrap_or_default())
             .with_operation(operation)
         })
     });

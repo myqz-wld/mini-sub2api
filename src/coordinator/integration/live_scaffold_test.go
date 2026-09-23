@@ -11,7 +11,7 @@ import (
 )
 
 func TestLiveSubscriptionOpenCode(t *testing.T) {
-	gateway := newLiveSubscriptionGateway(t)
+	gateway, relay := newLiveCallerWireGateway(t, 8)
 	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		t.Run(model, func(t *testing.T) {
 			client := startOpenCode(t, gateway.server.URL, gateway.secret, model)
@@ -42,10 +42,11 @@ func TestLiveSubscriptionOpenCode(t *testing.T) {
 			}
 		})
 	}
+	assertLiveCallerWire(t, gateway, relay)
 }
 
 func TestLiveSubscriptionOpenCodeRead(t *testing.T) {
-	gateway := newLiveSubscriptionGateway(t)
+	gateway, relay := newLiveCallerWireGateway(t, 8)
 	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		t.Run(model, func(t *testing.T) {
 			client := startOpenCodeWithRead(t, gateway.server.URL, gateway.secret, model, true)
@@ -108,4 +109,5 @@ func TestLiveSubscriptionOpenCodeRead(t *testing.T) {
 			}
 		})
 	}
+	assertLiveCallerWire(t, gateway, relay)
 }

@@ -8,7 +8,7 @@ import (
 )
 
 func TestLiveSubscriptionMemoryOpenCode(t *testing.T) {
-	gateway := newLiveSubscriptionGatewayBounded(t, 10)
+	gateway, relay := newLiveCallerWireGateway(t, 10)
 	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		t.Run(model, func(t *testing.T) {
 			label, steps := liveMemoryScenario(t)
@@ -37,4 +37,5 @@ func TestLiveSubscriptionMemoryOpenCode(t *testing.T) {
 			}
 		})
 	}
+	assertLiveCallerWire(t, gateway, relay)
 }

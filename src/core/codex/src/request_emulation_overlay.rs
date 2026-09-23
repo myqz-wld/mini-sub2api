@@ -384,7 +384,10 @@ fn user_message(text: String) -> Value {
     })
 }
 
-fn canonicalize_request_order(object: &mut Map<String, Value>, transport: EmulationTransport) {
+pub(super) fn canonicalize_request_order(
+    object: &mut Map<String, Value>,
+    transport: EmulationTransport,
+) {
     const HTTP_ORDER: &[&str] = &[
         "model",
         "instructions",

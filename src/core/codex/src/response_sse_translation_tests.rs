@@ -112,16 +112,24 @@ fn detects_lf_and_crlf_event_boundaries() {
 }
 
 #[test]
-fn replaces_multiline_data_and_preserves_event_fields() {
+fn replaces_multiline_data_and_strips_private_sse_envelope_fields() {
     let event = "event: response.completed\r\nid: 7\r\ndata: {\"type\":\r\ndata: \"response.completed\"}\r\n\r\n";
     assert_eq!(
         data_payload(event).as_deref(),
         Some("{\"type\":\n\"response.completed\"}")
     );
-    let got = replace_data_lines(event, "{\"type\":\"response.completed\"}").expect("replace data");
+    let got = replace_data_lines(
+        event,
+        "{\"type\":\"response.completed\"}",
+        Some("response.completed"),
+    )
+    .expect("replace data");
     assert!(got.contains("event: response.completed\r\n"));
-    assert!(got.contains("id: 7\r\n"));
+    assert!(!got.contains("id:"));
     assert_eq!(got.matches("data:").count(), 1);
+    let private = ": synthetic-private\nevent: synthetic-private\nid: synthetic-private\nretry: synthetic-private\ndata: {}\n\n";
+    let got = replace_data_lines(private, "{}", None).expect("strip private envelope");
+    assert_eq!(got, "data: {}\n\n");
 }
 
 #[tokio::test]

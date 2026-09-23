@@ -49,7 +49,8 @@ Counts describe overlapping matrices, not additive independent cases.
 | Configuration: 48 four-call cases | Stable association under changed/current/omitted settings; eligible WS suffix, Lite IDs and API-key bytes |
 | Reasoning: 96 four-call cases | Include visibility, full/reference histories, JSON/SSE/WS/reconnect, caller markers, hidden-state restoration and tool/user turns |
 | Caller bases: 144 two-call cases | Missing/invalid/explicit bases, both credentials and HTTP/WS ordinary/Lite; no defaults, stable prefix ownership |
-| Actual OpenCode: 18 cases | Custom-provider text/read/denied-file and built-in OpenAI plugin; continuity, tool turns, headers and bytes |
+| Actual OpenCode: 18 cases | Custom-provider text/read/denied-file and built-in OpenAI plugin; continuity, tool turns, API-key bytes and ordered Subscription wire/header contracts |
+| Bare ordered wire: 12 cases | HTTP/WS × ordinary/Lite × minimal/explicit/null controls; independent actual CLI baselines, source-derived protocol order, complete header signatures |
 | Models/context | All 9 catalog models; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
 | 0.156.0 controls | Actual CLI HTTP/WS effort changes with the capability enabled; analytics/model/effort metadata, scoped cache affinity, Guardian references and tool-result evidence |
 | Built-in wire shape: 28 requests | Actual CLI app-server; HTTP fallback/WS × ordinary/Lite × two isolated processes; complete header order/presence/casing and recursive JSON shape, including tool loops and the next turn |
@@ -83,6 +84,11 @@ Run the suites above for current results; the timeout investigation is summarize
 [Operations](../../../docs/OPERATIONS.md#diagnosing-long-requests).
 
 Older 14-case OpenCode evidence proves delivery only; current 18-case coverage checks continuity.
+Current OpenCode/ordinary ordered checks use `caller_wire_contract_test.go` and independently run
+the pinned CLI through `caller_wire_capture_test.go`. Thus the OpenCode suite also requires that
+CLI and source checkout. Live OpenCode and bare-memory checks now capture Core egress through the
+authenticated bounded relay and apply the same wire contract. Bare live fixtures use one relay per
+five-turn case so each stays within the relay's 12-request budget, including hidden setup.
 Exports/live calls need separate opt-in and authorization. General protocol stress may force direct
 functions; actual code-mode tests separately execute the native host. Core supplies no JavaScript
 bridge to ordinary clients. No actual OpenCode WS producer, universal retry/retention contract,

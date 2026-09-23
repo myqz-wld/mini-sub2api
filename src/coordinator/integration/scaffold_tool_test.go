@@ -71,6 +71,7 @@ func TestOpenCodeReadToolCapture(t *testing.T) {
 					} else {
 						assertScaffoldCustomSession(t, packets[i], session)
 						assertScaffoldMessageParity(t, packets[i], wire)
+						assertCallerWireContract(t, packets[i], wire, capture.tap.packets(t)[i])
 					}
 				}
 				if route == "subscription" {

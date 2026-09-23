@@ -51,11 +51,11 @@ func assertLiveMemory(t *testing.T, text, label string, count int) {
 }
 
 func TestLiveSubscriptionMemoryBare(t *testing.T) {
-	gateway := newLiveSubscriptionGatewayBounded(t, 40)
 	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		for _, delivery := range []string{"json", "sse", "ws"} {
 			for _, mode := range []string{"full", "reference"} {
 				t.Run(fmt.Sprintf("%s/%s/%s", model, delivery, mode), func(t *testing.T) {
+					gateway, relay := newLiveCallerWireGateway(t, 5)
 					label, steps := liveMemoryScenario(t)
 					client := ordinaryClient(t, gateway, delivery == "ws", delivery != "json", nil)
 					var history []any
@@ -100,6 +100,7 @@ func TestLiveSubscriptionMemoryBare(t *testing.T) {
 							history = append(history, output...)
 						}
 					}
+					assertLiveCallerWire(t, gateway, relay)
 				})
 			}
 		}
