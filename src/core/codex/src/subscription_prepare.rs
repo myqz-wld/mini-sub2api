@@ -23,6 +23,10 @@ mod history_selection;
 #[path = "subscription_input_metadata.rs"]
 mod input_metadata;
 
+#[path = "subscription_history_import.rs"]
+mod history_import;
+pub(crate) use history_import::HistoryImport;
+
 pub(crate) struct ContextPlan {
     pub(crate) evidence: Evidence,
     pub(crate) restored_input: Option<Vec<Value>>,
@@ -38,6 +42,7 @@ pub(crate) struct ContextPlan {
     pub(crate) dependencies: Dependencies,
     pub(crate) settings: Value,
     pub(crate) external_context: bool,
+    pub(crate) allow_history_import: bool,
     pub(crate) scope: String,
     pub(crate) socket: Option<String>,
 }
@@ -352,6 +357,7 @@ impl ContextStore {
             dependencies,
             settings: effective_settings,
             external_context: object.get("conversation").is_some_and(|v| !v.is_null()),
+            allow_history_import: false,
             scope: scope_key,
             socket: socket.map(str::to_string),
         })

@@ -38,6 +38,45 @@ choices when updating the pin, rather than silently acquiring new defaults.
 Previously added Lite setup attribution and HTTP body routing tokens were implementation deviations,
 not required user customizations; the wire-shape corrections below remove them.
 
+## Turn-start metadata and carrier ownership
+
+Codex 0.156.0 `core/src/responses_metadata.rs` defines the full serialized body
+`client_metadata["x-codex-turn-metadata"]` as canonical. Its HTTP compatibility header comes from
+the same snapshot, with tool inventory omitted; the normal HTTP builder always includes body
+client metadata. A WS handshake has no JSON body, while each response.create has its own metadata.
+These phases must not be treated as interchangeable sources of turn state.
+
+The gateway now preserves valid nonnegative i64 caller turn-start timestamps. Body metadata wins;
+HTTP headers supply a timestamp only when the body metadata carrier is absent. Missing/invalid
+values reuse the recorded turn time, or the server clock for a new turn. Explicit corrections are
+retained for subsequent omitted values, including after restart. Prewarm/memory omit this field;
+API-key bodies/frames stay transparent. Caller time never drives expiry or retention.
+
+Earlier native assertions allowed timestamp replacement and only checked within-turn stability.
+Those exceptions are removed: native tool-loop/root/child/fork/transport captures now require exact
+caller timestamp equality. Root capture tests also check canonical metadata in HTTP/WS bodies and
+HTTP body/header equality for sandbox, workspace and turn-start fields.
+
+Header-only sandbox/workspace input remains a gateway compatibility boundary: generated body
+metadata can replace that header input. It is not the normal native 0.156.0 HTTP request shape.
+This timestamp change does not expand sandbox/workspace header fallback or alter permission policy.
+
+## Complete history after expiry or restart
+
+When anonymous callers replay complete content after local history is gone, old per-item turn
+metadata no longer forces them back into the old session. A guarded import creates stable target
+turn copies using existing same-Key/account identity state, preserving the source owners and
+message/tool references. It does not copy hidden body state, enable reference-only recovery or
+authorize unrelated explicit-session lineage. See [eligibility rules](BEHAVIOR.md#state-and-limits).
+
+Regression captures cover ordinary/Lite HTTP JSON, SSE and WS across Core restart, followed by
+another full turn. Unit cases cover expiry, source preservation, repeated/reference continuation,
+restart, target ancestry, incomplete dependencies, retained/running sources, transaction rollback
+and Key/account isolation. Actual OpenCode 1.18.29 custom-provider captures on gpt-5.4/Astra also
+resume complete history after Core restart. In these two cases OpenCode omitted item turn metadata
+even when the synthetic upstream returned it; the specific old-turn failure must not be attributed
+to ordinary OpenCode behavior without request evidence. These checks use loopback endpoints only.
+
 ## Changes from 0.153.4
 
 | Native change | Gateway behavior |
@@ -200,7 +239,8 @@ for the native child. Raw bounded captures stayed in memory; retained results co
 
 These loopback checks establish local client/gateway compatibility. The separately authorized live
 checks below establish provider acceptance for their tested scenarios. Subscription rewrites scoped
-identities, credentials and turn timestamps; complete payloads/compressed bytes consequently differ.
+identities and credentials; complete payloads/compressed bytes consequently differ. Historical runs
+also allowed turn timestamp replacement; the follow-up above removes that exception.
 
 ## Real upstream continuation evidence
 

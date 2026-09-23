@@ -66,8 +66,7 @@ func (p *transportProjection) metadata(t *testing.T, before, after map[string]an
 		}
 		switch field {
 		case "turn_started_at_unix_ms":
-			// The gateway deliberately owns its projected turn start. Its timestamp
-			// must nevertheless stay stable for the whole real native tool loop.
+			// Preserve the native timestamp exactly throughout its tool loop.
 			original, originalOK := expected.(float64)
 			emitted, emittedOK := actual.(float64)
 			if !originalOK || !emittedOK || original <= 0 || emitted <= 0 {
@@ -82,7 +81,7 @@ func (p *transportProjection) metadata(t *testing.T, before, after map[string]an
 			}
 			p.starts[p.turn] = emitted
 			if original != emitted {
-				p.observed("projected-turn-start")
+				t.Errorf("caller turn start timestamp changed: %s", fieldPath)
 			}
 		case "session_id", "thread_id", "parent_thread_id", "forked_from_thread_id", "x-codex-parent-thread-id":
 			p.identity(t, expected, actual, "thread", fieldPath)

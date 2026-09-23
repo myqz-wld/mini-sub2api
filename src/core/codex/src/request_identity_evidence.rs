@@ -22,6 +22,7 @@ pub(crate) struct RequestIdentityEvidence {
     pub(crate) turn: Option<String>,
     pub(crate) root_turn: Option<String>,
     pub(crate) parent_turn: Option<String>,
+    pub(crate) turn_started_at_unix_ms: Option<i64>,
     pub(crate) items: Vec<ItemIdentityEvidence>,
     pub(crate) new_user_submission: bool,
     pub(crate) window_number: Option<u64>,
@@ -91,6 +92,18 @@ impl RequestIdentityEvidence {
         let turn = evidence_text(RelationshipCarrier::Turn, &sources);
         let root_turn = evidence_text(RelationshipCarrier::RootTurn, &sources);
         let parent_turn = evidence_text(RelationshipCarrier::ParentTurn, &sources);
+        // Native body metadata is canonical. A WS handshake describes connection setup,
+        // so it must never supply a timestamp for a later response.create frame.
+        let turn_started_at_unix_ms = body_turn
+            .as_ref()
+            .or_else(|| {
+                (transport == CodexTransport::Http)
+                    .then_some(header_turn.as_ref())
+                    .flatten()
+            })
+            .and_then(|metadata| metadata.get("turn_started_at_unix_ms"))
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= 0);
 
         Self {
             installation: evidence_text(RelationshipCarrier::Installation, &sources),
@@ -103,6 +116,7 @@ impl RequestIdentityEvidence {
             turn,
             root_turn,
             parent_turn,
+            turn_started_at_unix_ms,
             items: item_evidence(object),
             new_user_submission: new_user_submission(object),
             window_number: window.as_deref().and_then(window_number),

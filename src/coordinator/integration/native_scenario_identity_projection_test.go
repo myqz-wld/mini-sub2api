@@ -180,7 +180,7 @@ func identityCompareGateway(t *testing.T, before, after []nativeWire, subscripti
 	}
 	var paths []string
 	for path := range differences {
-		allowed := subscription && (nativeRootMetadataDifference(path) || path == "changed:headers.x-codex-turn-metadata.turn_started_at_unix_ms" || path == "added:client_metadata.parent_thread_id")
+		allowed := subscription && (nativeRootMetadataDifference(path) || path == "added:client_metadata.parent_thread_id")
 		if !allowed {
 			t.Errorf("unclassified native branch metadata difference: %s", path)
 		}

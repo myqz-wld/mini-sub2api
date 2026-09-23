@@ -15,6 +15,10 @@ import (
 
 // A complete Responses event stream exercises third-party SDK parsers as well as Codex's parser.
 func newScaffoldCapture(t *testing.T) *nativeCapture {
+	return newScaffoldCaptureWithTurnMetadata(t, false)
+}
+
+func newScaffoldCaptureWithTurnMetadata(t *testing.T, turnMetadata bool) *nativeCapture {
 	t.Helper()
 	capture := &nativeCapture{t: t}
 	capture.server, capture.tap = newNativeTappedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +88,9 @@ func newScaffoldCapture(t *testing.T) *nativeCapture {
 			return
 		}
 		item := map[string]any{"type": "message", "id": "msg_" + response["id"].(string), "role": "assistant", "status": "in_progress", "content": []any{}}
+		if turnMetadata {
+			item["internal_chat_message_metadata_passthrough"] = map[string]any{"turn_id": historyImportTurn(t, body)}
+		}
 		send(map[string]any{"type": "response.output_item.added", "output_index": 0, "item": item})
 		part := map[string]any{"type": "output_text", "text": "", "annotations": []any{}, "logprobs": []any{}}
 		send(map[string]any{"type": "response.content_part.added", "output_index": 0, "item_id": item["id"], "content_index": 0, "part": part})

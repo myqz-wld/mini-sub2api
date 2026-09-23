@@ -28,6 +28,7 @@ type responsesProfileWebSocketCapture struct {
 }
 
 type responsesProfileWebSocketFixture struct {
+	supervisor        *adapter.Supervisor
 	apiKey            string
 	apiKeyID          string
 	subscriptionKey   string
@@ -263,7 +264,8 @@ func newResponsesProfileWebSocketFixtureWithResponder(
 		public.Close()
 	})
 	return responsesProfileWebSocketFixture{
-		apiKey: apiKey.Secret, apiKeyID: apiKey.ID,
+		supervisor: supervisor,
+		apiKey:     apiKey.Secret, apiKeyID: apiKey.ID,
 		subscriptionKey: subscriptionKey.Secret, subscriptionKeyID: subscriptionKey.ID,
 		public: public, captures: captures, store: store, coreStateDir: coreStateDir,
 	}

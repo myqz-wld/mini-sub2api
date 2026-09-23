@@ -39,6 +39,7 @@ pub(crate) struct InputProjection<'a> {
     pub(crate) synthesized_item_ids: &'a [String],
     pub(crate) lite_prefixes: &'a [usize],
     pub(crate) native_prefixes: &'a [crate::lite_prefix_identity::NativePrefix],
+    pub(crate) history_import: Option<crate::subscription_prepare::HistoryImport<'a>>,
 }
 
 pub(crate) fn resolve_and_project(
@@ -53,6 +54,7 @@ pub(crate) fn resolve_and_project(
         synthesized_item_ids,
         lite_prefixes,
         native_prefixes,
+        history_import,
     } = input;
     let installation_lookup = evidence
         .installation
@@ -132,7 +134,7 @@ pub(crate) fn resolve_and_project(
         .map(|raw| editor.existing_wire_from_downstream(WireIdDomain::Turn, raw))
         .transpose()?
         .flatten();
-    let resolved_turn = resolve_turn(
+    let mut resolved_turn = resolve_turn(
         editor,
         evidence,
         &turn_key,
@@ -140,6 +142,13 @@ pub(crate) fn resolve_and_project(
         &conversation.id,
         reserved_turn.as_deref(),
     )?;
+    if !evidence.is_memory()
+        && resolved_turn.started_at_unix_ms.is_some()
+        && let Some(start) = evidence.turn_started_at_unix_ms
+    {
+        editor.observe_turn_started_at(&turn_key, start)?;
+        resolved_turn.started_at_unix_ms = Some(start);
+    }
     let turn_id = resolved_turn.turn_id;
     let root_turn_id = resolved_turn.root_turn_id;
     let parent_turn_id = resolved_turn.parent_turn_id;
@@ -219,6 +228,7 @@ pub(crate) fn resolve_and_project(
         synthesized_item_ids,
         &identity,
         current_turn_raw.as_deref(),
+        history_import.as_ref(),
     )?;
     crate::request_identity_projection::apply(headers, object, &identity)
         .map_err(|_| anyhow::anyhow!("projecting request identity"))?;

@@ -18,6 +18,7 @@ pub(super) fn project_items(
     synthesized_item_ids: &[String],
     identity: &ResolvedRequestIdentity,
     current_turn_raw: Option<&str>,
+    history_import: Option<&crate::subscription_prepare::HistoryImport<'_>>,
 ) -> Result<BTreeSet<String>> {
     let synthesized = synthesized_item_ids
         .iter()
@@ -42,19 +43,19 @@ pub(super) fn project_items(
             continue;
         }
         let temporary_id = item.get("id").and_then(Value::as_str).map(str::to_string);
-        let raw = temporary_id
-            .as_deref()
-            .and_then(|id| {
-                evidence
-                    .items
-                    .iter()
-                    .find(|evidence| evidence.id.as_deref() == Some(id))
-            })
+        // Repeated item IDs must retain each occurrence's own turn evidence. Looking up
+        // only the first matching ID could hide a later, unrelated historical owner.
+        let raw = index
+            .checked_sub(prefix_count)
+            .and_then(|index| evidence.items.get(index))
+            .filter(|item| item.id.is_none() || item.id == temporary_id)
             .or_else(|| {
-                index
-                    .checked_sub(prefix_count)
-                    .and_then(|index| evidence.items.get(index))
-                    .filter(|item| item.id.is_none())
+                temporary_id.as_deref().and_then(|id| {
+                    evidence
+                        .items
+                        .iter()
+                        .find(|evidence| evidence.id.as_deref() == Some(id))
+                })
             });
         let projected_turn = project_item_turn(
             editor,
@@ -66,6 +67,7 @@ pub(super) fn project_items(
             }),
             current_turn_raw,
             identity,
+            history_import,
         )?;
         set_item_turn(
             item,
@@ -118,6 +120,7 @@ fn project_item_turn(
     raw: Option<&str>,
     current_raw: Option<&str>,
     identity: &ResolvedRequestIdentity,
+    history_import: Option<&crate::subscription_prepare::HistoryImport<'_>>,
 ) -> Result<Option<String>> {
     if identity.request_kind == "memory" {
         return Ok(raw.map(str::to_string));
@@ -131,6 +134,14 @@ fn project_item_turn(
     let raw = raw.expect("checked above");
     let key = turn_key_for_raw(editor, raw)?;
     let projected = if let Some(existing) = editor.existing_turn(&key) {
+        if !editor.history_thread_allowed(&existing.thread_id, identity)
+            && let Some(import) = history_import
+            && let Some(imported) = import.resolve_turn(editor, &existing, identity)?
+        {
+            // The source's global alias must keep its original owner. This copy belongs
+            // solely to the target thread and has a separate reversible public identity.
+            return Ok(Some(imported));
+        }
         anyhow::ensure!(
             editor.history_thread_allowed(&existing.thread_id, identity),
             "historical turn belongs to an unrelated thread"

@@ -337,6 +337,21 @@ impl<'a> RequestStateEditor<'a> {
         Ok(assignment)
     }
 
+    pub(crate) fn observe_turn_started_at(&mut self, key: &str, value: i64) -> Result<()> {
+        anyhow::ensure!(value >= 0, "invalid caller turn start time");
+        let entry = self
+            .scope_mut()
+            .turns
+            .get_mut(key)
+            .ok_or_else(|| anyhow::anyhow!("turn start owner is missing"))?;
+        let changed = entry.started_at_unix_ms != value;
+        // Explicit caller corrections also replace old gateway-generated values. Retention
+        // still uses last_seen_day from the server clock, never this protocol timestamp.
+        entry.started_at_unix_ms = value;
+        self.changed |= changed;
+        Ok(())
+    }
+
     pub(crate) fn existing_turn(&mut self, key: &str) -> Option<TurnAssignment> {
         let day = self.day;
         let scope_key = self.scope_key.clone();

@@ -51,6 +51,7 @@ pub(crate) async fn prepare_stateful_codex_request(
         context.socket_id,
     )?;
     plan.restore_input_metadata();
+    plan.enable_history_import(&identity_evidence, context.binding.is_some());
     let target_lite = plan.caller_format == Format::Lite
         || object
             .get("model")

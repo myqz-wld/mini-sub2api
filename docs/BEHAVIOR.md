@@ -108,6 +108,11 @@ root-agent/time/REPL defaults and valid overrides do not enable execution. Filte
 
 Valid numeric item `create_time` survives absent optional IDs. Retained history preserves first-assigned
 time/turn metadata through expansion/matching; explicit caller values and content remain intact.
+For `turn_started_at_unix_ms`, preserve nonnegative i64 values from canonical body turn metadata.
+Only an absent body carrier permits HTTP-header fallback; WS handshake timestamps never seed create
+frames. An explicit value updates that turn's recorded time, including a correction to an earlier
+fallback. Omitted/null/invalid values reuse the recorded value; a new turn uses the server clock.
+Prewarm/memory omit this field. Retention uses independent server activity clocks, not caller time.
 Native exec/wait exposure and host availability differ. Bare API/OpenCode keep direct tools; Core
 provides no JavaScript bridge or claim of complete default-native code-mode equivalence.
 
@@ -138,6 +143,23 @@ Full history/settings/comparison data expire after **3 business-idle hours**, on
 30-second sweep. Capacity may evict sooner; active work is protected. Live WS facts/tokens survive
 bulk expiry. Remote continuation cannot rebuild missing bodies; complete caller input can.
 Compaction/injection may require a client replacement before full reconstruction.
+Anonymous full replay can import old `internal_chat_message_metadata_passthrough.turn_id` metadata
+after source bodies expire, are evicted or disappear on restart. Initial import requires no explicit
+session/current-turn/thread lineage, bound WS session, selected baseline/checkpoint, external
+conversation or response reference. The caller must supply a user-led history with closed tool
+dependencies: messages, direct function/custom calls and results, supplied reasoning ciphertext,
+and ordinary/Lite setup. Conflicting declarations of one item ID, item references,
+missing ciphertext on reasoning items and unsupported
+opaque control items do not qualify. No source body or active source work may remain available.
+
+Each imported turn receives a separate stable identity in the target thread. Its original owner and
+aliases are never reassigned. Later full replay, eligible references, descendants and declared forks
+can reuse the target's copies. Message/tool IDs and call/result associations retain their existing
+scoped translations. The gateway uses only supplied content and same-Key/account identity evidence;
+it never reconstructs expired ciphertext or fetches another scope's history. This checks protocol
+self-containment, not equality with unavailable old text. Explicit unrelated-session copies still
+require their declared ownership relationship; stable original-session reconstruction is unchanged.
+The three-hour history TTL is a code constant; `CONVERSATION_IDLE_TTL` is not a setting in this project.
 
 | Resource | Default |
 |---|---:|

@@ -20,12 +20,13 @@ import (
 )
 
 type nativeGateway struct {
-	store    *storage.Store
-	keyID    string
-	server   *httptest.Server
-	tap      *nativeTap
-	secret   string
-	stateDir string
+	supervisor *adapter.Supervisor
+	store      *storage.Store
+	keyID      string
+	server     *httptest.Server
+	tap        *nativeTap
+	secret     string
+	stateDir   string
 }
 
 func newNativeGateway(t *testing.T, upstream string, subscription bool) nativeGateway {
@@ -76,7 +77,7 @@ func newNativeGatewayForWireShape(t *testing.T, upstream string, subscription, h
 		handler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(handler.ShutdownWebSockets)
-	return nativeGateway{server: server, tap: tap, secret: key.Secret, stateDir: coreDir, store: store, keyID: key.ID}
+	return nativeGateway{server: server, tap: tap, secret: key.Secret, stateDir: coreDir, store: store, keyID: key.ID, supervisor: supervisor}
 }
 
 func TestNativeCodexThroughGateway(t *testing.T) {

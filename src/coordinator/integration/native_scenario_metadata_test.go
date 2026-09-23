@@ -73,6 +73,9 @@ func (r *nativeMetadataRelations) compare(t *testing.T, path string, before, aft
 			if !bok || !aok || b <= 0 || a <= 0 {
 				t.Fatal("native or projected turn start is not a positive timestamp")
 			}
+			if a != b {
+				t.Fatal("caller turn start timestamp changed")
+			}
 			if r.starts == nil {
 				r.starts = map[string][2]any{}
 			}
@@ -159,6 +162,7 @@ func TestNativeScenarioMetadataRootLifecycle(t *testing.T) {
 						if !bok || !aok {
 							t.Fatal("root native metadata absent")
 						}
+						assertNativeTurnMetadataCarriers(t, b, packets[index].headers.Get("X-Codex-Turn-Metadata"), ws)
 						for _, difference := range relations.compare(t, "client_metadata", b, a) {
 							seenDifferences[difference] = true
 						}
@@ -201,10 +205,30 @@ func TestNativeScenarioMetadataRootLifecycle(t *testing.T) {
 	}
 }
 
+func assertNativeTurnMetadataCarriers(t *testing.T, metadata map[string]any, header string, ws bool) {
+	t.Helper()
+	var body map[string]any
+	raw, ok := metadata["x-codex-turn-metadata"].(string)
+	if !ok || json.Unmarshal([]byte(raw), &body) != nil {
+		t.Fatal("native request omitted canonical body turn metadata")
+	}
+	if ws {
+		return // The handshake is a different phase from each response.create.
+	}
+	var compatibility map[string]any
+	if json.Unmarshal([]byte(header), &compatibility) != nil {
+		t.Fatal("native HTTP request omitted compatibility turn metadata")
+	}
+	for _, field := range []string{"sandbox", "sandbox_mode", "workspaces", "turn_started_at_unix_ms"} {
+		if !reflect.DeepEqual(body[field], compatibility[field]) {
+			t.Errorf("native HTTP body/header metadata differs: %s", field)
+		}
+	}
+}
+
 func nativeRootMetadataDifference(path string) bool {
 	switch path {
 	case "added:client_metadata.x-codex-turn-state", "removed:client_metadata.x-codex-turn-state",
-		"changed:client_metadata.x-codex-turn-metadata.turn_started_at_unix_ms",
 		"added:input.item_metadata.create_time", "added:input.item_metadata.turn_id":
 		return true
 	}

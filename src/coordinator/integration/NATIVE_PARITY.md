@@ -89,6 +89,10 @@ the pinned CLI through `caller_wire_capture_test.go`. Thus the OpenCode suite al
 CLI and source checkout. Live OpenCode and bare-memory checks now capture Core egress through the
 authenticated bounded relay and apply the same wire contract. Bare live fixtures use one relay per
 five-turn case so each stays within the relay's 12-request budget, including hidden setup.
+`TestOpenCodeAnonymousFullHistoryAfterCoreRestart` keeps the actual custom-provider session across
+a fixture Core restart and checks both full replay and item-turn field presence. The tested 1.18.29
+client omitted those fields despite the synthetic provider emitting them. Independent HTTP/SSE/WS
+gateway cases retain them explicitly to exercise the guarded historical-turn import itself.
 Exports/live calls need separate opt-in and authorization. General protocol stress may force direct
 functions; actual code-mode tests separately execute the native host. Core supplies no JavaScript
 bridge to ordinary clients. No actual OpenCode WS producer, universal retry/retention contract,

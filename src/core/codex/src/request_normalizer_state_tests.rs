@@ -316,6 +316,9 @@ async fn sandbox_is_derived_from_sidecar_platform_and_header_body_stay_in_sync()
 #[path = "request_normalizer_continuation_state_tests.rs"]
 mod continuation_tests;
 
+#[path = "request_normalizer_turn_start_tests.rs"]
+mod turn_start_tests;
+
 #[path = "request_normalizer_compaction_state_tests.rs"]
 mod compaction_tests;
 

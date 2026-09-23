@@ -158,6 +158,12 @@ pub(crate) async fn prepare_identity_request(
                             synthesized_item_ids: &synthesized_item_ids,
                             lite_prefixes: &lite_prefixes,
                             native_prefixes: &native_prefixes,
+                            history_import: admission.as_ref().map(|(plan, _)| {
+                                crate::subscription_prepare::HistoryImport {
+                                    plan,
+                                    store: &cache,
+                                }
+                            }),
                         },
                     )?;
                     projection.identity.connection_id = connection_id;

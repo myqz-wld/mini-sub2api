@@ -73,8 +73,12 @@ OpenCode custom providers and bare clients can associate full histories without 
 
 - HTTP stays HTTP; WS stays WS. HTTP continuation requires complete local history, which expires
   after three idle hours or earlier capacity eviction. Full input can rebuild it.
+- Anonymous full history can import old turn identities after expiry or restart once message/tool
+  dependencies are self-contained; original session ownership and scoped aliases remain intact.
 - Subscription preserves caller instructions and tool order, inserts no default base, and requests
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
+- Valid caller turn-start timestamps survive normalization; omitted values reuse the recorded turn
+  time or receive a server-clock fallback. These timestamps do not control retention.
 - Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the
   [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
 - Bare and actual OpenCode captures also check ordered protocol objects and complete upstream
