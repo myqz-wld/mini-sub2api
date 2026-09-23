@@ -57,6 +57,35 @@ prewarm/continuation protocol and `responses_websockets=2026-02-06` marker remai
 Legacy native `/responses/compact` capture expectations were retired with that upstream client path;
 streamed and local compaction remain covered.
 
+## Linux TLS builds
+
+Linux HTTP uses the same native-TLS backend as the pinned CLI. Its OpenSSL dependency graph now
+matches Codex 0.156.0 by version, registry source and checksum:
+
+| Dependency | Pinned version |
+|---|---|
+| `openssl` Rust bindings | `0.10.75` |
+| `openssl-sys` | `0.9.111` |
+| `openssl-src` for vendored builds | `300.6.1+3.6.3` (OpenSSL `3.6.3`) |
+
+GNU/Linux retains system-library discovery. The `x86_64-unknown-linux-musl` and
+`aarch64-unknown-linux-musl` targets enable `openssl-sys/vendored`, matching the upstream target
+rules. Keep `Cargo.lock` and build with `--locked`; use a suitable target C compiler/linker plus
+Make and Perl for musl. OpenSSL's explicit build-environment overrides still apply.
+
+GNU's linked system OpenSSL version remains platform-owned; matching Rust bindings alone does not
+pin that library or certify TLS fingerprint equality. macOS/Windows native HTTP TLS and rustls WS
+configuration are unchanged. Codex's custom-CA-triggered HTTP switch to rustls remains outside this
+dependency alignment.
+
+Linux ARM64 validation passed 479 Core + 7 protocol tests on GNU and 480 Core + 7 protocol tests
+on musl, under an unprivileged user with external networking disconnected. The new loopback HTTPS
+test rejects untrusted certificates and wrong hostnames before sending HTTP, then verifies a valid
+request. The musl runtime test confirms OpenSSL 3.6.3. The x86_64 musl feature graph was checked;
+this run did not build or execute an x86_64 artifact.
+Both ARM64 release binaries run: ELF inspection confirms GNU links system `libssl.so.3` and
+`libcrypto.so.3`, while musl has no dynamic-library dependencies. GNU clippy also passed.
+
 ## Field order and presence
 
 The follow-up audit compares ordered JSON tokens from captured bytes, before converting objects to

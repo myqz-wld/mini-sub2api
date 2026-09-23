@@ -28,6 +28,10 @@ pub fn has_literal_loopback_host(raw_url: &str) -> bool {
     }
 }
 
+#[cfg(all(test, target_os = "linux"))]
+#[path = "http_client_openssl_tests.rs"]
+mod openssl_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

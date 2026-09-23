@@ -48,10 +48,19 @@ webbrowser = "1"
 zlib-rs = { version = "=0.5.5", default-features = false }
 zstd = "=0.13.3"
 
-# Linux's existing native-TLS backend already uses OpenSSL. Do not introduce an
-# extra runtime library on Apple/Windows just to classify diagnostic errors.
+# Match Codex 0.156.0's Linux bindings; GNU keeps the platform OpenSSL library.
+# Other platforms keep their native TLS backend without an extra OpenSSL dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
-openssl = "=0.10.81"
+openssl = "=0.10.75"
+openssl-sys = "=0.9.111"
+
+# Match the native CLI's vendored OpenSSL policy for its Linux musl release targets.
+# Cargo.lock pins openssl-src to the same source release as Codex 0.156.0.
+[target.x86_64-unknown-linux-musl.dependencies]
+openssl-sys = { version = "=0.9.111", features = ["vendored"] }
+
+[target.aarch64-unknown-linux-musl.dependencies]
+openssl-sys = { version = "=0.9.111", features = ["vendored"] }
 
 [dev-dependencies]
 tokio = { version = "=1.52.3", features = ["test-util"] }
