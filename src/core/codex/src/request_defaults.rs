@@ -11,7 +11,7 @@ pub(crate) struct ModelProfile {
     verbosity: Option<&'static str>,
 }
 
-const MODEL_PROFILES: [(&str, ModelProfile); 11] = [
+const MODEL_PROFILES: [(&str, ModelProfile); 9] = [
     (
         "gpt-6-astra",
         ModelProfile {
@@ -35,14 +35,6 @@ const MODEL_PROFILES: [(&str, ModelProfile); 11] = [
     (
         "gpt-5.6-luna",
         profile(true, Some("medium"), None, Some("low")),
-    ),
-    (
-        "gpt-5.4-mini",
-        profile(false, Some("medium"), None, Some("medium")),
-    ),
-    (
-        "gpt-5.2",
-        profile(false, Some("medium"), Some("auto"), Some("low")),
     ),
     ("gpt-5.5", profile(false, Some("medium"), None, Some("low"))),
     ("gpt-5.4", profile(false, Some("medium"), None, Some("low"))),
@@ -188,7 +180,7 @@ mod tests {
     fn model_lookup_uses_longest_prefix_then_single_namespace_suffix() {
         let derived_mini = model_profile("gpt-5.4-mini-preview");
         assert_eq!(derived_mini.reasoning_effort, Some("medium"));
-        assert_eq!(derived_mini.verbosity, Some("medium"));
+        assert_eq!(derived_mini.verbosity, Some("low"));
 
         let namespaced_lite = model_profile("vendor/gpt-5.6-sol-snapshot");
         assert!(namespaced_lite.responses_lite);
@@ -229,7 +221,7 @@ mod tests {
             true,
         );
         assert_eq!(disabled_summary["reasoning"]["summary"], "none");
-        assert_eq!(disabled_summary["reasoning"]["effort"], "medium");
+        assert!(disabled_summary["reasoning"].get("effort").is_none());
     }
 
     #[test]

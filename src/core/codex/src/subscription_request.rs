@@ -61,14 +61,25 @@ pub(crate) fn selected_session(
         let text = header.to_str().map_err(|_| Error::InvalidRequest)?;
         direct.push(optional_id(Some(&Value::String(text.to_string())))?);
     }
-    if let Some(session) = one(direct)? {
-        return Ok(Some(session));
-    }
+    let direct = one(direct)?;
     let flat = object.get("client_metadata").and_then(Value::as_object);
-    if let Some(session) = optional_id(flat.and_then(|m| m.get("session_id")))? {
+    let body = metadata(flat.and_then(|m| m.get("x-codex-turn-metadata")))?;
+    let declared = optional_id(flat.and_then(|m| m.get("session_id")))?.or(optional_id(
+        body.as_ref().and_then(|m| m.get("session_id")),
+    )?);
+    // Codex 0.156.0 uses session-id for cache affinity on root forks. The body's
+    // explicit session remains the owner when the header carries prompt_cache_key.
+    if let Some(session) = direct {
+        if object.get("prompt_cache_key").and_then(Value::as_str) == Some(session.as_str())
+            && let Some(declared) = declared
+        {
+            return Ok(Some(declared));
+        }
         return Ok(Some(session));
     }
-    let body = metadata(flat.and_then(|m| m.get("x-codex-turn-metadata")))?;
+    if declared.is_some() {
+        return Ok(declared);
+    }
     let mut nested = vec![optional_id(
         body.as_ref().and_then(|m| m.get("session_id")),
     )?];

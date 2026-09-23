@@ -6,7 +6,7 @@ Each distribution Key binds one credential; request status, latency and usage ar
 | Upstream | Behavior for every caller |
 |---|---|
 | API key | Pass bodies/valid WS frames and caller `X-Codex-Routing-Hint` through; retain gateway auth, admission and response-header policy. |
-| Codex Subscription | Emulate Codex 0.153.4 for native Codex, bare API and third-party Responses clients. |
+| Codex Subscription | Emulate Codex 0.156.0 for native Codex, bare API and third-party Responses clients. |
 
 No account pool, automatic switching, Chat Completions or admin HTTP API.
 
@@ -73,6 +73,8 @@ OpenCode custom providers and bare clients can associate full histories without 
   after three idle hours or earlier capacity eviction. Full input can rebuild it.
 - Subscription preserves caller instructions and tool order, inserts no default base, and requests
   encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
+- Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the
+  [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
 - Success requires consistent terminal/output evidence. Failed or partial output cannot become
   reusable history; uncertain sends are not automatically replayed.
 - Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state
@@ -88,6 +90,7 @@ Vault/identity files are private but unencrypted; request/response bodies are no
 | Guide | Contents |
 |---|---|
 | [Behavior](docs/BEHAVIOR.md) | Matching, compaction, instructions, limits and failure semantics |
+| [Codex compatibility](docs/CODEX_COMPATIBILITY.md) | 0.156.0 wire changes and actual CLI capture evidence |
 | [Operations](docs/OPERATIONS.md) | Authentication, request diagnosis, administration and deployment |
 | [Memory](docs/MEMORY.md) | Small-host sizing and OOM diagnosis; context budgets are not RSS caps |
 | [Protocol](src/protocol/v1/README.md) | Private coordinator/Core wire contract |

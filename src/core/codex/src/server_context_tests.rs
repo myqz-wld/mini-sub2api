@@ -289,9 +289,10 @@ async fn aggregated_http_retains_item_events_when_terminal_omits_output() {
         captures[1]["input"][1]["content"][0]["text"],
         "event answer"
     );
-    assert_eq!(
-        captures[1]["client_metadata"]["x-codex-turn-state"],
-        "event-only-token"
+    assert!(
+        captures[1]["client_metadata"]
+            .get("x-codex-turn-state")
+            .is_none()
     );
     assert!(captures[1].get("previous_response_id").is_none());
 }

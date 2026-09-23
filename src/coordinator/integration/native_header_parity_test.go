@@ -23,10 +23,10 @@ func assertNativeWireParity(t *testing.T, caller, sent nativePacket, wire native
 			t.Errorf("native header value differs: %s", name)
 		}
 	}
-	// The gateway intentionally pins a complete identity triplet; native app-server uses UA
-	// and Originator without a separate Version header on these requests.
+	// The built-in OpenAI provider sends Version. Most older fixtures use a custom provider
+	// without that default header; the dedicated built-in wire-shape fixture checks the full set.
 	if subscription {
-		if sent.headers.Get("Version") != "0.153.4" {
+		if sent.headers.Get("Version") != "0.156.0" {
 			t.Fatal("pinned Version header")
 		}
 	} else if caller.headers.Get("Version") != sent.headers.Get("Version") {

@@ -31,6 +31,11 @@ pub(crate) async fn prepare_stateful_codex_request(
     }
     let mut object = serde_json::from_slice::<serde_json::Map<String, Value>>(&body)
         .map_err(|_| Error::InvalidRequest)?;
+    let native_metadata_order = object
+        .get("client_metadata")
+        .filter(|value| crate::request_identity::has_complete_native_client_metadata(value))
+        .and_then(Value::as_object)
+        .map(|metadata| metadata.keys().cloned().collect::<Vec<_>>());
     let identity_evidence = crate::request_identity_evidence::RequestIdentityEvidence::extract(
         &object, headers, transport, false,
     );
@@ -155,7 +160,7 @@ pub(crate) async fn prepare_stateful_codex_request(
     } else {
         metadata.insert("turn_id".into(), Value::String(turn));
     }
-    metadata.remove("x-codex-turn-state");
+    metadata.shift_remove("x-codex-turn-state");
     let mut clean_headers = headers.clone();
     clean_headers.remove("x-codex-turn-state");
     // Use the selected session, but retain the other original first-request carriers. Bound WS
@@ -184,18 +189,38 @@ pub(crate) async fn prepare_stateful_codex_request(
     .await?;
     prepared.rebuilt_reference = explicit_delta && full_send;
     let operation = prepared.operation.as_ref().ok_or(Error::StateUnavailable)?;
-    if let Some(token) = store.turn_token(operation) {
-        let mut value: Value =
-            serde_json::from_slice(&prepared.body).map_err(|_| Error::InvalidRequest)?;
-        value["client_metadata"]["x-codex-turn-state"] = Value::String(token.clone());
-        prepared.headers.insert(
-            "x-codex-turn-state",
-            token.parse().map_err(|_| Error::InvalidRequest)?,
-        );
-        prepared.body = Bytes::from(serde_json::to_vec(&value).map_err(|_| Error::InvalidRequest)?);
-        if prepared.body.len() > assembly_limit {
-            return Err(Error::InvalidRequest);
+    let Some(token) = store.turn_token(operation) else {
+        return Ok(prepared);
+    };
+    prepared.headers.insert(
+        "x-codex-turn-state",
+        token.parse().map_err(|_| Error::InvalidRequest)?,
+    );
+    // Native HTTP carries this token only in the header. Avoid another full body decode/encode
+    // unless WS needs to insert the token learned for this admitted operation.
+    if transport == EmulationTransport::Http {
+        return Ok(prepared);
+    }
+    let mut value: Value =
+        serde_json::from_slice(&prepared.body).map_err(|_| Error::InvalidRequest)?;
+    value["client_metadata"]["x-codex-turn-state"] = Value::String(token);
+    if let Some(order) = native_metadata_order
+        && let Some(metadata) = value
+            .get_mut("client_metadata")
+            .and_then(Value::as_object_mut)
+    {
+        // Replacing an untrusted routing token must not move the native HashMap's wire slot.
+        let mut existing = std::mem::take(metadata);
+        for name in order {
+            if let Some(value) = existing.shift_remove(&name) {
+                metadata.insert(name, value);
+            }
         }
+        metadata.extend(existing);
+    }
+    prepared.body = Bytes::from(serde_json::to_vec(&value).map_err(|_| Error::InvalidRequest)?);
+    if prepared.body.len() > assembly_limit {
+        return Err(Error::InvalidRequest);
     }
     Ok(prepared)
 }

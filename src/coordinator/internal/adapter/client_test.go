@@ -16,7 +16,7 @@ func TestCopyForwardedHeadersPreservesCurrentCodexMetadata(t *testing.T) {
 		"User-Agent":  "OpenAI/Go 3.52.0", "Version": "0.149.0",
 		"X-Client-Request-Id": "request-test",
 		"OpenAI-Organization": "org-test", "OpenAI-Project": "proj-test",
-		"X-Codex-Beta-Features": "feature-test", "X-Codex-Turn-Metadata": "metadata-test",
+		"X-Codex-Beta-Features": "feature-test", "X-Codex-Turn-Metadata": "metadata-test", "X-Codex-Guardian": "reviewer",
 		"X-Codex-Inference-Call-Id":              "inference-test",
 		"X-OpenAI-Subagent":                      "review",
 		"X-Codex-Window-Id":                      "window-test",

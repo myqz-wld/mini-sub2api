@@ -47,7 +47,7 @@ const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
 
 const SUPPORTED_HTTP_FIELDS: &[&str] = &["background", "stream"];
 const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id", "stream"];
-// Codex 0.153.4 does not expose these public Responses fields in its request builder.
+// Codex 0.156.0 does not expose these public Responses fields in its request builder.
 const UNSUPPORTED_CODEX_EMULATION_FIELDS: &[&str] = &[
     "metadata",
     "prompt_cache_retention",
@@ -111,7 +111,13 @@ pub(super) fn apply(
         transport == EmulationTransport::Http,
     );
     enforce_upstream_transport_controls(object, transport);
-    if profile.uses_subscription_transport() {
+    let guardian_reviewer = headers
+        .get("x-codex-guardian")
+        .is_some_and(|value| value == "reviewer");
+    if guardian_reviewer {
+        object.remove("service_tier");
+    }
+    if profile.uses_subscription_transport() && !guardian_reviewer {
         request_identity::apply_routing_hint(object, headers);
     } else {
         request_identity::remove_routing_hint(headers);
@@ -258,6 +264,11 @@ fn relocate_lite_tools(object: &mut Map<String, Value>) {
 }
 
 fn canonicalize_top_level_tools(object: &mut Map<String, Value>) {
+    // Native ordinary Responses serializes Some(tools), including an empty list. Lite
+    // omits this carrier and puts tools in its setup item instead. Explicit null stays caller-owned.
+    object
+        .entry("tools")
+        .or_insert_with(|| Value::Array(Vec::new()));
     let Some(tools) = object.get("tools").and_then(Value::as_array).cloned() else {
         return;
     };
@@ -405,6 +416,7 @@ fn canonicalize_request_order(object: &mut Map<String, Value>, transport: Emulat
         "parallel_tool_calls",
         "reasoning",
         "store",
+        "stream",
         "stream_options",
         "include",
         "service_tier",

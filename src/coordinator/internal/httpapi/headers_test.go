@@ -14,6 +14,7 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	source.Set("X-Request-Id", "provider-raw")
 	source.Set("X-Codex-Turn-State", "opaque")
 	source.Set("X-Codex-Installation-Id", "must-not-cross")
+	source.Set("X-Codex-Guardian", "reviewer")
 	source.Set("X-Unrecognized-Provider-Extension", "must-not-cross")
 	source.Set(protocolv1.ProviderRequestIDHeader, "provider-private")
 	source.Set(protocolv1.CoreTTFBHeader, "6")
@@ -28,6 +29,7 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	}
 	for _, name := range []string{
 		"X-Codex-Installation-Id",
+		"X-Codex-Guardian",
 		"X-Unrecognized-Provider-Extension",
 		protocolv1.ProviderRequestIDHeader,
 		protocolv1.CoreTTFBHeader,

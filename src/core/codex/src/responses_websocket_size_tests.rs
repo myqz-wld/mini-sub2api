@@ -8,7 +8,7 @@ fn oversized_incremental_continuation_falls_back_to_the_bounded_full_frame() {
         "type":"response.create", "model":"gpt-5.4", "input":[first_item.clone()]
     });
     let mut continuation =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
     continuation.plan_public_create(&first);
     assert!(continuation.mark_public_create_attempted());
     continuation.observe_server_event(&serde_json::json!({

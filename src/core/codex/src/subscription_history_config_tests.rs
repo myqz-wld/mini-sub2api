@@ -111,7 +111,7 @@ async fn model_and_setup_changes_keep_current_format_without_inheriting_old_base
                     emitted.get("instructions").and_then(Value::as_str),
                     has_base.then_some("current base")
                 );
-                assert!(emitted.get("tools").is_none());
+                assert_eq!(emitted["tools"], json!([]));
             }
             assert!(
                 !items

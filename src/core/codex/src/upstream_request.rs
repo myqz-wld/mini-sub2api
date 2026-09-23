@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::handshake::client::Request as WebSocketReque
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
 
-pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.153.4";
+pub(crate) const CODEX_COMPATIBILITY_VERSION: &str = "0.156.0";
 pub(crate) const CODEX_VERSION_HEADER: &str = "version";
 pub(crate) const RESPONSES_WEBSOCKET_BETA: &str = "responses_websockets=2026-02-06";
 pub(crate) const CODEX_ROUTING_HINT_HEADER: &str = "x-codex-routing-hint";
@@ -33,6 +33,7 @@ const COMMON_ALLOWED: &[&str] = &[
     "openai-beta",
     "x-client-request-id",
     "x-codex-beta-features",
+    "x-codex-guardian",
     "x-codex-inference-call-id",
     CODEX_ROUTING_HINT_HEADER,
     "x-codex-turn-state",
@@ -69,6 +70,7 @@ const HTTP_HEADER_ORDER: &[&str] = &[
     CODEX_VERSION_HEADER,
     "x-openai-internal-codex-residency",
     "x-codex-beta-features",
+    "x-codex-guardian",
     "x-codex-turn-state",
     "x-codex-window-id",
     "x-codex-turn-metadata",
@@ -123,6 +125,7 @@ const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
     CODEX_VERSION_HEADER,
     "x-codex-installation-id",
     "x-codex-beta-features",
+    "x-codex-guardian",
     CODEX_ROUTING_HINT_HEADER,
     "x-codex-inference-call-id",
     "x-client-request-id",
@@ -162,6 +165,7 @@ const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
     CODEX_VERSION_HEADER,
     "x-codex-installation-id",
     "x-codex-beta-features",
+    "x-codex-guardian",
     CODEX_ROUTING_HINT_HEADER,
     "x-codex-inference-call-id",
     "x-client-request-id",
@@ -324,6 +328,7 @@ fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMa
 
     let mut extra_headers = HeaderMap::new();
     copy_header(&mut extra_headers, source, "x-codex-beta-features");
+    copy_header(&mut extra_headers, source, "x-codex-guardian");
     copy_header(&mut extra_headers, source, "x-client-request-id");
     copy_header(&mut extra_headers, source, "traceparent");
     copy_header(&mut extra_headers, source, "tracestate");

@@ -44,7 +44,7 @@ func TestNativeAllCatalogModelDefaults(t *testing.T) {
 			Slug string `json:"slug"`
 		} `json:"models"`
 	}
-	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 11 {
+	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 9 {
 		t.Fatal("pinned catalog shape")
 	}
 	for _, model := range catalog.Models {
@@ -149,7 +149,7 @@ func TestNativeLitePrefixContentAndThreadDimensions(t *testing.T) {
 					t.Fatal("native thread did not namespace prefix ID")
 				}
 			}
-			// v0.153.4 requires a persisted source rollout for fork/resume. Assert this
+			// v0.156.0 requires a persisted source rollout for fork/resume. Assert this
 			// boundary explicitly; native ephemeral tests never create transcript fixtures.
 			client.callExpect("thread/fork", map[string]any{"threadId": thread, "ephemeral": true}, -32600)
 			options.base = "基础 {{literal}}\n"

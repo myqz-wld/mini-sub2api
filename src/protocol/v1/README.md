@@ -75,6 +75,7 @@ The coordinator may forward only these public-client headers to the core:
 - `openai-project`
 - `x-client-request-id`
 - `x-codex-beta-features`
+- `x-codex-guardian`
 - `x-codex-routing-hint`
 - `x-codex-inference-call-id`
 - `x-codex-turn-state`
@@ -105,7 +106,7 @@ selects the request and response profile:
 | Credential kind | Profile for every caller |
 | --- | --- |
 | OpenAI API key | `ApiKeyPassthrough` |
-| Codex subscription | `CodexSubscription1534` |
+| Codex subscription | `CodexSubscription1560` |
 
 Caller markers never grant permissions or change the selected credential. API-key bodies, valid WS
 application frames and response bodies remain byte-transparent, including Codex-marked callers;
@@ -116,7 +117,7 @@ Caller `x-codex-routing-hint` is preserved for API-key HTTP/WS requests, includi
 value; omission stays omission. Subscription derives its hint from the actual model/service tier.
 
 Subscription replaces `User-Agent`, `originator`, and `version` with the runtime-derived Codex
-v0.153.4 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
+v0.156.0 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
 level-3 zstd. Only API-key upstreams receive `OpenAI-Organization`, `OpenAI-Project` and reviewed
 `X-Stainless-*` headers. Both layers remove caller cookies, proxy authentication, forwarding headers,
 content length, transfer encoding, connection-specific headers, unreviewed internal headers and
@@ -124,7 +125,7 @@ unknown `X-Stainless-*` headers.
 
 ## Subscription request preparation
 
-Subscription follows Codex v0.153.4, commit `3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`.
+Subscription follows Codex v0.156.0, commit `fe74a774532af67b5a4a3dec03ce9469e17f89af`.
 Classify original transport, identity/reference evidence and caller format before applying the overlay.
 Caller format, complete context and transmitted format remain distinct. Deterministic repairs require
 equivalent-content proof and revalidation. There is no HTTP/WS conversion.
@@ -200,7 +201,7 @@ caller workspaces remain intact.
 
 Each credential owns HTTP/WS transport contexts. HTTP uses reqwest/native-tls. Provider WS uses
 AWS-LC rustls/native roots, PQ-first groups, HTTP/1 without ALPN, and fresh TLS session state per
-connection. Pinned tungstenite forks and compression match v0.153.4; Go need not parse bodies for identity.
+connection. Pinned tungstenite forks and compression match v0.156.0; Go need not parse bodies for identity.
 
 ## Inference response
 

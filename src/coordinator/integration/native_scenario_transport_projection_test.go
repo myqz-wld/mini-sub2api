@@ -17,7 +17,6 @@ type transportProjection struct {
 	known      map[string]int
 	starts     map[string]float64
 	turn       string
-	lite       bool
 }
 
 func (p *transportProjection) observed(name string) {
@@ -120,20 +119,6 @@ func (p *transportProjection) metadata(t *testing.T, before, after map[string]an
 	}
 	for field := range after {
 		if _, exists := before[field]; !exists {
-			if path == strings.Split(path, ".")[0]+".client_metadata" && field == "x-codex-turn-state" && after[field] == "transport-token-1" {
-				p.observed("http-body-routing-token-added")
-				continue
-			}
-			if p.lite && strings.HasSuffix(path, ".input[1].internal_chat_message_metadata_passthrough") {
-				if field == "turn_id" && after[field] == p.turn {
-					p.observed("lite-base-turn-added")
-					continue
-				}
-				if value, ok := after[field].(float64); field == "create_time" && ok && value > 0 {
-					p.observed("lite-base-create-time-added")
-					continue
-				}
-			}
 			t.Errorf("metadata field added: %s.%s", path, field)
 		}
 	}
@@ -142,12 +127,6 @@ func (p *transportProjection) metadata(t *testing.T, before, after map[string]an
 func (p *transportProjection) compare(t *testing.T, before, after map[string]any, path string) {
 	t.Helper()
 	p.turn, _ = transportMetadata(t, after)["turn_id"].(string)
-	p.lite = false
-	if input, ok := before["input"].([]any); ok && len(input) > 0 {
-		if item, ok := input[0].(map[string]any); ok {
-			p.lite = item["type"] == "additional_tools"
-		}
-	}
 	for field, expected := range before {
 		actual, present := after[field]
 		fieldPath := path + "." + field
@@ -220,13 +199,6 @@ func (p *transportProjection) item(t *testing.T, before, after map[string]any, p
 	}
 	for field := range after {
 		if _, exists := before[field]; !exists {
-			if before["type"] == "additional_tools" && field == "internal_chat_message_metadata_passthrough" {
-				metadata, ok := after[field].(map[string]any)
-				if ok && len(metadata) == 1 && metadata["turn_id"] == p.turn {
-					p.observed("lite-tools-turn-added")
-					continue
-				}
-			}
 			t.Errorf("input item field added: %s.%s", path, field)
 		}
 	}

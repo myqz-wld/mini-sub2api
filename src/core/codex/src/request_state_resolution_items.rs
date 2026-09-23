@@ -38,6 +38,9 @@ pub(super) fn project_items(
         let Some(item) = item.as_object_mut() else {
             continue;
         };
+        if item.get("type").and_then(Value::as_str) == Some("configuration_update") {
+            continue;
+        }
         let temporary_id = item.get("id").and_then(Value::as_str).map(str::to_string);
         let raw = temporary_id
             .as_deref()

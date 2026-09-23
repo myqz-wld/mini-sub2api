@@ -108,7 +108,7 @@ async fn oversized_schema_id_is_an_invalid_request_not_a_state_outage() {
         "client_metadata":{"session_id":"x".repeat(513)}
     });
     let error = prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).expect("body JSON")),

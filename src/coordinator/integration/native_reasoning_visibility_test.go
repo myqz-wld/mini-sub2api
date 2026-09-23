@@ -91,7 +91,7 @@ func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativ
 			if !hasReasoningInclude(include) {
 				t.Fatal("Subscription omitted encrypted reasoning upstream")
 			}
-			if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.153.4" {
+			if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.156.0" {
 				t.Fatal("reasoning change altered transport fingerprint")
 			}
 		}

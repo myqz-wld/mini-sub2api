@@ -184,7 +184,7 @@ async fn hidden_provenance_does_not_survive_history_expiry_or_restore_across_key
     .await;
     body["input"] = json!([input("seed"), response["output"][0], input("next")]);
     let other = prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

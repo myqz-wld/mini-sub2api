@@ -167,11 +167,10 @@ fn projection_decision(
         Some(RelationshipCarrier::ForkedFromThread) => {
             optional_string(&identity.forked_from_thread_id)
         }
-        Some(RelationshipCarrier::Turn) if identity.memory() => ProjectionDecision::Remove,
         Some(RelationshipCarrier::Turn) if identity.prewarm() => string(""),
         Some(RelationshipCarrier::Turn) => optional_string(&identity.turn_id),
         Some(RelationshipCarrier::RootTurn | RelationshipCarrier::ParentTurn)
-            if identity.memory() || identity.prewarm() =>
+            if identity.prewarm() =>
         {
             ProjectionDecision::Remove
         }

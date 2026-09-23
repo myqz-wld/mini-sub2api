@@ -90,7 +90,7 @@ async fn prepare(
     body: Value,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -238,7 +238,7 @@ async fn admission_reclaims_idle_ws_comparison_without_closing_its_socket() {
     let socket = store.contexts.open_socket().unwrap();
     identity.connection_id = Some(socket.id.clone());
     let mut baseline =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
     baseline.plan_public_create(&json!({"type":"response.create","model":"gpt-5.4",
         "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x".repeat(40 * 1024)}]}]}));
     assert!(baseline.mark_public_create_attempted());

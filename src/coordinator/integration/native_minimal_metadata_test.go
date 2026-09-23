@@ -23,7 +23,7 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 		} `json:"models"`
 	}
 	raw, err := os.ReadFile(filepath.Join(nativeSource(t), "codex-rs/models-manager/models.json"))
-	if err != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Models) != 11 {
+	if err != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Models) != 9 {
 		t.Fatal("pinned native metadata catalog unavailable")
 	}
 	for _, model := range catalog.Models {
@@ -51,6 +51,9 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 						metadata, ok := wire.value["client_metadata"].(map[string]any)
 						if !ok {
 							t.Fatal("minimal client metadata absent")
+						}
+						if metadata["guardian_credits_requested"] != "true" {
+							t.Fatal("minimal caller lacks native backend Guardian metadata")
 						}
 						var turn map[string]any
 						if encoded, ok := metadata["x-codex-turn-metadata"].(string); !ok || json.Unmarshal([]byte(encoded), &turn) != nil {
@@ -86,8 +89,8 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 						if capturedBase(t, ordinaryResolvedFirst(t, wires)) != request["instructions"] {
 							t.Fatal("minimal Lite base changed")
 						}
-					} else if len(input) != 1 || value["instructions"] != request["instructions"] || value["tools"] != nil {
-						t.Fatal("minimal Responses caller acquired tools or instructions")
+					} else if tools, ok := value["tools"].([]any); len(input) != 1 || value["instructions"] != request["instructions"] || !ok || len(tools) != 0 {
+						t.Fatal("minimal Responses caller lost the native empty-tools carrier or changed instructions")
 					}
 					last, _ := input[len(input)-1].(map[string]any)
 					content, _ := last["content"].([]any)

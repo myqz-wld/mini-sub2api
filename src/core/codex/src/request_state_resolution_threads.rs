@@ -16,7 +16,9 @@ pub(super) fn resolve_conversation(
         return Ok(assignment);
     }
     let key = editor.lookup("conversation", raw);
-    let reserved = editor.existing_wire_from_downstream(WireIdDomain::Thread, raw)?;
+    let reserved = editor
+        .existing_wire_from_downstream(WireIdDomain::Session, raw)?
+        .or(editor.existing_wire_from_downstream(WireIdDomain::Thread, raw)?);
     if let Some(id) = &reserved {
         anyhow::ensure!(
             editor.child_thread_by_id(id).is_none(),

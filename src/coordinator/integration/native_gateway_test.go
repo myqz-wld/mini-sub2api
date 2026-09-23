@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -28,6 +29,10 @@ type nativeGateway struct {
 }
 
 func newNativeGateway(t *testing.T, upstream string, subscription bool) nativeGateway {
+	return newNativeGatewayForWireShape(t, upstream, subscription, false)
+}
+
+func newNativeGatewayForWireShape(t *testing.T, upstream string, subscription, httpOnly bool) nativeGateway {
 	t.Helper()
 	assertLoopbackURL(t, upstream)
 	binary := findCoreBinary(t)
@@ -58,7 +63,18 @@ func newNativeGateway(t *testing.T, upstream string, subscription bool) nativeGa
 	}
 	t.Cleanup(func() { _ = supervisor.Close() })
 	handler := httpapi.NewHandler(store, supervisor, nil)
-	server, tap := newNativeTappedServer(t, handler)
+	server, tap := newNativeTappedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Test-only alias exercises the CLI's actual built-in provider gates. The
+		// production public surface remains /v1/responses.
+		if r.URL.Path == "/backend-api/codex/responses" {
+			if httpOnly && r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			r.URL.Path = "/v1/responses"
+		}
+		handler.ServeHTTP(w, r)
+	}))
 	t.Cleanup(handler.ShutdownWebSockets)
 	return nativeGateway{server: server, tap: tap, secret: key.Secret, stateDir: coreDir, store: store, keyID: key.ID}
 }
@@ -93,7 +109,7 @@ func TestNativeCodexThroughGateway(t *testing.T) {
 							}
 							continue
 						}
-						if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.153.4" {
+						if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.156.0" {
 							t.Fatal("Subscription fingerprint identity mismatch")
 						}
 						if !ws && wire.value["previous_response_id"] != nil {

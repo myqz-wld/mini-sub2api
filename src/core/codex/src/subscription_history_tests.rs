@@ -357,7 +357,7 @@ fn simplified_caller_history_does_not_expand_ws_automatic_reuse_eligibility() {
     use crate::responses_websocket_state::{PublicCreateMode, ResponsesWebSocketState};
     for reduced in [false, true] {
         let mut state =
-            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
         let user = json!({"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]});
         let mut first = request(json!([user]));
         first["type"] = "response.create".into();

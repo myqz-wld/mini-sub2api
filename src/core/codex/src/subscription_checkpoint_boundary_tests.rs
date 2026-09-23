@@ -255,7 +255,7 @@ async fn checkpoint_identity_does_not_inherit_omitted_ordinary_instructions() {
     let wire: Value = serde_json::from_slice(&next.body).unwrap();
     assert!(wire.get("instructions").is_none());
     assert!(wire["input"][0]["type"] != "additional_tools");
-    assert!(wire.get("tools").is_none());
+    assert_eq!(wire["tools"], json!([]));
 }
 
 #[tokio::test]

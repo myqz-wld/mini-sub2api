@@ -3,7 +3,29 @@ use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-pub(crate) fn apply(
+pub(crate) fn apply_generated(
+    object: &mut Map<String, Value>,
+    thread: &str,
+    prefixes: &[usize],
+) -> anyhow::Result<BTreeSet<String>> {
+    let ids = apply(object, thread, prefixes)?;
+    for index in prefixes {
+        let item = object["input"][*index]
+            .as_object_mut()
+            .expect("generated prefix");
+        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
+            item.shift_remove("internal_chat_message_metadata_passthrough");
+        } else {
+            item.insert(
+                "internal_chat_message_metadata_passthrough".into(),
+                Value::Object(Map::new()),
+            );
+        }
+    }
+    Ok(ids)
+}
+
+fn apply(
     object: &mut Map<String, Value>,
     thread: &str,
     prefixes: &[usize],
@@ -52,6 +74,7 @@ pub(crate) struct NativePrefix {
     id: String,
     kind: &'static str,
     payload: Vec<u8>,
+    metadata_fields: Option<BTreeSet<String>>,
 }
 
 pub(crate) fn capture_native(object: &Map<String, Value>) -> Vec<NativePrefix> {
@@ -76,6 +99,7 @@ pub(crate) fn capture_native(object: &Map<String, Value>) -> Vec<NativePrefix> {
             id: id.to_string(),
             kind: "at",
             payload,
+            metadata_fields: metadata_fields(&input[0]),
         });
     }
     if let Some(base) = input.get(1)
@@ -94,9 +118,16 @@ pub(crate) fn capture_native(object: &Map<String, Value>) -> Vec<NativePrefix> {
             id: id.to_string(),
             kind: "msg",
             payload: text.as_bytes().to_vec(),
+            metadata_fields: metadata_fields(base),
         });
     }
     prefixes
+}
+
+fn metadata_fields(item: &Value) -> Option<BTreeSet<String>> {
+    item.get("internal_chat_message_metadata_passthrough")
+        .and_then(Value::as_object)
+        .map(|metadata| metadata.keys().cloned().collect())
 }
 
 pub(crate) fn project_native(
@@ -141,6 +172,19 @@ pub(crate) fn project_native(
         else {
             continue;
         };
+        // Setup prefixes have no per-turn attribution in native requests. Keep the caller's
+        // original presence/empty-object shape after proving the deterministic prefix identity.
+        let item = object["input"][index].as_object_mut().expect("prefix item");
+        if let Some(fields) = &prefix.metadata_fields {
+            if let Some(metadata) = item
+                .get_mut("internal_chat_message_metadata_passthrough")
+                .and_then(Value::as_object_mut)
+            {
+                metadata.retain(|name, _| fields.contains(name));
+            }
+        } else {
+            item.shift_remove("internal_chat_message_metadata_passthrough");
+        }
         // Existing reversible bindings may be used by live upstream contexts created by older
         // versions. Preserve them; silently rotating one would break valid historical references.
         if let Some(existing) =

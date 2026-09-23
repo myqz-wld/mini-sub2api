@@ -2,7 +2,7 @@ use super::*;
 use std::assert_eq;
 
 #[tokio::test]
-async fn native_1534_prefixes_are_stable_and_supported_per_response_controls_survive() {
+async fn native_1560_prefixes_are_stable_and_supported_per_response_controls_survive() {
     let captures = Arc::new(Mutex::new(Vec::new()));
     let upstream = spawn_loopback(
         Router::new()

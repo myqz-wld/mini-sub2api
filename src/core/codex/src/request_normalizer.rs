@@ -60,7 +60,7 @@ struct InvalidStatefulProjection {
     source: anyhow::Error,
 }
 
-/// Applies the Codex 0.153.4 request overlay selected by `upstream_profile`.
+/// Applies the Codex 0.156.0 request overlay selected by `upstream_profile`.
 ///
 /// The caller object is cloned in full before the supported request-field allowlist and targeted
 /// normalization are applied. `ApiKeyPassthrough` is deliberately rejected: callers must retain its
@@ -397,6 +397,10 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "request_normalizer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_1560_tests.rs"]
+mod release1560_tests;
 
 #[cfg(test)]
 #[path = "request_normalizer_message_tests.rs"]

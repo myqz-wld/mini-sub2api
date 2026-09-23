@@ -19,7 +19,7 @@ fn subscription_system_role_becomes_developer_while_message_content_types_remain
     );
 
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -49,7 +49,7 @@ async fn malformed_serialized_identity_fails_closed_before_fallback() {
     assert!(
         harness
             .prepare(
-                UpstreamProfile::CodexSubscription1534,
+                UpstreamProfile::CodexSubscription1560,
                 EmulationTransport::Http,
                 &headers,
                 body,

@@ -21,7 +21,7 @@ func TestNativeScenarioEnvironmentSkillModels(t *testing.T) {
 			IncludeSkillsUsage bool   `json:"include_skills_usage_instructions"`
 		} `json:"models"`
 	}
-	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 11 {
+	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 9 {
 		t.Fatal("native skill routing catalog shape")
 	}
 	for _, model := range catalog.Models {

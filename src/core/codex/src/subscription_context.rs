@@ -111,6 +111,7 @@ pub(crate) struct Lease {
     pub(crate) id: String,
     pub(crate) store: Weak<Mutex<Inner>>,
     pub(crate) reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility,
+    pub(crate) transport: crate::request_normalizer::EmulationTransport,
 }
 
 pub(crate) struct SocketLease {
@@ -218,6 +219,11 @@ impl ContextStore {
         operation: &Operation,
         token: &str,
     ) -> anyhow::Result<()> {
+        // Native HTTP learns routing only from response headers; response.metadata supplies
+        // this state on WebSocket streams. A shared event parser must preserve that boundary.
+        if operation.0.transport != crate::request_normalizer::EmulationTransport::WebSocket {
+            return Ok(());
+        }
         crate::request_state_types::validate_wire_id(token)?;
         {
             let mut inner = self

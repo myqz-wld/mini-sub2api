@@ -10,7 +10,7 @@ switching, Chat Completions or conversation-management API.
 | Upstream | Every caller |
 |---|---|
 | API key | Bodies/valid WS frames remain byte-transparent; gateway auth, admission, usage and safe headers still apply. Caller `X-Codex-Routing-Hint` survives; omission stays absent. |
-| Subscription | Codex 0.153.4 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
+| Subscription | Codex 0.156.0 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
 
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
@@ -29,6 +29,9 @@ alone does not authorize WS reuse; compare actual settings, input/output, thread
 
 Within Key/account scope, locate by original handshake `session-id` → `client_metadata.session_id` →
 turn metadata session ID → known previous response → eligible history/checkpoint → new session.
+For native cache-affinity requests where `session-id` carries `prompt_cache_key`, an explicit body
+session ID remains the owner. Scoped cache aliases may be shared across forks without merging their
+sessions; arbitrary bare-client cache hints do not create session ownership.
 The first WS frame binds the session; later frames reject cross-session evidence and supply current
 turn/window metadata. Reconnect resolves again. Conversation/cache/request/thread/window IDs are not
 session locators; mapped top-level `conversation` is compatibility evidence, not full local history.
@@ -64,27 +67,32 @@ Each branch/turn and physical WS permits one inference. Equivalent contexts may 
 content, never execution owners/tool consumption. Current-thread, ancestor or declared-fork history
 still requires the same session, including remote-only continuation.
 
-Retain the first upstream handshake/metadata turn token across same-turn retries/reconnects.
+Retain the first upstream turn token across same-turn retries/reconnects. HTTP learns it from
+response headers and replays it only in headers; WS also learns `response.metadata` tokens and
+carries the selected token in `response.create` metadata, preserving a native carrier's key order.
 Failed-turn facts follow idle expiry/capacity; admitted work is protected. Completed prewarm may
 transfer its token only to the first business turn on that socket/thread. Hidden setup updates the
-business frame before sending. Memory metadata is turn-free; Core provides no memory-writing service.
+business frame before sending. Native memory-consolidation turn/root-turn IDs are projected when
+present; absent memory turns remain absent. Core provides no memory-writing service.
 
 ## Instructions and Lite
 
 | Caller format | Base and tools |
 |---|---|
-| Ordinary | Keep nonblank top-level instructions verbatim; omit missing/null/blank/nonstring bases. Top-level tools. |
+| Ordinary | Keep nonblank top-level instructions verbatim; omit missing/null/blank/nonstring bases. Top-level tools; omitted tools serialize as `[]`. |
 | Ordinary → Lite | `additional_tools`, optional valid caller-base developer message, original input; remove top-level base/tools. |
 | Formed Lite | Preserve input instructions; place an explicit valid top-level base after tools. |
 | Inherited Lite increment | Validate referenced caller format/setup; do not repeat the prefix. |
 
 No path inserts model-default bases or renders caller placeholders. Ordinary continuation does not
 restore an omitted base. Preserve developer content/order/duplicates; Subscription maps
-system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.153.4/README.md)
+system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.156.0/README.md)
 are offline test fixtures only.
 
 Lite UUIDv5 uses OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
 base text (`msg_`). Regenerate only Core-owned/proven native prefixes; retain durable aliases.
+Generated setup carries no turn/time attribution: the tool prefix omits message metadata and the
+base prefix has an empty metadata object. Proven native setup preserves the caller's supplied fields.
 Group loose functions/custom tools and function namespaces in encounter order, preserving duplicates
 and the last nonblank description.
 
@@ -98,6 +106,14 @@ Valid numeric item `create_time` survives absent optional IDs. Retained history 
 time/turn metadata through expansion/matching; explicit caller values and content remain intact.
 Native exec/wait exposure and host availability differ. Bare API/OpenCode keep direct tools; Core
 provides no JavaScript bridge or claim of complete default-native code-mode equivalence.
+
+Codex 0.156.0 `configuration_update` input items retain their reasoning effort and history position
+without item IDs or turn stamps. Native analytics flags and opaque executed-tool result metadata
+survive normalization. Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
+service-tier/routing hints, and their parent response IDs require an existing mapping in the same Key.
+Bare non-reviewer Subscription callers receive the backend Guardian credit metadata flag. WS delta
+reuse compares late executed-tool result metadata and its call binding; changed evidence requires
+full input. See [wire-shape evidence and limits](CODEX_COMPATIBILITY.md#field-order-and-presence).
 
 ## Reasoning visibility
 

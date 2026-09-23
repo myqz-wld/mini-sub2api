@@ -354,7 +354,7 @@ fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
         .is_err()
     );
     {
-        let profile = UpstreamProfile::CodexSubscription1534;
+        let profile = UpstreamProfile::CodexSubscription1560;
         assert!(
             prepare_codex_overlay_for_test(
                 profile,
@@ -431,7 +431,7 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
 }
 
 fn prepare_subscription(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(UpstreamProfile::CodexSubscription1534, caller, transport)
+    prepare(UpstreamProfile::CodexSubscription1560, caller, transport)
 }
 
 fn prepare(profile: UpstreamProfile, caller: Value, transport: EmulationTransport) -> Value {

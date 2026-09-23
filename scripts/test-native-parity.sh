@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# Requires the real Codex 0.153.4 binary and its exact read-only source checkout.
+# Requires the real Codex 0.156.0 binary and its exact read-only source checkout.
 # The tests fail on missing/wrong prerequisites; they never skip or contact a provider.
 # Do not accept a stale Core binary inherited from another build or worktree.
 env -u MINI_SUB2API_CORE_CODEX_BINARY \

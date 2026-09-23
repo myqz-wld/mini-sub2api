@@ -137,7 +137,15 @@ pub(crate) fn canonicalize_executed_tool_calls(metadata: &mut Map<String, Value>
         let Some(call) = call.as_object_mut() else {
             continue;
         };
-        reorder(call, &["name", "arguments"]);
+        reorder(
+            call,
+            &[
+                "name",
+                "arguments",
+                "tool_result_sources",
+                "tool_result_metadata",
+            ],
+        );
     }
 }
 

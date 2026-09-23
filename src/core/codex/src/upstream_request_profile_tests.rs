@@ -8,6 +8,41 @@ fn offline_client() -> Client {
 }
 
 #[test]
+fn guardian_headers_survive_http_and_websocket_without_crossing_response_privacy() {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-codex-guardian", HeaderValue::from_static("reviewer"));
+    headers.insert(
+        http::header::COOKIE,
+        HeaderValue::from_static("synthetic-private"),
+    );
+    let auth = ResolvedAuth::CodexOAuth {
+        token: "synthetic-token".into(),
+        account_id: "synthetic-account".into(),
+    };
+    let http = build(
+        &offline_client(),
+        &headers,
+        "http://127.0.0.1:1/responses",
+        &auth,
+        UpstreamProfile::CodexSubscription1560,
+        Bytes::from_static(b"{}"),
+    )
+    .unwrap();
+    let (ws, _) = build_websocket(
+        &headers,
+        "http://127.0.0.1:1/responses",
+        &auth,
+        UpstreamProfile::CodexSubscription1560,
+        1024,
+    )
+    .unwrap();
+    for emitted in [http.headers(), ws.headers()] {
+        assert_eq!(emitted["x-codex-guardian"], "reviewer");
+        assert!(!emitted.contains_key(http::header::COOKIE));
+    }
+}
+
+#[test]
 fn originator_profile_cannot_promote_an_api_key_to_subscription_auth() {
     let auth = ResolvedAuth::OpenAiApiKey {
         token: "offline-profile-key-not-real".to_string(),
@@ -17,7 +52,7 @@ fn originator_profile_cannot_promote_an_api_key_to_subscription_auth() {
         &HeaderMap::new(),
         "https://example.test/v1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         Bytes::from_static(br#"{"model":"offline"}"#),
     );
 

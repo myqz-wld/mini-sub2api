@@ -192,7 +192,7 @@ func assertAnonymousCurrentConfiguration(t *testing.T, wire nativeWire, format s
 	tools, _ := wire.value["tools"].([]any)
 	if format == "ordinary" {
 		if base == "" {
-			if wire.value["instructions"] != nil || wire.value["tools"] != nil {
+			if wire.value["instructions"] != nil || !reflect.DeepEqual(wire.value["tools"], []any{}) {
 				t.Fatal("omitted ordinary setup inherited prior values")
 			}
 		} else if wire.value["instructions"] != base {

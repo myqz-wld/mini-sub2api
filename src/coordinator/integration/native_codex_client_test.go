@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const nativeVersion = "codex-cli 0.153.4"
+const nativeVersion = "codex-cli 0.156.0"
 
 type nativeClient struct {
 	t           *testing.T
@@ -33,22 +33,24 @@ type nativeClient struct {
 }
 
 type nativeOptions struct {
-	endpoint           string
-	model              string
-	ws                 bool
-	bearer             string
-	base               string
-	project            string
-	metadataEndpoint   string
-	tools              []any
-	neutralPersonality bool
-	configOverrides    map[string]string
-	homeFiles          map[string]string
-	threadParams       map[string]any
-	providerName       string
-	traceEndpoint      string
-	deadline           time.Duration
-	observe            func(map[string]any)
+	endpoint               string
+	model                  string
+	ws                     bool
+	bearer                 string
+	base                   string
+	project                string
+	metadataEndpoint       string
+	tools                  []any
+	neutralPersonality     bool
+	configOverrides        map[string]string
+	homeFiles              map[string]string
+	threadParams           map[string]any
+	providerName           string
+	traceEndpoint          string
+	deadline               time.Duration
+	observe                func(map[string]any)
+	reasoningEffortUpdates bool
+	builtinOpenAI          bool
 }
 
 func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
@@ -71,7 +73,7 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		var err error
 		binary, err = exec.LookPath("codex")
 		if err != nil {
-			t.Fatal("native parity requires Codex v0.153.4")
+			t.Fatal("native parity requires Codex v0.156.0")
 		}
 	}
 	version, err := exec.Command(binary, "--version").Output()
@@ -79,6 +81,24 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		t.Fatal("native parity binary version mismatch")
 	}
 	isolated := t.TempDir()
+	catalogPath := filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json")
+	if options.reasoningEffortUpdates {
+		data, err := os.ReadFile(catalogPath)
+		var catalog map[string]any
+		if err != nil || json.Unmarshal(data, &catalog) != nil {
+			t.Fatal("read native capability fixture")
+		}
+		for _, raw := range catalog["models"].([]any) {
+			entry := raw.(map[string]any)
+			if entry["slug"] == options.model {
+				entry["supports_reasoning_effort_updates"] = true
+			}
+		}
+		catalogPath = filepath.Join(isolated, "models.json")
+		if os.WriteFile(catalogPath, mustRequestJSON(t, catalog), 0600) != nil {
+			t.Fatal("write native capability fixture")
+		}
+	}
 	deadline := options.deadline
 	if deadline == 0 {
 		deadline = 30 * time.Second
@@ -110,7 +130,6 @@ cli_auth_credentials_store = "file"
 [analytics]
 enabled = false
 [features]
-personality = %t
 apps = false
 plugins = false
 recommended_plugins = false
@@ -126,7 +145,11 @@ request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = %d
 websocket_connect_timeout_ms = 3000
-`, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"), metadataEndpoint+"/backend-api", !options.neutralPersonality, providerName, options.endpoint+"/v1", options.ws, idleMillis)
+`, options.model, catalogPath, metadataEndpoint+"/backend-api", providerName, options.endpoint+"/v1", options.ws, idleMillis)
+	if options.builtinOpenAI {
+		config = strings.Replace(config, `model_provider = "native_capture"`, `model_provider = "openai"`, 1)
+		config = fmt.Sprintf("openai_base_url = %q\n", options.endpoint+"/backend-api/codex") + config
+	}
 	if err := os.WriteFile(filepath.Join(isolated, "config.toml"), []byte(config), 0600); err != nil {
 		t.Fatal("write native config")
 	}
@@ -207,7 +230,7 @@ websocket_connect_timeout_ms = 3000
 		}
 	}()
 	t.Cleanup(func() { _ = input.Close(); cancel(); _ = command.Wait(); reader.Wait() })
-	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.153.4"}, "capabilities": map[string]any{"experimentalApi": true}})
+	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.156.0"}, "capabilities": map[string]any{"experimentalApi": true}})
 	client.send(map[string]any{"method": "initialized"})
 	return client
 }

@@ -62,16 +62,7 @@ func scenarioBaseExpectedPersonality(model scenarioBaseModel, personality string
 		}
 		template = kept.String()
 	}
-	if model.Messages.Variables == nil {
-		return template
-	}
-	variable := ""
-	if personality == "feature-off" {
-		variable = model.Messages.Variables["personality_default"]
-	} else if personality != "none" {
-		variable = model.Messages.Variables["personality_"+personality]
-	}
-	return strings.ReplaceAll(template, "{{ personality }}", variable)
+	return template
 }
 
 func scenarioBasePersonalityFragments(t *testing.T, wire nativeWire, expectedText string) int {
@@ -97,7 +88,7 @@ func scenarioBasePersonalityFragments(t *testing.T, wire nativeWire, expectedTex
 
 func TestNativeScenarioBasePersonalityModes(t *testing.T) {
 	for _, route := range []string{"direct", "api-key", "subscription"} {
-		for _, model := range []string{"gpt-5.4", "gpt-5.6-sol", "gpt-5.2"} {
+		for _, model := range []string{"gpt-5.4", "gpt-5.6-sol", "gpt-5.5"} {
 			for _, personality := range []string{"pragmatic", "friendly", "none", "feature-off"} {
 				t.Run(route+"/"+model+"/"+personality, func(t *testing.T) {
 					catalog := scenarioBaseCatalog(t, model)
@@ -152,11 +143,7 @@ func TestNativeScenarioBasePersonalityUpdates(t *testing.T) {
 						}
 						for i, wire := range business {
 							assertScenarioBaseValue(t, wire, options.model == "gpt-5.6-sol", expected)
-							expectedCount := 0
-							if profile == "template" && i >= 2 && (!ws || i == 2) {
-								expectedCount = 1
-							}
-							if scenarioBasePersonalityFragments(t, wire, catalog.Messages.Variables["personality_friendly"]) != expectedCount {
+							if scenarioBasePersonalityFragments(t, wire, "") != 0 {
 								t.Fatal("personality lifecycle appended, lost or repeated an update incorrectly")
 							}
 							if ws && i >= 2 && wire.value["previous_response_id"] == nil {

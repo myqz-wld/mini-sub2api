@@ -172,6 +172,7 @@ fn turn_metadata_order_and_visibility_are_table_owned() {
             "tool_namespaces_info",
             "turn_started_at_unix_ms",
             "history_ingest_requested",
+            "analytics_enabled",
             "compaction",
         ]
     );

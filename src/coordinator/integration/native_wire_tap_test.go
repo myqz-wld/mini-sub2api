@@ -141,7 +141,7 @@ func (tap *nativeTap) packets(t *testing.T) []nativePacket {
 			if err != nil || len(body) > nativeCaptureLimit {
 				t.Fatal("native HTTP capture body bound")
 			}
-			if request.URL.Path == "/v1/responses" {
+			if request.URL.Path == "/v1/responses" || request.URL.Path == "/backend-api/codex/responses" {
 				packets = append(packets, nativePacket{method: request.Method, headers: request.Header.Clone(), headerNames: names, headerSpellings: spellings, payload: body, connection: number + 1})
 			}
 		}

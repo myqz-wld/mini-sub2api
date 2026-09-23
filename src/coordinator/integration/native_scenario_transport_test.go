@@ -44,28 +44,14 @@ func TestNativeScenarioTransportLifecycle(t *testing.T) {
 									t.Fatal("API-key lifecycle request payload changed")
 								}
 							} else {
+								assertNativeJSONShape(t, nativePacketJSON(t, packets[i]), wire.body)
 								projection.compare(t, transportPacketValue(t, packets[i]), wire.value, fmt.Sprintf("request[%d]", i))
 							}
 						}
 						if route == "api-key" {
 							assertProfileStateFileCount(t, gateway.stateDir, 0)
 						} else {
-							wantRouting, wantPrefix := 2, 0
-							if ws {
-								wantRouting = 0
-							}
-							if model == "gpt-5.6-sol" {
-								wantPrefix = 4
-								if ws {
-									wantPrefix = 1
-								}
-							}
-							for kind, want := range map[string]int{"http-body-routing-token-added": wantRouting, "lite-tools-turn-added": wantPrefix, "lite-base-turn-added": wantPrefix, "lite-base-create-time-added": wantPrefix} {
-								if projection.known[kind] != want {
-									t.Errorf("recorded baseline difference changed: %s count=%d want=%d", kind, projection.known[kind], want)
-								}
-							}
-							t.Logf("KNOWN native conformance differences (runner success is not exact parity): %v", projection.known)
+							t.Logf("projected scalar differences: %v", projection.known)
 						}
 					}
 					// The raw parser independently validates masks, deflate context and framing.

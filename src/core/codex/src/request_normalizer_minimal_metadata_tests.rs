@@ -4,7 +4,7 @@ fn project(mut caller: Value, transport: EmulationTransport) -> (Value, Value) {
     caller["input"] = "Translate this synthetic sentence.".into();
     caller["instructions"] = "Only translate the supplied text.".into();
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&caller).unwrap()),
@@ -52,7 +52,7 @@ fn bare_model_defaults_do_not_invent_environment_or_tools() {
             } else {
                 assert_eq!(input.len(), 1);
                 assert_eq!(value["instructions"], "Only translate the supplied text.");
-                assert!(value.get("tools").is_none());
+                assert_eq!(value["tools"], serde_json::json!([]));
             }
             assert_eq!(input.last().unwrap()["role"], "user");
             assert_eq!(

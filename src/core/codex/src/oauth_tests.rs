@@ -72,7 +72,7 @@ fn refresh_and_revoke_requests_use_codex_identity_headers() {
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| {
-                value.starts_with("codex-tui/0.153.4 (") && value.ends_with(" (codex-tui; 0.153.4)")
+                value.starts_with("codex-tui/0.156.0 (") && value.ends_with(" (codex-tui; 0.156.0)")
             })
     );
 }

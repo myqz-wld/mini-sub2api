@@ -222,7 +222,7 @@ pub(crate) fn resolve_and_project(
     )?;
     crate::request_identity_projection::apply(headers, object, &identity)
         .map_err(|_| anyhow::anyhow!("projecting request identity"))?;
-    generated_upstream_ids.extend(crate::lite_prefix_identity::apply(
+    generated_upstream_ids.extend(crate::lite_prefix_identity::apply_generated(
         object,
         &identity.thread_id,
         lite_prefixes,
@@ -250,7 +250,7 @@ fn resolve_turn(
     root_thread_id: &str,
     reserved_turn: Option<&str>,
 ) -> Result<ResolvedTurn> {
-    if evidence.is_memory() {
+    if evidence.is_memory() && evidence.turn.is_none() {
         return Ok(ResolvedTurn {
             turn_id: None,
             root_turn_id: None,

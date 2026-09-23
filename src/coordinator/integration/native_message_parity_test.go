@@ -78,8 +78,22 @@ func assertNativeMessageParity(t *testing.T, packet nativePacket, wire nativeWir
 		}
 	}
 	var caller map[string]any
+	assertNativeJSONShape(t, raw, wire.body)
 	if json.Unmarshal(raw, &caller) != nil {
 		t.Fatal("native comparison JSON")
+	}
+	beforeMetadata, _ := caller["client_metadata"].(map[string]any)
+	afterMetadata, _ := wire.value["client_metadata"].(map[string]any)
+	var beforeTurn, afterTurn map[string]any
+	beforeRaw, _ := beforeMetadata["x-codex-turn-metadata"].(string)
+	afterRaw, _ := afterMetadata["x-codex-turn-metadata"].(string)
+	if json.Unmarshal([]byte(beforeRaw), &beforeTurn) != nil || json.Unmarshal([]byte(afterRaw), &afterTurn) != nil {
+		t.Fatal("native turn metadata comparison JSON")
+	}
+	for _, field := range []string{"analytics_enabled", "model", "reasoning_effort"} {
+		if expected, present := beforeTurn[field]; present && !reflect.DeepEqual(expected, afterTurn[field]) {
+			t.Errorf("native turn metadata differs: %s", field)
+		}
 	}
 	for field, expected := range caller {
 		if slices.Contains([]string{"client_metadata", "input", "prompt_cache_key", "previous_response_id"}, field) {

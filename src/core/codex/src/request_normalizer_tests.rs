@@ -38,7 +38,7 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
             EmulationTransport::Http,
             &headers,
             Bytes::from(body),
@@ -196,7 +196,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
         "true".parse().expect("header"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &headers,
         body,
@@ -271,7 +271,7 @@ fn strips_subscription_incompatible_and_codex_unemitted_fields() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -313,7 +313,7 @@ async fn filters_unsupported_fields_from_already_subscription_shaped_json() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body,
@@ -345,7 +345,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true}"#,
     );
     let native_prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         native.clone(),
@@ -392,7 +392,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
     );
     let encoded = Bytes::from_static(b"compressed bytes");
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &encoded_headers,
         encoded,
@@ -419,7 +419,7 @@ async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
             EmulationTransport::Http,
             &headers,
             body.clone(),
@@ -433,7 +433,7 @@ async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     assert_ne!(prepared.body, body);
     let repeated = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
             EmulationTransport::Http,
             &headers,
             body,

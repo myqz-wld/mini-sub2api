@@ -10,7 +10,7 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
         (
             "user-agent",
-            "codex-tui/0.153.4 (Mac OS test; arm64) dumb (codex-tui; 0.153.4)",
+            "codex-tui/0.156.0 (Mac OS test; arm64) dumb (codex-tui; 0.156.0)",
         ),
         ("originator", "codex-tui"),
         ("x-codex-beta-features", "remote_compaction_v2"),
@@ -38,7 +38,7 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -96,7 +96,7 @@ fn oauth_websocket_replaces_process_identity_and_keeps_canonical_merge_position(
     let mut headers = HeaderMap::new();
     for (name, value) in [
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
-        ("user-agent", "codex_exec/0.153.4 (Mac OS test; arm64) dumb"),
+        ("user-agent", "codex_exec/0.156.0 (Mac OS test; arm64) dumb"),
         ("originator", "codex_exec"),
         ("x-codex-beta-features", "remote_compaction_v2"),
         (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.4"),
@@ -113,7 +113,7 @@ fn oauth_websocket_replaces_process_identity_and_keeps_canonical_merge_position(
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -153,7 +153,7 @@ fn oauth_websocket_timing_headers_match_codex_0149_conditional_order() {
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
         (
             "user-agent",
-            "codex-tui/0.153.4 (Mac OS test; arm64) dumb (codex-tui; 0.153.4)",
+            "codex-tui/0.156.0 (Mac OS test; arm64) dumb (codex-tui; 0.156.0)",
         ),
         ("originator", "codex-tui"),
         ("x-codex-beta-features", "remote_compaction_v2"),
@@ -180,7 +180,7 @@ fn oauth_websocket_timing_headers_match_codex_0149_conditional_order() {
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -258,7 +258,7 @@ fn oauth_websocket_optional_headers_match_codex_0149_merge_order() {
             token: "oauth-websocket-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         1024 * 1024,
     )
     .expect("WebSocket request");
@@ -350,7 +350,7 @@ async fn oauth_http_headers_and_zstd_body_match_codex_0149_wire_shape() {
             token: "oauth-http-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         body.clone(),
     )
     .expect("HTTP request");

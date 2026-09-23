@@ -6,7 +6,7 @@ const HISTORY_SCOPE: &str = "psn_HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH";
 
 #[tokio::test]
 async fn lite_parallel_tool_calls_is_forced_off_for_both_profiles_and_transports() {
-    for (profile_index, profile) in [UpstreamProfile::CodexSubscription1534]
+    for (profile_index, profile) in [UpstreamProfile::CodexSubscription1560]
         .into_iter()
         .enumerate()
     {
@@ -61,7 +61,7 @@ async fn lite_parallel_tool_calls_is_forced_off_for_both_profiles_and_transports
 
 #[tokio::test]
 async fn store_false_preserves_scoped_item_ids_calls_and_explicit_references() {
-    for (profile_index, profile) in [UpstreamProfile::CodexSubscription1534]
+    for (profile_index, profile) in [UpstreamProfile::CodexSubscription1560]
         .into_iter()
         .enumerate()
     {

@@ -1,4 +1,4 @@
-use crate::responses_websocket_projection::equivalent_items;
+use crate::responses_websocket_projection::equivalent_items_for_reuse;
 use crate::responses_websocket_projection::project_properties;
 use crate::responses_websocket_projection::reusable_item;
 use serde_json::Map;
@@ -104,7 +104,7 @@ pub(crate) fn incremental_input(
         .chain(&baseline.output)
         .cloned()
         .collect::<Vec<_>>();
-    if !equivalent_items(&expected, comparison_prefix) {
+    if !equivalent_items_for_reuse(&expected, comparison_prefix) {
         return None;
     }
     let (_, delta) = current.input.split_at_checked(prefix_len)?;

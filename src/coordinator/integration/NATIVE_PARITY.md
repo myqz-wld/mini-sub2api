@@ -11,9 +11,12 @@ mise exec -- python3 scripts/prepare-opencode-tests.py
 bash scripts/test-scaffold-parity.sh
 ```
 
-Pinned clients: Codex **0.153.4** (`3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`) and OpenCode
+Pinned clients: Codex **0.156.0** (`fe74a774532af67b5a4a3dec03ce9469e17f89af`) and OpenCode
 **1.18.29** (`16747470f976aca3d362ad730bcd3fe82ecc2c9a`). Missing/wrong prerequisites fail.
 Clients are verified on macOS arm64. Standard suites use loopback mocks and never fall back to providers.
+Code Mode execution requires the matching 0.156.0 `codex-code-mode-host` companion in the CLI's
+installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NATIVE_CODEX_BINARY`;
+`MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout.
 
 ## Method
 
@@ -21,6 +24,10 @@ Clients are verified on macOS arm64. Standard suites use loopback mocks and neve
   external networking. OpenCode uses in-memory SQLite, no snapshots and a null log sink. Join only owned children.
 - Compare direct traffic with client → public Go gateway → Rust Core. Check API-key byte equality and
   Subscription ordered content/settings plus typed identity relationships.
+- Parse ordered JSON tokens recursively, including serialized turn metadata. Fail on field order,
+  additions/omissions, duplicate keys, null/empty-container/empty-string/boolean differences.
+  The built-in OpenAI fixture also requires exact header name order and casing; custom providers
+  do not supply all built-in defaults. Captures and scalar payloads remain memory-only.
 - Tap HTTP/WS before decoding; independently parse masking, fragmentation, controls and deflate.
   Bounds: 64 connections/tap, 64 MiB/connection, 128 application requests and 64 MiB/application capture.
   Raw bodies stay in memory; failures report structure.
@@ -43,7 +50,9 @@ Counts describe overlapping matrices, not additive independent cases.
 | Reasoning: 96 four-call cases | Include visibility, full/reference histories, JSON/SSE/WS/reconnect, caller markers, hidden-state restoration and tool/user turns |
 | Caller bases: 144 two-call cases | Missing/invalid/explicit bases, both credentials and HTTP/WS ordinary/Lite; no defaults, stable prefix ownership |
 | Actual OpenCode: 18 cases | Custom-provider text/read/denied-file and built-in OpenAI plugin; continuity, tool turns, headers and bytes |
-| Models/context | All 11 catalogs; bases/personality, ordered developer messages, AGENTS/Skills/permissions and caller environment |
+| Models/context | All 9 catalog models; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
+| 0.156.0 controls | Actual CLI HTTP/WS effort changes with the capability enabled; analytics/model/effort metadata, scoped cache affinity, Guardian references and tool-result evidence |
+| Built-in wire shape: 28 requests | Actual CLI app-server; HTTP fallback/WS × ordinary/Lite × two isolated processes; complete header order/presence/casing and recursive JSON shape, including tool loops and the next turn |
 | Identity/privacy | Key/device/shared-account isolation, forks/owners, explicit conflicts, restart/corruption and required references |
 | HTTP boundaries: 64 cases | EOF/delta/DONE-only/all terminals, 9 MiB output, JSON/SSE, no replay, exact API-key bytes and usage/status |
 | WS controls: 24 cases | Inject/append/generic ownership, stale-history rejection and full replacement |
@@ -71,3 +80,6 @@ Exports/live calls need separate opt-in and authorization. General protocol stre
 functions; actual code-mode tests separately execute the native host. Core supplies no JavaScript
 bridge to ordinary clients. No actual OpenCode WS producer, universal retry/retention contract,
 all-model entitlement or exhaustive environment Cartesian coverage is claimed.
+HTTP/1.1/WS shape equality and macOS ClientHello checks do not certify Linux TLS, negotiated HTTP/2
+SETTINGS/HPACK, packet timing or remote classification. Detailed findings are in
+[Codex compatibility](../../../docs/CODEX_COMPATIBILITY.md#field-order-and-presence).

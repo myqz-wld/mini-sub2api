@@ -186,7 +186,7 @@ async fn compaction_commits_only_on_completed_and_same_base_operations_converge(
 
 async fn admitted_compaction(store: &RequestStateStore, body: Value) -> ResponseStateContext {
     let prepared = prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

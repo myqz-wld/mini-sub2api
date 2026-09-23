@@ -27,6 +27,7 @@ const REUSABLE_ITEM_TYPES: &[&str] = &[
     "code_interpreter_call",
     "compaction",
     "compaction_trigger",
+    "configuration_update",
     "computer_call",
     "computer_call_output",
     "context_compaction",
@@ -68,6 +69,31 @@ pub(crate) fn equivalent_items(left: &[Value], right: &[Value]) -> bool {
             .iter()
             .zip(right)
             .all(|(left, right)| project_item(left) == project_item(right))
+}
+
+pub(crate) fn equivalent_items_for_reuse(left: &[Value], right: &[Value]) -> bool {
+    equivalent_items(left, right)
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| tool_result_metadata(left).eq(tool_result_metadata(right)))
+}
+
+// Match native 0.156.0: late result evidence and its call binding cannot be
+// delivered by appending a delta. Other internal metadata remains volatile.
+fn tool_result_metadata(
+    item: &Value,
+) -> impl Iterator<Item = (usize, Option<&Value>, Option<&Value>, &Value)> {
+    item.get("internal_chat_message_metadata_passthrough")
+        .and_then(|metadata| metadata.get("executed_tool_calls"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, call)| {
+            call.get("tool_result_metadata")
+                .map(|metadata| (index, call.get("name"), call.get("arguments"), metadata))
+        })
 }
 
 pub(crate) fn encoded_len_within(value: &Value, maximum: usize) -> Option<usize> {

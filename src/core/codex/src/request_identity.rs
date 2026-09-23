@@ -101,8 +101,9 @@ fn resolve_identity(
     headers: &HeaderMap,
     context: &IdentityContext,
 ) -> RequestIdentity {
-    let session_id = header_text(headers, "session-id")
-        .or_else(|| client_metadata_text(object, "session_id"))
+    let session_id = crate::subscription_request::selected_session(object, headers)
+        .ok()
+        .flatten()
         .unwrap_or_else(new_uuid_v7);
     let thread_id = header_text(headers, "thread-id")
         .or_else(|| client_metadata_text(object, "thread_id"))
@@ -123,14 +124,12 @@ fn resolve_identity(
         .or_else(|| request_header_turn_metadata.and_then(|raw| metadata_text(raw, "request_kind")))
         .unwrap_or_else(|| if prewarm { "prewarm" } else { "turn" }.to_string());
     let memory = request_kind == "memory";
-    let turn_id = (!memory).then(|| {
-        body_turn_metadata
-            .as_deref()
-            .and_then(|raw| metadata_text(raw, "turn_id"))
-            .or_else(|| request_header_turn_metadata.and_then(|raw| metadata_text(raw, "turn_id")))
-            .or_else(|| client_metadata_text(object, "turn_id"))
-            .unwrap_or_else(new_uuid_v7)
-    });
+    let turn_id = body_turn_metadata
+        .as_deref()
+        .and_then(|raw| metadata_text(raw, "turn_id"))
+        .or_else(|| request_header_turn_metadata.and_then(|raw| metadata_text(raw, "turn_id")))
+        .or_else(|| client_metadata_text(object, "turn_id"))
+        .or_else(|| (!memory).then(new_uuid_v7));
     let root_turn_id = body_turn_metadata
         .as_deref()
         .and_then(|raw| metadata_text(raw, "root_turn_id"))
@@ -143,6 +142,7 @@ fn resolve_identity(
         .or_else(|| client_metadata_text(object, WINDOW_HEADER))
         .unwrap_or_else(|| format!("{thread_id}:0"));
     let generated = generated_turn_metadata(
+        object,
         headers,
         &installation_id,
         &session_id,
@@ -188,6 +188,7 @@ fn resolve_identity(
 
 #[allow(clippy::too_many_arguments)]
 fn generated_turn_metadata(
+    object: &Map<String, Value>,
     headers: &HeaderMap,
     installation_id: &str,
     session_id: &str,
@@ -237,6 +238,17 @@ fn generated_turn_metadata(
         "turn_started_at_unix_ms".to_string(),
         Utc::now().timestamp_millis().into(),
     );
+    metadata.insert("analytics_enabled".to_string(), false.into());
+    if let Some(name) = object.get("model").and_then(Value::as_str) {
+        metadata.insert("model".to_string(), name.into());
+    }
+    if let Some(effort) = object
+        .get("reasoning")
+        .and_then(|value| value.get("effort"))
+        .and_then(Value::as_str)
+    {
+        metadata.insert("reasoning_effort".to_string(), effort.into());
+    }
     to_ascii_json_string(&Value::Object(metadata)).unwrap_or_else(|_| "{}".to_string())
 }
 
@@ -311,6 +323,17 @@ fn apply_client_metadata(
         }
     }
     if !preserve_native_order {
+        // Bare Subscription callers emulate the built-in ChatGPT backend session. A complete
+        // native carrier retains its provider/session-specific optional fields instead.
+        if headers
+            .get("x-codex-guardian")
+            .is_none_or(|value| value != "reviewer")
+        {
+            metadata.insert(
+                "guardian_credits_requested".into(),
+                Value::String("true".into()),
+            );
+        }
         randomize_synthesized_client_metadata(metadata);
     }
 }
@@ -338,7 +361,7 @@ fn ensure_ws_stream_start(metadata: &mut Map<String, Value>) {
     }
 }
 
-fn has_complete_native_client_metadata(value: &Value) -> bool {
+pub(crate) fn has_complete_native_client_metadata(value: &Value) -> bool {
     let Some(metadata) = value.as_object() else {
         return false;
     };

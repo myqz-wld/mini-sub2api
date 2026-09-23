@@ -119,7 +119,7 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
             token: "oauth-offline-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         Bytes::from_static(OFFICIAL_SDK_BODY),
     )
     .expect("offline request build");
@@ -144,7 +144,7 @@ fn oauth_request_excludes_api_key_routing_and_sdk_headers() {
             .get(http::header::USER_AGENT)
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| {
-                value.starts_with("codex-tui/0.153.4 (") && value.ends_with(" (codex-tui; 0.153.4)")
+                value.starts_with("codex-tui/0.156.0 (") && value.ends_with(" (codex-tui; 0.156.0)")
             })
     );
     assert_eq!(
@@ -194,7 +194,7 @@ fn oauth_request_replaces_client_identity_with_canonical_subscription_profile() 
             token: "oauth-offline-not-real".to_string(),
             account_id: "account-test".to_string(),
         },
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         Bytes::from_static(OFFICIAL_SDK_BODY),
     )
     .expect("offline request build");
@@ -227,7 +227,7 @@ fn websocket_request_emission_matches_codex_header_order_and_deflate_offer() {
     let mut headers = HeaderMap::new();
     for (name, value) in [
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
-        ("user-agent", "codex_exec/0.153.4"),
+        ("user-agent", "codex_exec/0.156.0"),
         ("originator", "codex_exec"),
         ("x-codex-turn-metadata", r#"{"request_kind":"prewarm"}"#),
         ("x-codex-beta-features", "feature-test"),
@@ -298,7 +298,7 @@ fn websocket_subagent_headers_match_codex_conditional_wire_order() {
     let mut headers = HeaderMap::new();
     for (name, value) in [
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
-        ("user-agent", "codex_exec/0.153.4"),
+        ("user-agent", "codex_exec/0.156.0"),
         ("originator", "codex_exec"),
         ("x-openai-subagent", "review"),
         ("x-codex-beta-features", "feature-test"),
@@ -390,7 +390,7 @@ async fn http_request_emission_matches_codex_common_header_order() {
         ("accept", "text/event-stream"),
         ("content-type", "application/json"),
         ("originator", "codex_exec"),
-        ("user-agent", "codex_exec/0.153.4"),
+        ("user-agent", "codex_exec/0.156.0"),
     ] {
         headers.insert(
             HeaderName::from_static(name),

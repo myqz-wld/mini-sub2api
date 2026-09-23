@@ -38,6 +38,13 @@ async fn native_lite_prefixes_follow_projected_thread_payload_and_restart() {
     let raw = native_request("native-thread", "  基础 {{literal}}\n", tools.clone());
     let first = value(&prepare(&store, &HeaderMap::new(), raw.clone()).await);
     assert_ids(&first);
+    for index in [0, 1] {
+        assert!(
+            first["input"][index]
+                .get("internal_chat_message_metadata_passthrough")
+                .is_none()
+        );
+    }
     let reopened = RequestStateStore::new(temp.path().join("accounts"));
     let repeated = value(&prepare(&reopened, &HeaderMap::new(), raw.clone()).await);
     for index in [0, 1] {
@@ -101,6 +108,11 @@ async fn native_lite_prefixes_keep_legacy_aliases_and_require_native_proof() {
         .unwrap();
     let current = value(&prepare(&store, &HeaderMap::new(), raw).await);
     assert!(current["input"][0]["id"] == legacy);
+    assert!(
+        current["input"][0]
+            .get("internal_chat_message_metadata_passthrough")
+            .is_none()
+    );
     let mut arbitrary = native_request("native-thread", "base", json!([]));
     arbitrary["input"][0]["id"] = json!("at_caller_opaque");
     arbitrary["input"][1]["id"] = json!("msg_caller_opaque");

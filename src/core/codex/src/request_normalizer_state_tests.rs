@@ -27,7 +27,7 @@ async fn prepare(
 ) -> PreparedEmulatedRequest {
     prepare_profile(
         store,
-        UpstreamProfile::CodexSubscription1534,
+        UpstreamProfile::CodexSubscription1560,
         ACCOUNT_REF,
         NAMESPACE,
         headers,
@@ -198,12 +198,12 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
 async fn both_codex_profiles_reuse_the_same_identity_contract_after_reopen() {
     for (profile, account_ref, state_namespace) in [
         (
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
             "acct_openai_stateful",
             "acct_openai_stateful",
         ),
         (
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
             "acct_subscription_stateful",
             "chatgpt-subscription-stateful",
         ),

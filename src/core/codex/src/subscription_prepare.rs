@@ -336,6 +336,7 @@ impl ContextStore {
             id,
             store: Arc::downgrade(&self.inner),
             reasoning_visibility: evidence.reasoning_visibility,
+            transport: evidence.transport,
         }));
         Ok(ContextPlan {
             evidence,

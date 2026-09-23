@@ -114,7 +114,7 @@ func TestNativeFinalCodeModeLoop(t *testing.T) {
 				wires := capture.snapshot()
 				business := businessWires(wires)
 				if calls != 1 || len(business) != 3 {
-					t.Fatal("code-mode nested tool/turn count differs")
+					t.Fatalf("code-mode nested tool/turn count differs: callbacks=%d requests=%d", calls, len(business))
 				}
 				found := false
 				input, _ := business[1].value["input"].([]any)

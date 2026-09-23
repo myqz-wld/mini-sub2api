@@ -47,6 +47,10 @@ async fn failed_turn_keeps_its_first_routing_token_until_expiry() {
         let mut body = request(json!([input("retry")]));
         body["client_metadata"] = json!({"session_id":"session","turn_id":"turn"});
         let first = prepare(&store, body.clone()).await.unwrap();
+        store
+            .contexts
+            .learn_turn(first.operation.as_ref().unwrap(), "first-token")
+            .unwrap();
         let state = ResponseStateContext::new(
             OWNER,
             NAMESPACE,
@@ -58,7 +62,7 @@ async fn failed_turn_keeps_its_first_routing_token_until_expiry() {
         .with_operation(first.operation);
         state
             .translate_value(
-                json!({"type":"response.metadata","headers":{"x-codex-turn-state":"first-token"}}),
+                json!({"type":"response.metadata","headers":{"x-codex-turn-state":"ignored-event-token"}}),
             )
             .await
             .unwrap();

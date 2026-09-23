@@ -242,5 +242,11 @@ pub(super) const RULES: &[CarrierRule] = &[
         CarrierAction::Opaque,
         HEADER_VISIBLE,
     ),
+    metadata(
+        "analytics_enabled",
+        None,
+        CarrierAction::Opaque,
+        HEADER_VISIBLE,
+    ),
     metadata("compaction", None, CarrierAction::Opaque, HEADER_VISIBLE),
 ];

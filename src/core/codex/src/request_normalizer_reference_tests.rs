@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn missing_provider_references_are_state_unavailable_for_both_codex_profiles() {
-    for profile in [UpstreamProfile::CodexSubscription1534] {
+    for profile in [UpstreamProfile::CodexSubscription1560] {
         for body in [
             serde_json::json!({
                 "model":"gpt-5.4",

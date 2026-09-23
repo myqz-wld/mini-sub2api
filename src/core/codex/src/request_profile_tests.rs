@@ -17,12 +17,12 @@ fn credential_alone_selects_emulation_for_all_callers() {
         (
             CallerKind::Bare,
             CredentialKind::CodexSubscription,
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
         ),
         (
             CallerKind::Codex,
             CredentialKind::CodexSubscription,
-            UpstreamProfile::CodexSubscription1534,
+            UpstreamProfile::CodexSubscription1560,
         ),
     ];
 
@@ -83,7 +83,7 @@ fn originator_never_changes_the_credential_dimension() {
 #[test]
 fn identity_and_transport_capabilities_are_independent() {
     let openai = UpstreamProfile::ApiKeyPassthrough;
-    let subscription = UpstreamProfile::CodexSubscription1534;
+    let subscription = UpstreamProfile::CodexSubscription1560;
     let bare = UpstreamProfile::ApiKeyPassthrough;
 
     assert!(!openai.uses_identity_state());

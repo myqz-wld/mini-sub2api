@@ -39,6 +39,7 @@ type nativeCapture struct {
 	bytes              int
 	metadataOnlyFooter bool
 	codeModeLoop       bool
+	httpRoutingToken   bool
 }
 
 func newNativeCapture(t *testing.T) *nativeCapture {
@@ -53,12 +54,17 @@ func newNativeCaptureWithFooter(t *testing.T, metadataOnly bool) *nativeCapture 
 	return capture
 }
 func (c *nativeCapture) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/backend-api/wham/accounts/check" {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"accounts":[{"id":"native-loopback-account","workspace_backend_origin":"https://127.0.0.1","account_routing_override":"NO_CONSTRAINT"}]}`)
+		return
+	}
 	if r.URL.Path == "/backend-api/wham/settings/user" {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"commit_attribution_enabled":false}`)
 		return
 	}
-	if r.URL.Path != "/v1/responses" {
+	if r.URL.Path != "/v1/responses" && r.URL.Path != "/backend-api/codex/responses" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -122,6 +128,12 @@ func (c *nativeCapture) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
+	c.mu.Lock()
+	withRoutingToken := c.httpRoutingToken
+	c.mu.Unlock()
+	if withRoutingToken {
+		w.Header().Set("X-Codex-Turn-State", "native-header-token")
+	}
 	for _, event := range events {
 		encoded, _ := json.Marshal(event)
 		_, _ = fmt.Fprintf(w, "data: %s\n\n", encoded)
@@ -255,7 +267,7 @@ func TestNativeCodexCaptureHTTPAndWS(t *testing.T) {
 					if wire.value["model"] != model {
 						t.Fatal("native model selection changed")
 					}
-					if !strings.Contains(wire.headers.Get("User-Agent"), "0.153.4") {
+					if !strings.Contains(wire.headers.Get("User-Agent"), "0.156.0") {
 						t.Fatal("native UA version mismatch")
 					}
 				}

@@ -81,6 +81,11 @@ pub(super) fn item_id_prefix(kind: &str) -> Option<&'static str> {
 }
 
 fn canonicalize_nested(object: &mut Map<String, Value>, kind: Option<&str>) {
+    if kind == Some("configuration_update")
+        && let Some(reasoning) = object.get_mut("reasoning").and_then(Value::as_object_mut)
+    {
+        reorder(reasoning, &["effort"]);
+    }
     canonicalize_contents(object, kind);
     canonicalize_tools(object, kind);
     canonicalize_caller(object);
@@ -244,6 +249,7 @@ fn canonicalize_structured_outputs(object: &mut Map<String, Value>, kind: Option
 
 fn fields_for_kind(kind: Option<&str>) -> &'static [&'static str] {
     match kind {
+        Some("configuration_update") => &["type", "reasoning"],
         Some("additional_tools") => &["type", "id", "role", "tools"],
         Some("message") => &[
             "type",

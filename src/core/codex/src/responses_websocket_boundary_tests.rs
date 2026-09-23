@@ -9,7 +9,7 @@ fn request(thread: &str, input: Value) -> Value {
 #[test]
 fn automatic_reuse_never_carries_another_threads_baseline() {
     let mut state =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
     let first = request(
         "first",
         json!([{"type":"message","role":"user","content":"seed"}]),
@@ -28,7 +28,7 @@ fn automatic_reuse_never_carries_another_threads_baseline() {
 #[test]
 fn reconstructed_explicit_reference_disables_hidden_setup_and_automatic_reuse_once() {
     let mut state =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
     let full = request("thread", json!([]));
     state.mark_rebuilt_reference(true);
     assert!(
@@ -63,7 +63,7 @@ fn hidden_setup_token_requires_completion_and_does_not_survive_failure_or_reconn
         "completed-reset",
     ] {
         let mut state =
-            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
         state
             .plan_hidden_setup(&request("thread", json!([])), PrewarmMode::Ordinary)
             .unwrap();
@@ -90,7 +90,7 @@ fn hidden_setup_token_requires_completion_and_does_not_survive_failure_or_reconn
 #[test]
 fn final_only_compaction_never_installs_a_socket_baseline() {
     let mut state =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1534);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1560);
     let first = request("thread", json!([]));
     let pending = PendingCompaction {
         marker_key: "marker".into(),
