@@ -63,6 +63,7 @@ pub(crate) async fn prepare_stateful_codex_request(
     plan.restore_input_metadata();
     plan.enable_history_import(&identity_evidence, context.binding.is_some());
     let target_lite = plan.caller_format == Format::Lite
+        || role == crate::native_request_policy::Role::Classifier
         || object
             .get("model")
             .and_then(Value::as_str)
@@ -200,6 +201,9 @@ pub(crate) async fn prepare_stateful_codex_request(
     .await?;
     prepared.rebuilt_reference = explicit_delta && full_send;
     prepared.native_client_metadata = native_metadata_order.is_some();
+    if role == crate::native_request_policy::Role::Classifier {
+        return Ok(prepared);
+    }
     let operation = prepared.operation.as_ref().ok_or(Error::StateUnavailable)?;
     let Some(token) = store.turn_token(operation) else {
         return Ok(prepared);

@@ -191,6 +191,10 @@ pub(super) async fn responses_inner(
             };
             drop(guard);
             crate::server::validate_recovery_owner(&resolved, &retry)?;
+            let client = retry
+                .transport
+                .inference_client(&retry.upstream_url, persistent)
+                .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
             let retry_headers = headers_for_retry(&forward_headers);
             upstream = diagnostics
                 .wait(

@@ -50,7 +50,7 @@ async fn native_1560_prefixes_are_stable_and_supported_per_response_controls_sur
 }
 
 #[tokio::test]
-async fn unsupported_native_requirements_fail_before_inference() {
+async fn unsupported_optional_controls_are_ignored_before_inference() {
     let captures = Arc::new(Mutex::new(Vec::new()));
     let upstream = spawn_loopback(
         Router::new()
@@ -68,17 +68,24 @@ async fn unsupported_native_requirements_fail_before_inference() {
         body.as_object_mut()
             .unwrap()
             .extend(member.as_object().unwrap().clone());
-        let failure = call_core_with_headers(
+        let response = call_core_with_headers(
             &state,
             &account,
             Bytes::from(serde_json::to_vec(&body).unwrap()),
             HeaderMap::new(),
         )
         .await
-        .expect_err("invalid native requirement");
-        assert!(matches!(failure, CoreFailure::InvalidRequest));
+        .expect("optional native controls ignored");
+        response.into_body().collect().await.unwrap();
     }
-    assert_eq!(captures.lock().await.len(), 0);
+    let wire = captures.lock().await;
+    assert_eq!(wire.len(), 3);
+    for value in wire.iter() {
+        assert!(value.get("access_programs").is_none());
+        assert!(value.get("stream_options").is_none());
+        assert_eq!(value["reasoning"]["context"], "all_turns");
+    }
+    drop(wire);
     request(
         &state,
         &account,
@@ -88,7 +95,7 @@ async fn unsupported_native_requirements_fail_before_inference() {
     )
     .await;
     assert_eq!(
-        captures.lock().await[0]["access_programs"],
+        captures.lock().await[3]["access_programs"],
         json!({"cyber":"standard"})
     );
 }

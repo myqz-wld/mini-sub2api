@@ -66,131 +66,11 @@ const OPENAI_API_KEY_ALLOWED: &[&str] = &[
     "x-stainless-timeout",
 ];
 
-const HTTP_HEADER_ORDER: &[&str] = &[
-    CODEX_VERSION_HEADER,
-    "x-openai-internal-codex-residency",
-    "x-codex-beta-features",
-    "x-codex-guardian",
-    "x-codex-turn-state",
-    "x-codex-window-id",
-    "x-codex-turn-metadata",
-    "x-codex-parent-thread-id",
-    "x-openai-subagent",
-    "x-openai-memgen-request",
-    "x-oai-attestation",
-    "x-codex-installation-id",
-    "x-openai-internal-codex-responses-lite",
-    CODEX_ROUTING_HINT_HEADER,
-    "x-codex-inference-call-id",
-    "x-client-request-id",
-    "session-id",
-    "thread-id",
-    "accept",
-    "content-encoding",
-    "content-type",
-    "authorization",
-    "chatgpt-account-id",
-    "originator",
-    "user-agent",
-    "x-responsesapi-include-timing-metrics",
-    "openai-beta",
-    "session_id",
-    "conversation_id",
-    "openai-organization",
-    "openai-project",
-    "x-stainless-arch",
-    "x-stainless-lang",
-    "x-stainless-os",
-    "x-stainless-package-version",
-    "x-stainless-retry-count",
-    "x-stainless-runtime",
-    "x-stainless-runtime-version",
-    "x-stainless-timeout",
-    "traceparent",
-    "tracestate",
-];
-
-const WEBSOCKET_WIRE_HEADER_ORDER: &[&str] = &[
-    "authorization",
-    "chatgpt-account-id",
-    "user-agent",
-    "x-responsesapi-include-timing-metrics",
-    "x-openai-internal-codex-residency",
-    "x-openai-memgen-request",
-    "x-oai-attestation",
-    "originator",
-    "openai-beta",
-    "x-codex-turn-metadata",
-    "x-openai-subagent",
-    CODEX_VERSION_HEADER,
-    "x-codex-installation-id",
-    "x-codex-beta-features",
-    "x-codex-guardian",
-    CODEX_ROUTING_HINT_HEADER,
-    "x-codex-inference-call-id",
-    "x-client-request-id",
-    "session-id",
-    "thread-id",
-    "x-codex-window-id",
-    "x-codex-turn-state",
-    "x-codex-parent-thread-id",
-    "x-openai-internal-codex-responses-lite",
-    "session_id",
-    "conversation_id",
-    "openai-organization",
-    "openai-project",
-    "x-stainless-arch",
-    "x-stainless-lang",
-    "x-stainless-os",
-    "x-stainless-package-version",
-    "x-stainless-retry-count",
-    "x-stainless-runtime",
-    "x-stainless-runtime-version",
-    "x-stainless-timeout",
-    "traceparent",
-    "tracestate",
-];
-
-const WEBSOCKET_SUBAGENT_WIRE_HEADER_ORDER: &[&str] = &[
-    "authorization",
-    "chatgpt-account-id",
-    "user-agent",
-    "x-responsesapi-include-timing-metrics",
-    "x-openai-internal-codex-residency",
-    "x-openai-memgen-request",
-    "x-oai-attestation",
-    "originator",
-    "openai-beta",
-    "x-openai-subagent",
-    CODEX_VERSION_HEADER,
-    "x-codex-installation-id",
-    "x-codex-beta-features",
-    "x-codex-guardian",
-    CODEX_ROUTING_HINT_HEADER,
-    "x-codex-inference-call-id",
-    "x-client-request-id",
-    "session-id",
-    "thread-id",
-    "x-codex-window-id",
-    "x-codex-turn-metadata",
-    "x-codex-parent-thread-id",
-    "x-codex-turn-state",
-    "x-openai-internal-codex-responses-lite",
-    "session_id",
-    "conversation_id",
-    "openai-organization",
-    "openai-project",
-    "x-stainless-arch",
-    "x-stainless-lang",
-    "x-stainless-os",
-    "x-stainless-package-version",
-    "x-stainless-retry-count",
-    "x-stainless-runtime",
-    "x-stainless-runtime-version",
-    "x-stainless-timeout",
-    "traceparent",
-    "tracestate",
-];
+#[path = "upstream_header_order.rs"]
+mod header_order;
+use header_order::*;
+#[path = "upstream_classifier.rs"]
+mod classifier;
 
 #[derive(Clone)]
 pub(crate) enum ResolvedAuth {
@@ -233,7 +113,12 @@ pub(crate) fn build(
         headers.remove("x-responsesapi-include-timing-metrics");
     }
     let body = prepare_http_body(&mut headers, profile, body)?;
-    let headers = ordered_headers(&headers, HTTP_HEADER_ORDER);
+    let order = if profile.emulates_codex() && crate::request_classifier::selected(&headers) {
+        classifier::HTTP_ORDER
+    } else {
+        HTTP_HEADER_ORDER
+    };
+    let headers = ordered_headers(&headers, order);
     client
         .post(upstream_url)
         .headers(headers)
@@ -258,7 +143,9 @@ pub(crate) fn build_websocket(
     if profile.uses_subscription_transport() {
         headers.remove("x-codex-turn-state");
         headers.remove("x-codex-inference-call-id");
-        headers.remove("x-openai-internal-codex-responses-lite");
+        if !crate::request_classifier::selected(&headers) {
+            headers.remove("x-openai-internal-codex-responses-lite");
+        }
     }
     headers.insert(
         "openai-beta",
@@ -320,6 +207,10 @@ fn insert_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
 }
 
 fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMap) {
+    if crate::request_classifier::selected(source) {
+        classifier::websocket_headers(destination, source);
+        return;
+    }
     // Codex constructs these as provider, per-request, default, then auth maps. Replaying that
     // merge matters because tungstenite's mandatory-header removals make HeaderMap layout visible
     // on the wire. Subscription identity itself is canonical and never caller-overridden.
@@ -431,6 +322,10 @@ fn prepare_http_body(
     profile: UpstreamProfile,
     body: Bytes,
 ) -> Result<Bytes, CoreFailure> {
+    if profile.emulates_codex() && crate::request_classifier::selected(headers) {
+        headers.remove(http::header::CONTENT_ENCODING);
+        return Ok(body);
+    }
     if !profile.uses_http_zstd() {
         return Ok(body);
     }
@@ -489,6 +384,9 @@ fn copy_allowed(destination: &mut HeaderMap, source: &HeaderMap, allowed: &[&'st
     }
 }
 
+#[cfg(test)]
+#[path = "upstream_classifier_tests.rs"]
+mod classifier_tests;
 #[cfg(test)]
 #[path = "upstream_request_oauth_wire_tests.rs"]
 mod oauth_wire_tests;

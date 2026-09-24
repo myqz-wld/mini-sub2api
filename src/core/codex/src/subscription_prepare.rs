@@ -43,6 +43,7 @@ pub(crate) struct ContextPlan {
     pub(crate) settings: Value,
     pub(crate) external_context: bool,
     pub(crate) allow_history_import: bool,
+    pub(crate) preserve_imported_outputs: bool,
     pub(crate) scope: String,
     pub(crate) socket: Option<String>,
 }
@@ -358,6 +359,7 @@ impl ContextStore {
             settings: effective_settings,
             external_context: object.get("conversation").is_some_and(|v| !v.is_null()),
             allow_history_import: false,
+            preserve_imported_outputs: false,
             scope: scope_key,
             socket: socket.map(str::to_string),
         })

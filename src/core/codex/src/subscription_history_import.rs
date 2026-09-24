@@ -18,6 +18,17 @@ impl ContextPlan {
         identity: &RequestIdentityEvidence,
         bound: bool,
     ) {
+        // Complete first replay can carry explicit session/turn identity. This does not grant
+        // the separate ability to copy expired historical turns from an unrelated owner.
+        self.preserve_imported_outputs = !bound
+            && self.evidence.previous.is_none()
+            && self.baseline.is_none()
+            && self.checkpoint.is_none()
+            && self.restored_input.is_none()
+            && !self.external_context
+            && identity.request_kind == "turn"
+            && !self.dependencies.awaiting_tools()
+            && self_contained(&self.evidence.input, false);
         self.allow_history_import = !bound
             && self.evidence.session.is_none()
             && self.evidence.turn.is_none()
@@ -34,11 +45,11 @@ impl ContextPlan {
             && identity.parent_turn.is_none()
             && !identity.explicit_thread_lineage
             && !self.dependencies.awaiting_tools()
-            && self_contained(&self.evidence.input);
+            && self_contained(&self.evidence.input, true);
     }
 }
 
-fn self_contained(items: &[Value]) -> bool {
+fn self_contained(items: &[Value], detached_turn_import: bool) -> bool {
     let mut seen_user = false;
     let mut ids = std::collections::BTreeMap::new();
     for item in items {
@@ -63,10 +74,11 @@ fn self_contained(items: &[Value]) -> bool {
             },
             Some("additional_tools" | "configuration_update") => {}
             Some("reasoning") if seen_user => {
-                if item
-                    .get("encrypted_content")
-                    .and_then(Value::as_str)
-                    .is_none_or(str::is_empty)
+                if detached_turn_import
+                    && item
+                        .get("encrypted_content")
+                        .and_then(Value::as_str)
+                        .is_none_or(str::is_empty)
                 {
                     return false;
                 }
@@ -77,6 +89,13 @@ fn self_contained(items: &[Value]) -> bool {
                 | "custom_tool_call"
                 | "custom_tool_call_output",
             ) if seen_user => {}
+            Some(
+                "local_shell_call"
+                | "web_search_call"
+                | "image_generation_call"
+                | "tool_search_call"
+                | "tool_search_output",
+            ) if seen_user && !detached_turn_import => {}
             _ => return false,
         }
     }

@@ -77,12 +77,12 @@ fn codex_defaults_preserve_controls_except_fixed_transport_and_required_include(
         "previous_response_id": null
     });
     let normalized = prepare_subscription(explicit.clone(), EmulationTransport::Http);
-    for name in [
-        "reasoning",
-        "prompt_cache_key",
-        "text",
-        "previous_response_id",
-    ] {
+    assert_eq!(
+        normalized["reasoning"],
+        serde_json::json!({"effort":"low", "context":"all_turns"})
+    );
+    assert_eq!(normalized["text"], serde_json::json!({"verbosity":"low"}));
+    for name in ["prompt_cache_key", "previous_response_id"] {
         assert_eq!(normalized[name], explicit[name], "explicit field {name}");
     }
     assert_eq!(normalized["tool_choice"], "auto");

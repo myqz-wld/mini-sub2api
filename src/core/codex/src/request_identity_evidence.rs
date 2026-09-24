@@ -27,6 +27,7 @@ pub(crate) struct RequestIdentityEvidence {
     pub(crate) new_user_submission: bool,
     pub(crate) window_number: Option<u64>,
     pub(crate) request_kind: String,
+    classifier: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,19 +77,29 @@ impl RequestIdentityEvidence {
         )
         .ok()
         .flatten();
-        let parent_thread = evidence_text(RelationshipCarrier::ParentThread, &sources);
+        let classifier = crate::request_classifier::selected(headers);
+        let parent_thread =
+            evidence_text(RelationshipCarrier::ParentThread, &sources).or_else(|| {
+                classifier
+                    .then(|| crate::request_classifier::source(object))
+                    .flatten()
+            });
         let forked_from_thread = evidence_text(RelationshipCarrier::ForkedFromThread, &sources);
         let subagent = evidence_text(RelationshipCarrier::Subagent, &sources);
-        let request_kind = evidence_text(RelationshipCarrier::RequestKind, &sources)
-            .unwrap_or_else(|| {
-                if transport == CodexTransport::WebSocket
-                    && object.get("generate").and_then(Value::as_bool) == Some(false)
-                {
-                    "prewarm".to_string()
-                } else {
-                    "turn".to_string()
-                }
-            });
+        let request_kind = if classifier {
+            Some("guardian_classifier".to_owned())
+        } else {
+            evidence_text(RelationshipCarrier::RequestKind, &sources)
+        }
+        .unwrap_or_else(|| {
+            if transport == CodexTransport::WebSocket
+                && object.get("generate").and_then(Value::as_bool) == Some(false)
+            {
+                "prewarm".to_string()
+            } else {
+                "turn".to_string()
+            }
+        });
         let turn = evidence_text(RelationshipCarrier::Turn, &sources);
         let root_turn = evidence_text(RelationshipCarrier::RootTurn, &sources);
         let parent_turn = evidence_text(RelationshipCarrier::ParentTurn, &sources);
@@ -121,6 +132,7 @@ impl RequestIdentityEvidence {
             new_user_submission: new_user_submission(object),
             window_number: window.as_deref().and_then(window_number),
             request_kind,
+            classifier,
         }
         .with_lineage()
     }
@@ -138,6 +150,10 @@ impl RequestIdentityEvidence {
 
     pub(crate) fn is_memory(&self) -> bool {
         self.request_kind == "memory"
+    }
+
+    pub(crate) fn is_classifier(&self) -> bool {
+        self.classifier
     }
 }
 

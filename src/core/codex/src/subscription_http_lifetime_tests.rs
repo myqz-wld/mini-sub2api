@@ -137,7 +137,7 @@ async fn status_only_timeout_releases_the_operation_before_failure_trailers_are_
 }
 
 #[tokio::test(start_paused = true)]
-async fn error_tail_deadline_releases_reservation_without_canceling_a_retry() {
+async fn missing_error_footer_uses_idle_budget_without_canceling_a_retry() {
     let (_temp, store) = store();
     let mut body = request(json!([input("retry")]));
     body["client_metadata"] = json!({"session_id":"session","turn_id":"turn"});
@@ -155,6 +155,11 @@ async fn error_tail_deadline_releases_reservation_without_canceling_a_retry() {
     assert_eq!(store.contexts.inner.lock().unwrap().reservations.len(), 1);
     let retry = prepare(&store, body).await.unwrap();
     let retry_id = retry.operation.as_ref().unwrap().0.id.clone();
+    let failure = frames.next().await.unwrap().unwrap();
+    assert_eq!(
+        failure.trailers_ref().unwrap()[mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER],
+        "never"
+    );
     assert!(frames.next().await.is_none());
     assert!(closed.load(Ordering::SeqCst));
     let inner = store.contexts.inner.lock().unwrap();

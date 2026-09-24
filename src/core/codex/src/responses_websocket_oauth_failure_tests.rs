@@ -155,7 +155,7 @@ async fn first_subscription_create_reports_state_unavailable_before_provider_con
 }
 
 #[tokio::test]
-async fn missing_control_reference_preserves_attempted_delivery() {
+async fn unsupported_control_is_ignored_while_create_is_in_flight() {
     let fixture = holding_oauth_fixture(
         "chatgpt-websocket-attempted-control-state-unavailable",
         HoldingProviderEvent::None,
@@ -182,24 +182,23 @@ async fn missing_control_reference_preserves_attempted_delivery() {
         )))
         .await
         .expect("inject");
-    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+    socket
+        .send(DownstreamMessage::Ping(
+            b"synthetic-heartbeat".to_vec().into(),
+        ))
         .await
-        .expect("attempted failure timeout")
-        .expect("attempted failure")
-        .expect("valid attempted failure");
-    assert_eq!(
-        failure_metadata(close),
-        crate::error::failure(
-            mini_sub2api_protocol_v1::RetryAdvice::Ambiguous,
-            mini_sub2api_protocol_v1::FailurePhase::Internal,
-            mini_sub2api_protocol_v1::DeliveryState::PossiblyDelivered,
-        )
-    );
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("protocol heartbeat deadline")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame, DownstreamMessage::Pong(_)));
     assert_eq!(fixture.state.frames.lock().await.len(), 1);
 }
 
 #[tokio::test]
-async fn state_failure_on_control_frame_preserves_observed_delivery() {
+async fn unsupported_control_does_not_read_or_mutate_identity_state() {
     let fixture = holding_oauth_fixture(
         "chatgpt-websocket-observed-control-state-unavailable",
         HoldingProviderEvent::Immediate,
@@ -239,19 +238,18 @@ async fn state_failure_on_control_frame_preserves_observed_delivery() {
         .send(DownstreamMessage::Text(stateful_inject(&response_id)))
         .await
         .expect("inject");
-    let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+    socket
+        .send(DownstreamMessage::Ping(
+            b"synthetic-heartbeat".to_vec().into(),
+        ))
         .await
-        .expect("observed failure timeout")
-        .expect("observed failure")
-        .expect("valid observed failure");
-    assert_eq!(
-        failure_metadata(close),
-        crate::error::failure(
-            mini_sub2api_protocol_v1::RetryAdvice::Never,
-            mini_sub2api_protocol_v1::FailurePhase::Internal,
-            mini_sub2api_protocol_v1::DeliveryState::Delivered,
-        )
-    );
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), socket.next())
+        .await
+        .expect("protocol heartbeat deadline")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(frame, DownstreamMessage::Pong(_)));
     assert_eq!(fixture.state.frames.lock().await.len(), 1);
 }
 

@@ -2,7 +2,7 @@
   {"name":"response.completed","data":"{\"type\":\"response.completed\"}","class":"terminal","output":false},
   {"name":"response.failed","data":"{\"type\":\"response.failed\"}","class":"terminal","output":false},
   {"name":"response.incomplete","data":"{\"type\":\"response.incomplete\"}","class":"terminal","output":false},
-  {"name":"error","data":"{\"type\":\"error\"}","class":"terminal","output":false},
+  {"name":"error","data":"{\"type\":\"error\"}","class":"status","output":false},
   {"name":"response.created","data":"{\"type\":\"response.created\",\"delta\":\"synthetic\"}","class":"status","output":false},
   {"name":"response.in_progress","data":"{\"type\":\"response.in_progress\",\"delta\":\"synthetic\"}","class":"status","output":false},
   {"name":"response.queued","data":"{\"type\":\"response.queued\",\"delta\":\"synthetic\"}","class":"status","output":false},

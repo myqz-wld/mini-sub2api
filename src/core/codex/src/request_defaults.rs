@@ -148,6 +148,7 @@ pub(crate) fn merge_for_role(
     role: crate::native_request_policy::Role,
 ) {
     crate::request_diagnostics::record_settings(object, false);
+    crate::native_request_types::normalize(object);
     object
         .entry("store".to_string())
         .or_insert(Value::Bool(false));
@@ -267,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_controls_keep_nulls_except_lite_parallel_and_required_include() {
+    fn explicit_null_controls_use_native_defaults() {
         let mut request = serde_json::json!({
             "store": true,
             "stream": false,
@@ -281,6 +282,8 @@ mod tests {
         expected["tool_choice"] = "auto".into();
         expected["parallel_tool_calls"] = Value::Bool(false);
         expected["include"] = serde_json::json!(["reasoning.encrypted_content"]);
+        expected["reasoning"] = serde_json::json!({"effort":"low", "context":"all_turns"});
+        expected["text"] = serde_json::json!({"verbosity":"low"});
         merge_request_defaults(
             request.as_object_mut().expect("object"),
             model_profile("gpt-5.6-sol"),

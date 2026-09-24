@@ -9,6 +9,34 @@ fn short_timeouts() -> SseTimeouts {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn standalone_error_waits_for_delayed_response_footer() {
+    let chunks = stream::once(async {
+        Ok(Bytes::from_static(
+            b"data: {\"type\":\"error\",\"code\":\"invalid_prompt\"}\n\n",
+        ))
+    })
+    .chain(stream::once(async {
+        tokio::time::sleep(Duration::from_millis(1250)).await;
+        Ok(Bytes::from_static(
+            b"data: {\"type\":\"response.failed\"}\n\n",
+        ))
+    }))
+    .chain(stream::pending());
+    let mut reader = SseReader::new(Box::pin(chunks), 4096);
+    assert!(reader.next_event().await.unwrap().is_some());
+    let started = Instant::now();
+    let footer = reader.next_event().await.unwrap().unwrap();
+    assert!(
+        String::from_utf8(footer)
+            .unwrap()
+            .contains("response.failed")
+    );
+    assert_eq!(started.elapsed(), Duration::from_millis(1250));
+    assert!(reader.next_event().await.unwrap().is_none());
+    assert_eq!(started.elapsed(), Duration::from_millis(2250));
+}
+
 fn delayed_repeat(value: &'static str, interval: Duration) -> UpstreamByteStream {
     Box::pin(stream::unfold((), move |_| async move {
         tokio::time::sleep(interval).await;
@@ -135,7 +163,6 @@ async fn first_terminal_starts_a_tail_that_later_events_cannot_extend() {
         "response.completed",
         "response.failed",
         "response.incomplete",
-        "error",
     ] {
         let first = Bytes::from(format!("data: {{\"type\":\"{terminal}\"}}\n\n"));
         let following = delayed_repeat(

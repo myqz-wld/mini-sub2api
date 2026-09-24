@@ -5,6 +5,20 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 const MAX_FIELDS: usize = 16;
+
+pub(crate) fn websocket_control(headers: &http::HeaderMap) {
+    let role = crate::native_request_policy::Role::read(&Map::new(), headers);
+    scope(
+        EmulationTransport::WebSocket,
+        role.label(),
+        "other",
+        "application_control",
+        || {
+            record("websocket", "type", "unsupported_variant");
+        },
+    );
+}
+
 type Key = (&'static str, &'static str, &'static str);
 #[derive(Default)]
 struct Counts {

@@ -147,6 +147,9 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         text
     };
     let mut continuation = ResponsesWebSocketState::new(context.caller, context.profile);
+    if crate::request_classifier::selected(&upstream_headers) {
+        continuation.disable_automatic_reuse();
+    }
     continuation.mark_rebuilt_reference(prepared.rebuilt_reference);
     let mut value = match serde_json::from_str::<serde_json::Value>(&text) {
         Ok(value) => value,

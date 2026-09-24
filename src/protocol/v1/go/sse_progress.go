@@ -47,9 +47,9 @@ func ClassifySSEData(data []byte) SSEClass {
 		return SSEEmpty
 	}
 	switch string(event.Type) {
-	case "response.completed", "response.failed", "response.incomplete", "error":
+	case "response.completed", "response.failed", "response.incomplete":
 		return SSETerminal
-	case "response.created", "response.in_progress", "response.queued", "response.metadata",
+	case "error", "response.created", "response.in_progress", "response.queued", "response.metadata",
 		"codex.response.metadata", "responsesapi.websocket_timing", "ping", "heartbeat", "keepalive",
 		"response.output_item.added", "response.web_search_call.in_progress", "response.web_search_call.searching",
 		"response.file_search_call.in_progress", "response.file_search_call.searching",

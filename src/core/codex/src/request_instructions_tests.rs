@@ -239,6 +239,8 @@ fn instruction_cases() -> Vec<(Option<Value>, Option<String>)> {
         .map(|value| (value, None))
         .collect::<Vec<_>>();
     for text in [
+        " \t\r\n".to_string(),
+        "\u{00a0}\u{3000}".to_string(),
         "caller custom instructions".to_string(),
         " \t保留两端空白\r\n".to_string(),
         "caller template {{ personality }} and {{ untouched }}".to_string(),
@@ -263,8 +265,6 @@ fn invalid_instructions() -> Vec<Option<Value>> {
         None,
         Some(Value::Null),
         Some(serde_json::json!("")),
-        Some(serde_json::json!(" \t\r\n")),
-        Some(serde_json::json!("\u{00a0}\u{3000}")),
         Some(serde_json::json!(42)),
         Some(serde_json::json!(0)),
         Some(serde_json::json!(1.5)),

@@ -243,7 +243,8 @@ connection. Pinned tungstenite forks and compression match v0.156.0; Go need not
 
 `fixtures/sse_progress.json` defines matching Go/Rust observations for HTTP output deadlines and
 fixed diagnostic categories. Nonempty text/reasoning/tool/media fields and completed items count as
-output; status, unknown and empty events do not. Classification never proves valid completion or
+output; status, unknown and empty events do not. Standalone `error` is nonterminal status for read
+budgets; only response.completed/failed/incomplete starts the terminal tail. Classification never proves valid completion or
 changes API-key bytes. [HTTP limits](../../../docs/BEHAVIOR.md#completion-and-recovery) define timing.
 
 ## Responses WebSocket
@@ -269,9 +270,8 @@ Subscription upgrades internally first, then connects upstream from the first no
   Go owns eight sockets/Key, credential revalidation, public overlap policy, operation accounting,
   first-frame/inter-turn/write deadlines and shutdown.
 - Application frames are bounded UTF-8 JSON text. API-key valid frames are byte-exact. Subscription
-  overlays creates and translates enumerated IDs on controls. `response.inject` retains only
-  `type/input/response_id`, filters item schemas and preserves opaque tool payloads; other non-create
-  frames remain byte-exact when IDs need no change.
+  overlays creates and logs/ignores unsupported application controls, including response.inject.
+  Protocol Ping/Pong remains supported. Public admission rejects controls while no operation is active.
 - Preserve nonempty `x-codex-ws-stream-request-start-ms`; generate only missing/empty values.
   Native prewarm retains empty `turn_id` and absent `root_turn_id/turn_started_at_unix_ms`.
   Deferred handshake turn metadata comes from the normalized first frame. Hidden prewarm uses

@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
 
-func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
+func TestCodexProfilesIgnoreUnsupportedTypedWebSocketControlFrames(t *testing.T) {
 	fixture := newResponsesProfileWebSocketFixtureWithResponder(
 		t,
 		func(connection *websocket.Conn, payload []byte, responseID string) {
@@ -88,34 +89,11 @@ func TestCodexProfilesTranslateTypedWebSocketControlFrames(t *testing.T) {
 				},
 			})
 			writeE2EWebSocketText(t, connection, string(control))
-			completedText := readE2EWebSocketText(t, connection)
-			var completed map[string]any
-			if json.Unmarshal([]byte(completedText), &completed) != nil {
-				t.Fatalf("completed event = %q", completedText)
+			select {
+			case <-fixture.captures:
+				t.Fatal("unsupported typed control reached upstream")
+			case <-time.After(100 * time.Millisecond):
 			}
-			completedResponse, _ := completed["response"].(map[string]any)
-			if completedResponse["id"] != publicResponseID {
-				t.Fatalf("completed response alias changed: %#v", completed)
-			}
-			controlCapture := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0]
-			upstreamControl := decodeResponsesProfileWebSocketFrame(t, controlCapture.Frame)
-			if upstreamControl["response_id"] != createCapture.ResponseID {
-				t.Fatalf("control response alias was not restored: %#v", upstreamControl)
-			}
-			item, _ := upstreamControl["item"].(map[string]any)
-			if item["id"] == "item-control-downstream" || item["call_id"] != "call-control-provider" {
-				t.Fatalf("control item IDs were not pseudonymized: %#v", item)
-			}
-			output, _ := item["output"].(map[string]any)
-			if output["opaque_id"] != "opaque-must-stay" {
-				t.Fatalf("opaque control output changed: %#v", output)
-			}
-			if createCapture.ProviderRequestID != controlCapture.ProviderRequestID {
-				t.Fatal("one provider connection emitted inconsistent request diagnostics")
-			}
-			assertProfileWebSocketDiagnosticHistory(
-				t, fixture.store, profile.keyID, createCapture.ProviderRequestID, 1,
-			)
 			assertWebSocketProfileCredentialBoundary(t, createCapture, profile.subscription)
 		})
 	}

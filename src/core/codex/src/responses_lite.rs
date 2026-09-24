@@ -120,15 +120,29 @@ pub(crate) fn order_projected_items(request: &mut Map<String, Value>) {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn canonicalize_request_items(
     request: &mut Map<String, Value>,
     default_image_detail: Option<&str>,
+) {
+    canonicalize_request_items_for_role(
+        request,
+        default_image_detail,
+        crate::native_request_policy::Role::Model,
+    );
+}
+
+pub(crate) fn canonicalize_request_items_for_role(
+    request: &mut Map<String, Value>,
+    default_image_detail: Option<&str>,
+    role: crate::native_request_policy::Role,
 ) {
     let turn_id = request
         .get("client_metadata")
         .and_then(Value::as_object)
         .and_then(|metadata| metadata.get("turn_id"))
         .and_then(Value::as_str)
+        .filter(|_| role != crate::native_request_policy::Role::Classifier)
         .map(str::to_string);
     if let Some(input) = request.get_mut("input") {
         canonicalize_input_items(input, default_image_detail, turn_id.as_deref());

@@ -31,9 +31,8 @@ The main compromise is synthesized execution metadata for ordinary clients. Miss
 use the established `danger-full-access` / `none` fallback; root-agent, analytics and review defaults
 describe the emulated request, not verified client capabilities. Supplied supported values remain
 authoritative within the identity/transport policy. Core has no native Code Mode JavaScript host,
-client tool execution or client memory-writing service. Explicit nullable/public controls can also
-differ from what the native CLI constructs. These differences should remain explicit compatibility
-choices when updating the pin, rather than silently acquiring new defaults.
+client tool execution or client memory-writing service. Invalid optional controls are logged and
+ignored before native defaults; required identity and dependency validation still fails closed.
 
 Previously added Lite setup attribution and HTTP body routing tokens were implementation deviations,
 not required user customizations; the wire-shape corrections below remove them.
@@ -231,7 +230,7 @@ model effort aliases, constructs role-specific choice/include/text combinations,
 metadata, preserves imported output IDs and uses metadata events for ordinary WS routing state.
 Managed auth now follows reload → refresh with at most three inference attempts. HPACK Authorization
 uses native without-indexing (`0f08`), verified from a production-built request on a loopback peer.
-Ordinary HTTP pools live per call/retry group; classifiers retain pooling. OAuth form/query/header
+Ordinary HTTP pools are rebuilt for each authentication recovery attempt; classifiers retain pooling. OAuth form/query/header
 order, exact large integers and free output-schema order were also verified. SSE BOM/CR support is
 a compatibility improvement: native 0.156.0 also failed those bounded fixtures. These local results
 do not establish byte equality for every release/platform/optional-role combination. A legacy local
@@ -347,7 +346,7 @@ Neither these live cases nor macOS ClientHello checks certify Linux TLS, negotia
 SETTINGS/HPACK, packet timing or remote fingerprint classification. Live coverage uses two models
 at low reasoning effort; all-model entitlement, forced live compaction and exhaustive failure paths
 remain outside this run. Bare/third-party requests retain the documented caller-control policy
-(including explicit nulls and omitted bases) and acquire no native environment or Code Mode runtime.
+(including omitted bases and native typed controls) and acquire no native environment or Code Mode runtime.
 They are not claimed to reproduce every default CLI request.
 
 ## Local validation
@@ -357,3 +356,39 @@ and vet passed after the live-routing corrections. Affected actual-CLI loopback 
 again with long routing tokens and strict wire checks. The release build and installed-artifact
 checks passed; binary scans found no private home/repository prefixes or deployment identifiers.
 Exact upstream prompt regeneration was verified during the initial 0.156.0 alignment.
+
+## Follow-up producer and boundary repairs
+
+The follow-up at baseline `e0681ac` separates tool-output encrypted content from message content,
+keeps the classifier source/parent/cache identity and its uncompressed HTTP/Lite WS transport,
+and omits detached Memory's four inner thread-identity fields. Full first replay preserves valid
+provider output item/call IDs even with explicit identity; known aliases and scope checks remain.
+Basic Guardian fixes output strictness to false, optional invalid controls use native defaults,
+reasoning content without reasoning_text is omitted, and whitespace-only instructions survive.
+
+Unsupported application JSON controls are logged/ignored by Subscription Core; protocol Ping/Pong
+and valid creates remain usable. Standalone SSE error does not start the one-second response tail,
+so a delayed failed footer is delivered within the existing idle budget. Custom CA parsing accepts
+OpenSSL trusted labels, trims trailing X509_AUX, handles mixed bundles and rejects invalid roots.
+
+Final HTTP/WS peer tests cover the admitted parent chain, role controls, exact encrypted payload
+preservation, replay identities, invalid type/null and opaque-value controls. Native release versus
+gateway loopback captures passed ordinary/trusted-AUX/mixed CA bundles over HTTP and WS.
+
+A subsequent official-release classifier capture completed four direct/gateway HTTP/WS cases,
+each with two successful parent tool turns and two classifier requests. It uses the built-in
+provider, explicit auto review, a registered synthetic app-server tool and isolated loopback peers.
+The failed earlier activation used manual review mode and an unavailable execution tool.
+
+The four gateway classifier requests now match native ingress in complete ordered protocol shape,
+inner metadata insertion order, header order/casing and stable header values. Body values match
+after validating consistent scoped identity translation; arbitrary business values are unchanged.
+The outer client_metadata HashMap has no fixed iteration-order requirement. The capture exposed
+and corrected late default-originator placement, inner JSON insertion order and an invented WS
+request timestamp. Classifier HTTP remains uncompressed and reuses one connection across both
+requests; WS retains the Lite header and negotiated compression. The source thread, parent turn,
+provider response and guardian-v2 cache key remain linked after the successful parent exchange.
+
+These are local macOS arm64 HTTP/1.1 and WS application/TCP captures. They do not certify a full
+TLS/HTTP2/platform matrix, real scoring quality, ciphertext decryption, or an actual Memory
+producer. No live provider request or deployment was used for this follow-up.

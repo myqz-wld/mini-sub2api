@@ -60,6 +60,9 @@ fn apply_inner(
 ) -> Result<(Vec<String>, Vec<usize>), ()> {
     crate::reasoning_visibility::ReasoningVisibility::read(object).map_err(|_| ())?;
     crate::native_request_policy::filter_admission(object);
+    if role == crate::native_request_policy::Role::Classifier {
+        crate::request_classifier::normalize_model(object);
+    }
     let caller_base = codex_instructions::has_valid_instructions(object);
     retain_codex_fields(object, transport);
     if object.contains_key("conversation") {
@@ -76,11 +79,12 @@ fn apply_inner(
     let already_lite =
         model_profile.responses_lite && (responses_lite_requested(object) || lite_incremental);
 
-    let synthesized_item_ids = if already_lite {
-        Vec::new()
-    } else {
-        normalize_input(object)
-    };
+    let synthesized_item_ids =
+        if already_lite && role != crate::native_request_policy::Role::Classifier {
+            Vec::new()
+        } else {
+            normalize_input(object)
+        };
     codex_instructions::apply(object, model_profile.responses_lite)?;
     if model_profile.responses_lite {
         if !already_lite {
@@ -121,20 +125,27 @@ fn apply_inner(
     if guardian_reviewer {
         object.remove("service_tier");
     }
-    if profile.uses_subscription_transport() && !guardian_reviewer {
+    if profile.uses_subscription_transport()
+        && !guardian_reviewer
+        && role != crate::native_request_policy::Role::Classifier
+    {
         request_identity::apply_routing_hint(object, headers);
     } else {
         request_identity::remove_routing_hint(headers);
     }
-    request_identity::apply(
-        object,
-        headers,
-        IdentityContext {
-            responses_lite: model_profile.responses_lite,
-            transport,
-            tool_namespaces_info: None,
-        },
-    );
+    if role == crate::native_request_policy::Role::Classifier {
+        crate::request_classifier::overlay(object, headers);
+    } else {
+        request_identity::apply(
+            object,
+            headers,
+            IdentityContext {
+                responses_lite: model_profile.responses_lite,
+                transport,
+                tool_namespaces_info: None,
+            },
+        );
+    }
     if let Some(metadata) = object
         .get_mut("client_metadata")
         .and_then(Value::as_object_mut)
@@ -169,9 +180,10 @@ fn apply_inner(
             }
         }
     }
-    responses_lite::canonicalize_request_items(
+    responses_lite::canonicalize_request_items_for_role(
         object,
         (!model_profile.responses_lite).then_some("high"),
+        role,
     );
     canonicalize_request_order(object, transport);
     let mut prefixes = Vec::new();

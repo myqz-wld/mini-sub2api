@@ -242,6 +242,10 @@ pub(crate) async fn relay(
                             Ok(is_create) => is_create,
                             Err(()) => return RelayExit::Protocol,
                         };
+                        if !is_create && profile.emulates_codex() {
+                            crate::ignored_fields::websocket_control(&headers);
+                            continue;
+                        }
                         if is_create
                             && !fingerprint_is_current(&vault, &account_ref, &fingerprint).await
                         {
@@ -271,10 +275,6 @@ pub(crate) async fn relay(
                             }
                             Err(ClientPrepareError::Protocol) => return RelayExit::Protocol,
                             Ok(prepared) => {
-                                if !is_create && profile.emulates_codex() {
-                                    continuation_guard(&client_continuation)
-                                        .abandon_cached_bodies();
-                                }
                                 if is_create
                                     && let Some(state) = client_response_state.as_ref()
                                     && state.update_operation(prepared.operation.clone()).is_err()

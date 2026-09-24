@@ -48,10 +48,9 @@ pub fn classify(data: &[u8]) -> Class {
     };
     let payload = |class, present| if present { class } else { Class::Empty };
     match event.kind.as_str() {
-        "response.completed" | "response.failed" | "response.incomplete" | "error" => {
-            Class::Terminal
-        }
-        "response.created"
+        "response.completed" | "response.failed" | "response.incomplete" => Class::Terminal,
+        "error"
+        | "response.created"
         | "response.in_progress"
         | "response.queued"
         | "response.metadata"

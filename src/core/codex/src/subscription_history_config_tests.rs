@@ -100,20 +100,24 @@ async fn model_and_setup_changes_keep_current_format_without_inheriting_old_base
                 identity.session_id
             );
             let emitted: Value = serde_json::from_slice(&prepared.body).unwrap();
-            let has_base = base == Some(json!("current base"));
+            let current_base = base
+                .as_ref()
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty());
+            let has_base = current_base.is_some();
             let items = emitted["input"].as_array().unwrap();
             if model == "gpt-5.6-sol" {
                 assert!(emitted.get("instructions").is_none());
                 assert!(items[0]["tools"] == json!([]));
                 assert_eq!(items.len(), 4 + usize::from(has_base));
                 if has_base {
-                    assert!(items[1]["content"][0]["text"] == "current base");
+                    assert_eq!(items[1]["content"][0]["text"].as_str(), current_base);
                 }
             } else {
                 assert_eq!(items.len(), 3);
                 assert_eq!(
                     emitted.get("instructions").and_then(Value::as_str),
-                    has_base.then_some("current base")
+                    current_base
                 );
                 assert_eq!(emitted["tools"], json!([]));
             }

@@ -17,7 +17,11 @@ pub(crate) fn canonicalize_optionals(object: &mut Map<String, Value>) {
             if object
                 .get("content")
                 .and_then(Value::as_array)
-                .is_some_and(Vec::is_empty)
+                .is_some_and(|items| {
+                    !items.iter().any(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("reasoning_text")
+                    })
+                })
             {
                 object.shift_remove("content");
             }

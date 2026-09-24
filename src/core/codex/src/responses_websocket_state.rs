@@ -45,6 +45,7 @@ pub(crate) struct ResponsesWebSocketState {
     setup_phase: OperationPhase,
     public_phase: OperationPhase,
     rebuilt_reference: bool,
+    automatic_reuse: bool,
     max_output_items: usize,
     max_output_bytes: usize,
 }
@@ -61,6 +62,7 @@ impl ResponsesWebSocketState {
             setup_phase: OperationPhase::Idle,
             public_phase: OperationPhase::Idle,
             rebuilt_reference: false,
+            automatic_reuse: caller == CallerKind::Bare && profile.uses_subscription_transport(),
             max_output_items: crate::inference_limits::get().output_items,
             max_output_bytes: crate::inference_limits::get().output_bytes,
         }
@@ -371,7 +373,13 @@ impl ResponsesWebSocketState {
     }
 
     fn automatic_reuse_enabled(&self) -> bool {
-        self.caller == CallerKind::Bare && self.profile.uses_subscription_transport()
+        self.automatic_reuse
+            && self.caller == CallerKind::Bare
+            && self.profile.uses_subscription_transport()
+    }
+
+    pub(crate) fn disable_automatic_reuse(&mut self) {
+        self.automatic_reuse = false;
     }
 
     fn activate(&mut self, expected: OperationKind) -> bool {

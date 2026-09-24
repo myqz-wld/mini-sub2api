@@ -75,6 +75,7 @@ pub(crate) fn supported_item(kind: &str) -> bool {
 }
 
 pub(crate) fn filter_admission(object: &mut Map<String, Value>) {
+    crate::native_request_types::normalize(object);
     if let Some(programs) = object
         .get_mut("access_programs")
         .and_then(Value::as_object_mut)
@@ -151,7 +152,14 @@ pub(crate) fn apply_controls(
     }
     object.insert("include".into(), include);
     if role == Role::Classifier {
+        log::remove(object, "generate", "request", "role_policy");
+        if object.contains_key("previous_response_id") {
+            log::record("request", "previous_response_id", "local_reference_only");
+        }
         log::remove(object, "text", "request", "role_policy");
+        log::remove(object, "service_tier", "request", "role_policy");
+        log::remove(object, "access_programs", "request", "role_policy");
+        log::remove(object, "stream_options", "request", "role_policy");
         object.insert("parallel_tool_calls".into(), false.into());
     }
     if let Some(tier) = object.get("service_tier")
@@ -179,6 +187,9 @@ pub(crate) fn apply_controls(
             .is_some_and(|v| !matches!(v.as_str(), Some("auto" | "concise" | "detailed")))
         {
             log::remove(reasoning, "summary", "reasoning", "disabled_summary");
+        }
+        if role == Role::Classifier {
+            log::remove(reasoning, "summary", "reasoning", "role_policy");
         }
         if profile.responses_lite {
             reasoning.insert("context".into(), "all_turns".into());
@@ -210,12 +221,11 @@ pub(crate) fn apply_controls(
                     log::record("text.format", "name", "role_policy");
                 }
                 format.insert("name".into(), "codex_output_schema".into());
-                if role != Role::Reviewer || !format.get("strict").is_some_and(Value::is_boolean) {
-                    if format.get("strict") == Some(&Value::Bool(false)) {
-                        log::record("text.format", "strict", "role_policy");
-                    }
-                    format.insert("strict".into(), true.into());
+                let strict = Value::Bool(role != Role::Reviewer);
+                if format.get("strict").is_some_and(|value| value != &strict) {
+                    log::record("text.format", "strict", "role_policy");
                 }
+                format.insert("strict".into(), strict);
             } else {
                 log::remove(text, "format", "text", "unsupported_variant");
             }

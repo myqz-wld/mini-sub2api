@@ -81,15 +81,19 @@ OpenCode custom providers and bare clients can associate full histories without 
   significant and matching stays within the current Key.
 - Subscription preserves caller instructions and tool order, inserts no default base, and requests
   encrypted reasoning for ordinary/reviewer requests; `include` controls public visibility. The async
-  classifier uses its own native defaults. Workspace, Skills and tools belong to the client.
+  classifier uses its own identity, cache and transport rules. Encrypted tool outputs are preserved.
+  Workspace, Skills and tools belong to the client; nonempty whitespace instructions remain verbatim.
 - Subscription ignores fields outside native request/tool/history types and emits bounded,
   content-free `codex_ignored_field` diagnostics before sending. See [log analysis and retention](docs/OPERATIONS.md#ignored-field-diagnostics).
 - Custom CA bundles use `CODEX_CA_CERTIFICATE`, then `SSL_CERT_FILE`; empty values are unset.
   HTTP uses native TLS by default and rustls for an override; WS appends the selected roots.
+  Ordinary and OpenSSL trusted/AUX certificate bundles are supported.
 - Valid caller turn-start timestamps survive normalization; omitted values reuse the recorded turn
   time or receive a server-clock fallback. These timestamps do not control retention.
 - Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the
   [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
+  Official classifier captures also compare complete HTTP/WS requests after successful parent
+  tool turns, including source/cache identity and persistent HTTP pooling.
 - Bare and actual OpenCode captures also check ordered protocol objects and complete upstream
   header order/casing against independently captured 0.156.0 baselines. Late identity insertion
   and automatic WS continuation preserve native field positions.
@@ -107,7 +111,8 @@ OpenCode custom providers and bare clients can associate full histories without 
 - Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state
   still uses the persistent transaction. See [cache bounds](docs/MEMORY.md#response-identity-work).
 - HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
-  and heartbeats cannot extend it. Completed streams close after a bounded tail; stalled client
+  and heartbeats cannot extend it. A standalone error waits for its failed footer within the idle
+  budget. Completed streams close after a bounded tail; stalled client
   writes time out after 120 seconds. [Diagnostic logs](docs/OPERATIONS.md#diagnosing-long-requests)
   correlate request stages, model/effort, typed failures and minute-spaced progress without payloads.
 

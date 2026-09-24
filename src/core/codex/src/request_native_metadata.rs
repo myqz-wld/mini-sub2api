@@ -15,6 +15,9 @@ pub(crate) struct NativeMetadata {
     cache_key: Option<String>,
     cache_header: bool,
     parent_response: Option<String>,
+    classifier: bool,
+    classifier_source: Option<String>,
+    classifier_has_root: bool,
 }
 
 impl NativeMetadata {
@@ -123,7 +126,29 @@ impl NativeMetadata {
             })
             .transpose()?
             .map(str::to_string);
+        let classifier = crate::request_classifier::selected(headers);
+        let classifier_source = if classifier {
+            text(crate::request_classifier::SOURCE)?
+        } else {
+            None
+        };
+        let classifier_has_root = values
+            .get("root_turn_id")
+            .or_else(|| flat.and_then(|m| m.get("root_turn_id")))
+            .is_some_and(Value::is_string);
+        if classifier && let Some(source) = &classifier_source {
+            crate::request_state_types::validate_wire_id(source)?;
+            if let Some(key) = object.get("prompt_cache_key").and_then(Value::as_str) {
+                anyhow::ensure!(
+                    key == format!("guardian-v2:{source}"),
+                    "classifier cache source mismatch"
+                );
+            }
+        }
         Ok(Self {
+            classifier,
+            classifier_source,
+            classifier_has_root,
             window_number,
             context_window_id,
             fork_ordinal,
@@ -142,7 +167,9 @@ impl NativeMetadata {
         headers: &mut HeaderMap,
         identity: &ResolvedRequestIdentity,
     ) -> anyhow::Result<()> {
-        if let Some(key) = &self.cache_key {
+        if let Some(key) = &self.cache_key
+            && !self.classifier
+        {
             // Reuse a known source session's cache affinity without making it the owner.
             // Reserve a UUID for a source that has not sent its own request yet.
             let projected =
@@ -167,6 +194,16 @@ impl NativeMetadata {
             let projected =
                 editor.required_wire_from_downstream(WireIdDomain::Response, parent, true)?;
             metadata.insert("parent_response_id".into(), Value::String(projected));
+        }
+        if self.classifier {
+            return crate::request_classifier::project(
+                editor,
+                object,
+                headers,
+                identity,
+                self.classifier_source.as_deref(),
+                self.classifier_has_root,
+            );
         }
         let mut turn: Map<String, Value> = serde_json::from_str(
             metadata

@@ -40,7 +40,7 @@ fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
 }
 
 #[test]
-fn gpt_5_2_preserves_explicit_null_members_except_required_include() {
+fn gpt_5_2_projects_optional_null_controls() {
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
             "model": "gpt-5.2",
@@ -74,7 +74,7 @@ fn gpt_5_2_preserves_explicit_null_members_except_required_include() {
     assert!(value["reasoning"]["context"].is_null());
     assert!(value["text"].is_null());
     assert_eq!(value["tool_choice"], "auto");
-    assert!(value["parallel_tool_calls"].is_null());
+    assert_eq!(value["parallel_tool_calls"], true);
     assert!(value.get("stream_options").is_none());
     assert!(value.get("instructions").is_none());
     for name in [

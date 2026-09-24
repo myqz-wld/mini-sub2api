@@ -232,21 +232,23 @@ pub(crate) fn resolve_and_project(
     )?;
     crate::request_identity_projection::apply(headers, object, &identity)
         .map_err(|_| anyhow::anyhow!("projecting request identity"))?;
-    generated_upstream_ids.extend(crate::lite_prefix_identity::apply_generated(
-        object,
-        &identity.thread_id,
-        lite_prefixes,
-    )?);
-    generated_upstream_ids.extend(crate::lite_prefix_identity::project_native(
-        editor,
-        object,
-        &identity.thread_id,
-        evidence.thread.as_deref(),
-        native_prefixes,
-    )?);
+    if !evidence.is_classifier() {
+        generated_upstream_ids.extend(crate::lite_prefix_identity::apply_generated(
+            object,
+            &identity.thread_id,
+            lite_prefixes,
+        )?);
+        generated_upstream_ids.extend(crate::lite_prefix_identity::project_native(
+            editor,
+            object,
+            &identity.thread_id,
+            evidence.thread.as_deref(),
+            native_prefixes,
+        )?);
+    }
     if history_import
         .as_ref()
-        .is_some_and(|import| import.plan.allow_history_import)
+        .is_some_and(|import| import.plan.preserve_imported_outputs)
     {
         crate::request_wire_ids::register_imported_outputs(
             editor,
@@ -298,9 +300,21 @@ fn resolve_turn(
         });
     }
 
+    // Classifier root metadata is optional even when its source is a child thread. Recover
+    // the known internal ancestry without inventing a root field in its outbound metadata.
+    let inherited_root = if evidence.is_classifier()
+        && evidence.root_turn.is_none()
+        && let Some(parent) = evidence.parent_turn.as_deref()
+    {
+        let key = turn_key_for_raw(editor, parent)?;
+        editor.existing_turn(&key).map(|turn| turn.root_turn_id)
+    } else {
+        None
+    };
     let root_raw = evidence
         .root_turn
         .as_deref()
+        .or(inherited_root.as_deref())
         .or(evidence.parent_turn.as_deref())
         .unwrap_or(turn_key);
     let root_key = turn_key_for_raw(editor, root_raw)?;

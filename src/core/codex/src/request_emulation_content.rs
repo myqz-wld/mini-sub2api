@@ -34,6 +34,14 @@ pub(super) fn filter(values: &mut Vec<Value>, kind: Option<&str>, summary: bool)
             matches!(t, "reasoning_text" | "text")
         } else if kind == Some("agent_message") {
             matches!(t, "input_text" | "encrypted_content")
+        } else if matches!(
+            kind,
+            Some("function_call_output" | "custom_tool_call_output")
+        ) {
+            matches!(
+                t,
+                "input_text" | "input_image" | "input_audio" | "encrypted_content"
+            )
         } else {
             matches!(
                 t,

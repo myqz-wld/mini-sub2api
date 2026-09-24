@@ -1,6 +1,9 @@
 //! Native custom-CA precedence. Errors deliberately omit local paths and certificate bytes.
 use anyhow::{Context, Result};
-use rustls_pki_types::{CertificateDer, pem::PemObject};
+use rustls_pki_types::{
+    CertificateDer,
+    pem::{PemObject, SectionKind},
+};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -20,10 +23,24 @@ pub(crate) fn certificates() -> Result<Option<Vec<CertificateDer<'static>>>> {
 }
 
 pub(crate) fn parse(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>> {
-    let certs = CertificateDer::pem_slice_iter(pem)
-        .map(|cert| cert.map(|cert| cert.into_owned()))
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|_| anyhow::anyhow!("invalid configured CA PEM bundle"))?;
+    let pem = String::from_utf8_lossy(pem);
+    let trusted = pem.contains("TRUSTED CERTIFICATE");
+    let normalized = pem
+        .replace("BEGIN TRUSTED CERTIFICATE", "BEGIN CERTIFICATE")
+        .replace("END TRUSTED CERTIFICATE", "END CERTIFICATE");
+    let mut certs = Vec::new();
+    for section in <(SectionKind, Vec<u8>)>::pem_slice_iter(normalized.as_bytes()) {
+        let (kind, der) =
+            section.map_err(|_| anyhow::anyhow!("invalid configured CA PEM bundle"))?;
+        if kind == SectionKind::Certificate {
+            let der = if trusted {
+                first_der_item(&der).context("invalid trusted CA certificate length")?
+            } else {
+                &der
+            };
+            certs.push(CertificateDer::from(der.to_vec()));
+        }
+    }
     anyhow::ensure!(
         !certs.is_empty(),
         "configured CA bundle contains no certificates"
@@ -36,6 +53,25 @@ pub(crate) fn parse(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>> {
             .context("invalid configured CA certificate")?;
     }
     Ok(certs)
+}
+
+// OpenSSL may append X509_AUX trust metadata. Registration still validates the certificate.
+fn first_der_item(der: &[u8]) -> Option<&[u8]> {
+    let length = *der.get(1)?;
+    let (header, content) = if length & 0x80 == 0 {
+        (2usize, usize::from(length))
+    } else {
+        let count = usize::from(length & 0x7f);
+        if count == 0 {
+            return None;
+        }
+        let end = 2usize.checked_add(count)?;
+        let content = der.get(2..end)?.iter().try_fold(0usize, |n, b| {
+            n.checked_mul(256)?.checked_add(usize::from(*b))
+        })?;
+        (end, content)
+    };
+    der.get(..header.checked_add(content)?)
 }
 
 pub(crate) fn apply(mut builder: reqwest::ClientBuilder) -> Result<reqwest::ClientBuilder> {
@@ -55,6 +91,33 @@ pub(crate) fn apply(mut builder: reqwest::ClientBuilder) -> Result<reqwest::Clie
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn auxiliary_trimming_checks_der_bounds_without_accepting_invalid_roots() {
+        assert_eq!(
+            first_der_item(&[0x30, 2, 1, 2, 0x30, 0]),
+            Some([0x30, 2, 1, 2].as_slice())
+        );
+        assert_eq!(
+            first_der_item(&[0x30, 0x81, 2, 1, 2, 0x30, 0]),
+            Some([0x30, 0x81, 2, 1, 2].as_slice())
+        );
+        for bytes in [
+            &[][..],
+            &[0x30],
+            &[0x30, 0x80, 0, 0],
+            &[0x30, 0x82, 1],
+            &[0x30, 2, 1],
+            &[0x30, 0xff, 0],
+        ] {
+            assert!(first_der_item(bytes).is_none());
+        }
+        assert!(
+            parse(
+                b"-----BEGIN TRUSTED CERTIFICATE-----\nMAIBAQ==\n-----END TRUSTED CERTIFICATE-----"
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn precedence_and_empty_values_do_not_mutate_process_environment() {
         for (codex, ssl, expected) in [

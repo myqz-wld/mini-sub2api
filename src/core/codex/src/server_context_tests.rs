@@ -10,9 +10,14 @@ use std::time::Duration;
 
 async fn context_upstream(
     AxumState(captures): AxumState<Arc<Mutex<Vec<Value>>>>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response<Body> {
-    let decoded = zstd::stream::decode_all(body.as_ref()).expect("Subscription zstd");
+    let decoded = if headers.get("content-encoding").is_some_and(|v| v == "zstd") {
+        zstd::stream::decode_all(body.as_ref()).expect("Subscription zstd")
+    } else {
+        body.to_vec()
+    };
     let value: Value = serde_json::from_slice(&decoded).expect("upstream JSON");
     assert!(
         value.get("previous_response_id").is_none(),

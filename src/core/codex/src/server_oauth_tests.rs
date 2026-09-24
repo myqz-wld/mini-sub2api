@@ -14,6 +14,9 @@ use super::integration_support::app_state;
 use super::integration_support::call_core;
 use super::integration_support::call_core_with_headers;
 
+#[path = "server_auth_connection_tests.rs"]
+mod connection_tests;
+
 #[derive(Clone)]
 struct OAuthMockState {
     old_access: String,

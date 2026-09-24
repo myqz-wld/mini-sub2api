@@ -17,13 +17,14 @@ import (
 	"github.com/coder/websocket"
 )
 
-func TestNativeControlHistoryInvalidation(t *testing.T) {
+func TestNativeControlHistoryContracts(t *testing.T) {
 	for _, subscription := range []bool{false, true} {
 		for _, model := range []string{"gpt-5.4", "gpt-5.6-sol"} {
 			for _, kind := range []string{"response.inject", "response.append_input_item", "future.control"} {
 				for _, explicit := range []bool{false, true} {
 					t.Run(fmt.Sprintf("subscription=%t/%s/%s/explicit=%t", subscription, model, kind, explicit), func(t *testing.T) {
 						var httpCalls atomic.Int32
+						controlSubmitted := make(chan struct{})
 						upstream, tap := newNativeTappedServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							if r.Method == http.MethodPost {
 								httpCalls.Add(1)
@@ -45,7 +46,13 @@ func TestNativeControlHistoryInvalidation(t *testing.T) {
 							if connection.Write(ctx, websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_control_capture"}}`)) != nil {
 								return
 							}
-							if _, _, err := connection.Read(ctx); err != nil {
+							if subscription {
+								select {
+								case <-controlSubmitted:
+								case <-ctx.Done():
+									return
+								}
+							} else if _, _, err := connection.Read(ctx); err != nil {
 								return
 							}
 							_ = connection.Write(ctx, websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_control_capture","output":[]}}`))
@@ -78,7 +85,15 @@ func TestNativeControlHistoryInvalidation(t *testing.T) {
 						if client.ws.Write(ctx, websocket.MessageText, controlBody) != nil {
 							t.Fatal("control send failed")
 						}
-						completed := readControlEvent(t, ctx, client.ws)
+						completion := make(chan map[string]any, 1)
+						go func() { completion <- readControlEvent(t, ctx, client.ws) }()
+						if subscription {
+							if client.ws.Ping(ctx) != nil {
+								t.Fatal("ignored control broke protocol heartbeat")
+							}
+							close(controlSubmitted)
+						}
+						completed := <-completion
 						if completed["type"] != "response.completed" {
 							t.Fatal("control completion missing")
 						}
@@ -100,39 +115,29 @@ func TestNativeControlHistoryInvalidation(t *testing.T) {
 							if readErr != nil {
 								t.Fatal("control follow-up response failed")
 							}
+							_ = reply
 							expected := 200
-							if subscription && step == 0 {
-								expected = http.StatusServiceUnavailable
-							}
-							if subscription && step == 0 {
-								var failure struct {
-									Error struct {
-										Code string `json:"code"`
-									} `json:"error"`
-								}
-								if json.Unmarshal(reply, &failure) != nil || failure.Error.Code != "state_unavailable" {
-									t.Fatal("stale history did not report state_unavailable")
-								}
-							}
 							if got.StatusCode != expected {
 								t.Fatal("control reused stale history or rejected full replacement")
 							}
 						}
 						wantHTTP := int32(2)
-						if subscription {
-							wantHTTP = 1
-						}
+
 						if httpCalls.Load() != wantHTTP {
 							t.Fatal("unavailable control history reached upstream")
 						}
 						packets := tap.packets(t)
-						if len(packets) != int(wantHTTP)+2 {
+						wantPackets := int(wantHTTP) + 2
+						if subscription {
+							wantPackets--
+						}
+						if len(packets) != wantPackets {
 							t.Fatal("control capture count differs")
 						}
 						if !subscription && !bytes.Equal(packets[1].payload, controlBody) {
 							t.Fatal("API-key control payload changed")
 						}
-						if explicit && !strings.Contains(string(packets[1].payload), "resp_control_capture") {
+						if !subscription && explicit && !strings.Contains(string(packets[1].payload), "resp_control_capture") {
 							t.Fatal("control response reference did not reverse correctly")
 						}
 					})

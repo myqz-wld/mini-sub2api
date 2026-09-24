@@ -24,7 +24,7 @@ pub(super) fn project_items(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    let generated_upstream = BTreeSet::new();
+    let mut generated_upstream = BTreeSet::new();
     let supplied_turns: BTreeSet<_> = evidence
         .items
         .iter()
@@ -69,17 +69,29 @@ pub(super) fn project_items(
             identity,
             history_import,
         )?;
-        set_item_turn(
-            item,
-            projected_turn.as_deref(),
-            evidence.is_prewarm(),
-            evidence.is_memory(),
-        );
+        if evidence.is_classifier() {
+            if let Some(metadata) = item
+                .get_mut("internal_chat_message_metadata_passthrough")
+                .and_then(Value::as_object_mut)
+                && metadata.contains_key("turn_id")
+                && let Some(turn) = &projected_turn
+            {
+                metadata.insert("turn_id".into(), turn.clone().into());
+            }
+        } else {
+            set_item_turn(
+                item,
+                projected_turn.as_deref(),
+                evidence.is_prewarm(),
+                evidence.is_memory(),
+            );
+        }
 
         let is_synthesized = temporary_id
             .as_ref()
             .is_some_and(|id| synthesized.contains(id));
-        let add_create_time = crate::response_item_metadata::adds_create_time(item)
+        let add_create_time = !evidence.is_classifier()
+            && crate::response_item_metadata::adds_create_time(item)
             && raw.is_none_or(|raw| !raw.had_create_time);
         if is_synthesized || add_create_time {
             let anchor = item_anchor(item);
@@ -105,7 +117,12 @@ pub(super) fn project_items(
             if is_synthesized {
                 // Ordinary Responses input may omit IDs. Preserve that omission instead of
                 // changing all historical IDs when a new turn is projected.
-                item.remove("id");
+                if evidence.is_classifier() {
+                    item.insert("id".into(), assignment.id.clone().into());
+                    generated_upstream.insert(assignment.id);
+                } else {
+                    item.remove("id");
+                }
             }
             if add_create_time && let Some(micros) = assignment.create_time_micros {
                 set_create_time(item, micros)?;

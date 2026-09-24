@@ -29,7 +29,7 @@ func runBaseInstructionCases(t *testing.T, run func(*testing.T, baseInstructionC
 					{name: "missing"},
 					{name: "null", supplied: true},
 					{name: "empty", supplied: true, value: ""},
-					{name: "blank", supplied: true, value: " \t\r\n\u00a0\u3000"},
+					{name: "whitespace", supplied: true, value: " \t\r\n\u00a0\u3000", expected: " \t\r\n\u00a0\u3000"},
 					{name: "number", supplied: true, value: 42},
 					{name: "boolean", supplied: true, value: false},
 					{name: "array", supplied: true, value: []any{"not instructions"}},

@@ -87,7 +87,7 @@ present; absent memory turns remain absent. Core provides no memory-writing serv
 
 | Caller format | Base and tools |
 |---|---|
-| Ordinary | Keep nonblank top-level instructions verbatim; omit missing/null/blank/nonstring bases. Top-level tools; omitted tools serialize as `[]`. |
+| Ordinary | Keep nonempty top-level instructions verbatim, including whitespace; omit missing/null/empty/nonstring bases. Top-level tools; omitted tools serialize as `[]`. |
 | Ordinary → Lite | `additional_tools`, optional valid caller-base developer message, original input; remove top-level base/tools. |
 | Formed Lite | Preserve input instructions; place an explicit valid top-level base after tools. |
 | Inherited Lite increment | Validate referenced caller format/setup; do not repeat the prefix. |
@@ -125,7 +125,12 @@ in stored history, without item IDs or turn stamps. The fixed native feature pol
 updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags and opaque executed-tool result metadata
 survive normalization. Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
 service-tier/routing hints, and their parent response IDs require an existing mapping in the same Key.
-Bare non-reviewer Subscription callers receive the backend Guardian credit metadata flag. WS delta
+Ordinary Subscription callers receive the backend Guardian credit metadata flag. Classifiers use
+the source thread's scoped `guardian-v2:` cache key, separate request thread/turn and validated
+parent linkage, without ModelClient installation/credits/input timing metadata. Classifier HTTP
+is uncompressed with its own header order; WS retains its Lite handshake header. Memory keeps
+flat identity and supplied turn/root fields but omits installation/session/thread/window from
+the inner turn metadata. WS delta
 reuse compares late executed-tool result metadata and its call binding; changed evidence requires
 full input. See [wire-shape evidence and limits](CODEX_COMPATIBILITY.md#field-order-and-presence).
 
@@ -134,16 +139,26 @@ ResponseItem separately, including image_generation_call and local_shell_call. T
 lower `const` to a one-element `enum`, keep the native schema subset and sort property names. Enum
 business objects and free output schemas keep their content/order. JSON numbers retain arbitrary
 precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
-strictness may be false. `ultra` resolves by the model catalog and `persistent` becomes `disabled`;
+strictness is false for basic Guardian. Invalid optional container/value types are logged and
+ignored before defaults; unknown nonempty string efforts and opaque business values remain valid.
+`ultra` resolves by the model catalog and `persistent` becomes `disabled`;
 local metadata may retain the selected alias. Unsupported/default tiers and `summary:none` are
 omitted; `flex` remains available. Lite removes image detail, including in structured tool outputs.
-Reasoning omits empty content arrays but preserves explicit null. Inner turn metadata follows native
+Function/custom tool outputs retain encrypted content; ordinary message and agent-message content
+use their separate native enums. Reasoning omits a content list with no reasoning_text (including
+empty and text-only lists), preserves complete mixed lists, and preserves explicit null. Inner turn metadata follows native
 struct order plus sorted extras; outer client metadata keeps its separate HashMap ordering policy.
 Legacy item_reference carriers still require scoped ownership, then are logged and omitted from
 native sends; callers should supply complete items when replaying content. Named function outputs can omit call_id; explicit null and missing references still fail validation.
 The pinned CustomToolCallOutput type still requires call_id. Anonymous reasoning lookup ignores
 status, agent, empty content and non-model metadata while checking IDs and ciphertext; provider
 item-done/terminal consistency remains strict.
+
+Complete first history replay preserves valid provider output item/call IDs with or without explicit
+session/thread/turn identity. Known public aliases reverse first. This does not relax reference,
+historical-owner or content checks, nor authorize copying unrelated expired turn ownership.
+Unsupported WS application controls are logged and ignored at the Subscription Core exit; protocol
+Ping/Pong remains supported. Public admission still rejects controls when no operation is active.
 
 ## Reasoning visibility
 
@@ -202,7 +217,8 @@ See [Memory](MEMORY.md) for small hosts.
 
 Device mode converges account installation UUIDv4 across duplicate credentials/Keys; off uses scoped
 aliases while keeping emulation. Logical UUIDv7 identities stay Key-isolated. Mode changes require
-disabled/drained credentials; stale WS revisions fail. Ordinary and synchronous-review HTTP clients live for one inference plus internal retries; async
+disabled/drained credentials; stale WS revisions fail. Ordinary and synchronous-review HTTP clients
+are rebuilt for each authentication recovery attempt; endpoint retries share that attempt's client. Async
 classifiers retain a credential-scoped pool. Infrastructure cookies remain process-wide. Pools/TLS
 resumption remain credential-isolated,
 without configurable JA3/uTLS or per-credential source-IP/proxy selection.

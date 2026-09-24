@@ -14,7 +14,6 @@ fn absent_bases_share_effective_settings_without_matching_catalog_text() {
                 for invalid in [
                     Value::Null,
                     json!(""),
-                    json!(" \n"),
                     json!(42),
                     json!(false),
                     json!([]),

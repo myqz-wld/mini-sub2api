@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/coder/websocket"
 )
 
-func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
+func TestResponsesProfileWebSocketInjectIsOpaqueForAPIKeyAndIgnoredForSubscription(t *testing.T) {
 	fixture := newResponsesProfileWebSocketFixtureWithResponder(
 		t,
 		func(connection *websocket.Conn, payload []byte, responseID string) {
@@ -87,34 +88,22 @@ func TestResponsesProfileWebSocketInjectUsesProfileFiltering(t *testing.T) {
 				`","input":[{"type":"function_call_output","id":"fco_profile","call_id":"` + callID +
 				`","output":{"opaque":true,"unknown":true},"unsupported_item":true}],"unsupported_top":true} `
 			writeE2EWebSocketText(t, connection, inject)
+			if test.emulated {
+				select {
+				case <-fixture.captures:
+					t.Fatal("unsupported inject reached upstream")
+				case <-time.After(100 * time.Millisecond):
+				}
+				return
+			}
 			if event := readE2EWebSocketText(t, connection); !bytes.Contains([]byte(event), []byte("response.completed")) {
 				t.Fatal("inject did not complete the active response")
 			}
 			captured := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)[0].Frame
-			if !test.emulated {
-				if !bytes.Equal(captured, []byte(inject)) {
-					t.Fatal("bare response.inject changed bytes")
-				}
-				return
+			if !bytes.Equal(captured, []byte(inject)) {
+				t.Fatal("API-key inject changed bytes")
 			}
-			value := decodeResponsesProfileWebSocketFrame(t, captured)
-			if value["type"] != "response.inject" || value["response_id"] != createCapture.ResponseID {
-				t.Fatal("emulated response.inject lost documented carriers")
-			}
-			if _, exists := value["unsupported_top"]; exists {
-				t.Fatal("emulated response.inject kept an unsupported top-level field")
-			}
-			input := value["input"].([]any)[0].(map[string]any)
-			if input["call_id"] != "call-inject-provider" {
-				t.Fatalf("emulated response.inject did not restore call ID: %#v", input)
-			}
-			if _, exists := input["unsupported_item"]; exists {
-				t.Fatal("emulated response.inject kept an unsupported item field")
-			}
-			output := input["output"].(map[string]any)
-			if output["opaque"] != true || output["unknown"] != true {
-				t.Fatal("emulated response.inject changed an opaque function output payload")
-			}
+
 		})
 	}
 }

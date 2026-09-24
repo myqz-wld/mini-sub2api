@@ -94,6 +94,20 @@ fn canonical_turn_metadata(
     for rule in
         turn_metadata_rules().filter(|rule| rule.action == CarrierAction::RelationshipProjection)
     {
+        if identity.memory()
+            && matches!(
+                rule.relationship,
+                Some(
+                    RelationshipCarrier::Installation
+                        | RelationshipCarrier::Session
+                        | RelationshipCarrier::Thread
+                        | RelationshipCarrier::Window
+                )
+            )
+        {
+            turn.remove(rule.name);
+            continue;
+        }
         match projection_decision(identity, rule.relationship) {
             ProjectionDecision::Set(value) => {
                 turn.insert(rule.name.to_string(), value);

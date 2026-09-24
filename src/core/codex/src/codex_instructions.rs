@@ -41,7 +41,7 @@ pub(crate) fn has_valid_instructions(object: &Map<String, Value>) -> bool {
     object
         .get("instructions")
         .and_then(Value::as_str)
-        .is_some_and(|text| !text.trim().is_empty())
+        .is_some_and(|text| !text.is_empty())
 }
 
 fn input_items(object: &mut Map<String, Value>) -> Result<&mut Vec<Value>, ()> {

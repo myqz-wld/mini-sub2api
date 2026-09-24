@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,11 +10,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-
-	protocolv1 "mini-sub2api/src/protocol/v1/go"
 )
 
-func TestCodexProfilesPreserveActiveWebSocketDeliveryAcrossStateOutage(t *testing.T) {
+func TestIgnoredWebSocketControlsDoNotAccessUnavailableState(t *testing.T) {
 	profiles := []struct {
 		name         string
 		subscription bool
@@ -87,33 +84,16 @@ func TestCodexProfilesPreserveActiveWebSocketDeliveryAcrossStateOutage(t *testin
 					}},
 				})
 				writeE2EWebSocketText(t, connection, string(control))
-				readContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				readContext, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 				_, _, readErr := connection.Read(readContext)
+				if readContext.Err() != context.DeadlineExceeded {
+					t.Fatalf("ignored control unexpectedly terminated connection: %v", readErr)
+				}
 				cancel()
-				if websocket.CloseStatus(readErr) != websocket.StatusCode(protocolv1.FailureCloseCode) {
-					t.Fatalf("active state outage close = %v", readErr)
-				}
-				var closeError websocket.CloseError
-				if !errors.As(readErr, &closeError) {
-					t.Fatalf("active state outage metadata unavailable: %v", readErr)
-				}
-				var failure protocolv1.FailureMetadata
-				if json.Unmarshal([]byte(closeError.Reason), &failure) != nil ||
-					failure.Phase != protocolv1.PhaseInternal {
-					t.Fatalf("active state outage failure = %#v / %q", failure, closeError.Reason)
-				}
-				if observed {
-					if failure.RetryAdvice != protocolv1.RetryNever ||
-						failure.DeliveryState != protocolv1.DeliveryDelivered {
-						t.Fatalf("observed outage authorized replay: %#v", failure)
-					}
-				} else if failure.RetryAdvice != protocolv1.RetryAmbiguous ||
-					failure.DeliveryState != protocolv1.DeliveryPossiblyDelivered {
-					t.Fatalf("attempted outage authorized safe replay: %#v", failure)
-				}
 				select {
 				case capture := <-fixture.captures:
-					t.Fatalf("state-failing control reached upstream: %#v", capture)
+					_ = capture
+					t.Fatal("ignored control reached upstream")
 				case <-time.After(200 * time.Millisecond):
 				}
 				assertProfileWebSocketDiagnosticHistory(
