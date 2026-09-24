@@ -160,9 +160,8 @@ func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testi
 	value := decodeResponsesProfileWebSocketFrame(t, captures[0].Frame)
 	assertWebSocketProfileCredentialBoundary(t, captures[0], true)
 	assertResponsesProfileSurface(t, value, false, true, true)
-	stream, streamOK := value["stream_id"].(string)
-	if !streamOK || stream == "caller-stream" || value["generate"] != false {
-		t.Fatal("explicit WebSocket state was not retained through pseudonymization")
+	if _, exists := value["stream_id"]; exists || value["generate"] != false {
+		t.Fatal("native prewarm control projection differs")
 	}
 }
 
@@ -382,7 +381,10 @@ func readResponsesProfileTerminalEvents(t *testing.T, connection *websocket.Conn
 	for index := 0; index < 3; index++ {
 		message := readE2EWebSocketText(t, connection)
 		events = append(events, message)
-		if index == 2 && !bytes.Contains([]byte(message), []byte("response.completed")) {
+		if bytes.Contains([]byte(message), []byte("response.completed")) {
+			return events
+		}
+		if index == 2 {
 			t.Fatal("WebSocket turn did not complete")
 		}
 	}

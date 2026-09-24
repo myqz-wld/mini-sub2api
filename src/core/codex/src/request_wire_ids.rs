@@ -27,6 +27,76 @@ pub(crate) fn translate_request_ids(
     Ok(())
 }
 
+// A self-contained imported transcript has passed admission and scoped identity validation.
+// Reverse known downstream aliases first. Register new native output declarations through the
+// existing bijective upstream map; a prefix alone never authorizes an external reference.
+pub(crate) fn register_imported_outputs(
+    editor: &mut RequestStateEditor<'_>,
+    object: &mut Map<String, Value>,
+    generated: &BTreeSet<String>,
+) -> Result<()> {
+    let Some(items) = object.get_mut("input").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    let mut calls = std::collections::BTreeMap::new();
+    for item in items.iter_mut().filter_map(Value::as_object_mut) {
+        let kind = item
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let output = kind == "message"
+            && item.get("role").and_then(Value::as_str) == Some("assistant")
+            || matches!(
+                kind.as_str(),
+                "reasoning"
+                    | "function_call"
+                    | "custom_tool_call"
+                    | "local_shell_call"
+                    | "web_search_call"
+                    | "tool_search_call"
+                    | "image_generation_call"
+            );
+        if output
+            && let Some(id) = item.get("id").and_then(Value::as_str).map(str::to_owned)
+            && !generated.contains(&id)
+            && crate::responses_lite::item_id_prefix(&kind).is_some_and(|p| {
+                id.strip_prefix(p)
+                    .is_some_and(|s| s.starts_with('_') && s.len() > 1)
+            })
+            && editor
+                .existing_wire_from_downstream(WireIdDomain::Item, &id)?
+                .is_none()
+        {
+            let alias = editor.wire_from_upstream(WireIdDomain::Item, &id)?;
+            item.insert("id".into(), alias.into());
+        }
+        if let Some(call) = item
+            .get("call_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        {
+            if output
+                && kind.ends_with("_call")
+                && call.starts_with("call_")
+                && call.len() > 5
+                && editor
+                    .existing_wire_from_downstream(WireIdDomain::Call, &call)?
+                    .is_none()
+            {
+                let alias = editor.wire_from_upstream(WireIdDomain::Call, &call)?;
+                calls.insert(call.clone(), alias.clone());
+                item.insert("call_id".into(), alias.into());
+            } else if kind.ends_with("_output")
+                && let Some(alias) = calls.get(&call)
+            {
+                item.insert("call_id".into(), alias.clone().into());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn translate_request_object(
     editor: &mut RequestStateEditor<'_>,
     object: &mut Map<String, Value>,

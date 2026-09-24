@@ -274,121 +274,49 @@ func assertResponsesProfileHTTPBody(t *testing.T, body []byte, lite, hasExplicit
 }
 
 func responsesProfileShellBoundariesValid(input any) bool {
-	items, _ := input.([]any)
-	for _, item := range items {
-		object, _ := item.(map[string]any)
-		if object["type"] != "shell_call" {
-			continue
-		}
-		action, _ := object["action"].(map[string]any)
-		agent, _ := object["agent"].(map[string]any)
-		_, actionUnknown := action["unsupported_shell_action"]
-		_, agentUnknown := agent["unsupported_agent"]
-		return action["max_output_length"] == float64(256) && agent["agent_name"] == "profile-worker" &&
-			!actionUnknown && !agentUnknown
-	}
-	return false
+	return !containsResponseProfileItem(input, "shell_call") && !containsResponseProfileItem(input, "shell_call_output")
 }
 
 func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, websocket, subscription bool) {
 	t.Helper()
-	for _, field := range []string{
-		"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store",
-		"include", "service_tier", "text", "context_management", "max_tool_calls",
-		"moderation", "prompt", "prompt_cache_options", "top_logprobs",
-	} {
+	for _, field := range []string{"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store", "include", "service_tier", "text"} {
 		if _, exists := value[field]; !exists {
-			t.Fatalf("Responses field %q was removed", field)
+			t.Fatalf("native field %q missing", field)
 		}
 	}
-	for _, field := range []string{"max_output_tokens", "temperature", "top_p", "stream_options"} {
-		_, exists := value[field]
-		if exists == subscription {
-			t.Fatalf("Subscription-only field policy mismatch for %q", field)
-		}
-	}
-	if websocket {
-		if value["stream"] != true {
-			t.Fatal("native WS stream flag is missing")
-		}
-		for _, field := range []string{"background"} {
-			if _, exists := value[field]; exists {
-				t.Fatalf("unsupported WebSocket field %q survived", field)
-			}
-		}
-	} else {
-		for _, field := range []string{"stream", "background"} {
-			if _, exists := value[field]; !exists {
-				t.Fatalf("HTTP Responses field %q was removed", field)
-			}
-		}
-		if value["store"] != false || value["stream"] != true {
-			t.Fatal("HTTP Codex profile did not pin store=false and stream=true")
-		}
-	}
-	if _, exists := value["unsupported_profile_sentinel"]; exists {
-		t.Fatal("unsupported top-level field was not stripped")
-	}
-	for _, field := range []string{
-		"metadata", "user", "prompt_cache_retention", "safety_identifier", "truncation",
-	} {
+	for _, field := range []string{"context_management", "max_tool_calls", "moderation", "prompt", "prompt_cache_options", "top_logprobs", "background", "stream_id",
+		"max_output_tokens", "temperature", "top_p", "stream_options", "unsupported_profile_sentinel", "metadata", "user", "prompt_cache_retention", "safety_identifier", "truncation"} {
 		if _, exists := value[field]; exists {
-			t.Fatalf("Codex-incompatible field %q crossed upstream", field)
+			t.Fatalf("non-native field %q crossed upstream", field)
 		}
 	}
-	prompt, ok := value["prompt"].(map[string]any)
-	if !ok || !jsonEqual(prompt["variables"], map[string]any{"opaque_prompt_sentinel": "retain"}) {
-		t.Fatal("prompt free-form key did not round trip")
-	}
-	context, ok := value["context_management"].([]any)
-	if !ok || len(context) != 1 {
-		t.Fatal("context_management did not retain its documented array shape")
-	}
-	contextEntry, ok := context[0].(map[string]any)
-	if !ok || contextEntry["type"] != "compaction" || contextEntry["compact_threshold"] != float64(1200) {
-		t.Fatal("context_management documented members did not round trip")
-	}
-	if _, exists := contextEntry["unsupported_context_sentinel"]; exists {
-		t.Fatal("context_management unsupported member was not stripped")
-	}
-	moderation, ok := value["moderation"].(map[string]any)
-	if !ok || moderation["model"] != "omni-moderation-latest" || moderation["policy"] != "default" {
-		t.Fatal("moderation documented members did not round trip")
-	}
-	if _, exists := moderation["unsupported_moderation_sentinel"]; exists {
-		t.Fatal("moderation unsupported member was not stripped")
-	}
-	cache, ok := value["prompt_cache_options"].(map[string]any)
-	if !ok || cache["mode"] != "explicit" || cache["ttl"] != "30m" {
-		t.Fatal("prompt_cache_options documented members did not round trip")
-	}
-	if _, exists := cache["unsupported_cache_sentinel"]; exists {
-		t.Fatal("prompt_cache_options unsupported member was not stripped")
+	if value["store"] != false || value["stream"] != true || value["tool_choice"] != "auto" || !jsonEqual(value["include"], []any{"reasoning.encrypted_content"}) {
+		t.Fatal("ordinary native controls differ")
 	}
 	if !responsesProfileToolBoundariesValid(value) {
-		t.Fatal("schema free-form content or structured custom-tool filtering is incorrect")
+		t.Fatal("native tool schema boundary differs")
 	}
 	if lite {
 		if _, exists := value["tools"]; exists {
-			t.Fatal("Lite profile kept top-level tools")
+			t.Fatal("Lite top-level tools")
 		}
 		if _, exists := value["instructions"]; exists {
-			t.Fatal("Lite profile kept top-level instructions")
+			t.Fatal("Lite top-level instructions")
 		}
 		input, ok := value["input"].([]any)
 		if !ok || len(input) < 2 {
-			t.Fatal("Lite profile is missing its tools/base prefix")
+			t.Fatal("missing Lite prefix")
 		}
 		assertDeveloperMessageText(t, input[1], "unit instruction")
 		return
 	}
 	for _, field := range []string{"instructions", "tools", "prompt_cache_key", "client_metadata"} {
 		if _, exists := value[field]; !exists {
-			t.Fatalf("normal profile removed Responses field %q", field)
+			t.Fatalf("native field %q missing", field)
 		}
 	}
 	if value["instructions"] != "unit instruction" {
-		t.Fatal("normal profile caller base instructions changed")
+		t.Fatal("caller base changed")
 	}
 }
 
@@ -404,7 +332,7 @@ func responsesProfileToolBoundariesValid(value any) bool {
 		case map[string]any:
 			if value["type"] == "function" && value["name"] == "lookup" {
 				functionSchema = jsonEqual(value["parameters"], map[string]any{
-					"type": "object", "x-profile-schema-sentinel": map[string]any{"retain": true},
+					"type": "object", "properties": map[string]any{},
 				})
 			}
 			if value["type"] == "custom" && value["name"] == "profile_custom" {
@@ -445,11 +373,8 @@ func assertResponsesProfileImageDetails(t *testing.T, input any, lite bool) {
 		_, hasDetail := image["detail"]
 		explicitLow := image["image_url"] == "data:image/png;base64,AQ=="
 		if lite {
-			if explicitLow && image["detail"] != "low" {
-				t.Fatalf("Lite image %d did not preserve explicit detail", index)
-			}
-			if !explicitLow && hasDetail {
-				t.Fatalf("Lite image %d synthesized detail", index)
+			if hasDetail {
+				t.Fatalf("Lite image %d retained detail", index)
 			}
 		} else {
 			want := "high"

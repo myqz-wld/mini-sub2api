@@ -13,8 +13,6 @@ use crate::responses_websocket_state::{
     EventDisposition, ObservedServerEvent, OperationPhase, ResponsesWebSocketState,
 };
 use crate::server::{AppState, account_lock, header_text, resolve_auth, validate_internal_request};
-use crate::transport_registry::CredentialTransportContext;
-use crate::upstream_request::{ResolvedAuth, build_websocket};
 use crate::vault::Vault;
 use crate::websocket_connector::{WebSocketConnection as UpstreamWebSocket, WebSocketHandshake};
 use crate::websocket_delivery::{
@@ -40,6 +38,7 @@ use std::time::Instant;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamCloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as UpstreamCloseCode;
+use tracing::Instrument;
 
 #[path = "responses_websocket_initial.rs"]
 mod initial;
@@ -96,7 +95,12 @@ async fn responses_socket_inner(
             .max_message_size(crate::inference_limits::get().request_bytes)
             .max_frame_size(crate::inference_limits::get().request_bytes)
             .on_upgrade(move |internal| async move {
-                crate::responses_websocket_deferred::run(internal, context).await;
+                crate::responses_websocket_deferred::run(internal, context)
+                    .instrument(tracing::info_span!(
+                        "websocket_request",
+                        request_id = gateway_request_id
+                    ))
+                    .await;
             })
             .into_response());
     }
@@ -150,26 +154,7 @@ async fn responses_socket_inner(
     Ok(response)
 }
 
-pub(crate) async fn send_handshake(
-    transport: &CredentialTransportContext,
-    headers: &HeaderMap,
-    upstream_url: &str,
-    auth: &ResolvedAuth,
-    profile: UpstreamProfile,
-) -> Result<WebSocketHandshake, CoreFailure> {
-    let (request, config) = build_websocket(
-        headers,
-        upstream_url,
-        auth,
-        profile,
-        crate::inference_limits::get().output_bytes,
-    )?;
-    transport
-        .websocket_connector_for_url(upstream_url)
-        .connect(request, config)
-        .await
-        .map_err(|_| CoreFailure::UpstreamConnectFailed)
-}
+pub(crate) use crate::responses_websocket_http::send_handshake;
 
 #[path = "responses_websocket_relay_context.rs"]
 mod relay_context;

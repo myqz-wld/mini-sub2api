@@ -93,6 +93,7 @@ fn canonicalizes_nested_additional_properties_schema() {
         tools[0]["parameters"],
         serde_json::json!({
             "type": "object",
+            "properties": {},
             "additionalProperties": {
                 "type": "string",
                 "description": "nested"
@@ -149,102 +150,17 @@ fn canonicalizes_codex_output_schema_controls() {
 }
 
 #[test]
-fn filters_documented_tool_variants_without_touching_free_form_containers() {
+fn filters_non_native_tool_variants_without_traversing_business_enums() {
     let tools = canonicalize_tools(vec![
-        serde_json::json!({
-            "type":"file_search",
-            "vector_store_ids":["vs_test"],
-            "filters":{"key":"kind","type":"eq","value":"doc","unsupported_filter":true},
-            "ranking_options":{
-                "hybrid_search":{"embedding_weight":0.5,"text_weight":0.5,"unsupported_hybrid":true},
-                "ranker":"auto","score_threshold":0.1,"unsupported_ranking":true
-            },
-            "unsupported_tool":true
-        }),
-        serde_json::json!({
-            "type":"mcp","server_label":"docs","server_url":"https://example.test/mcp",
-            "headers":{"x-free-form-header":"preserved"},
-            "allowed_tools":[{"read_only":true,"tool_names":["lookup"],"unsupported_filter":true}],
-            "require_approval":{"always":{"read_only":true,"unsupported_filter":true},"unsupported_approval":true},
-            "unsupported_tool":true
-        }),
-        serde_json::json!({
-            "type":"code_interpreter",
-            "container":{
-                "type":"auto","file_ids":["file_test"],
-                "network_policy":{"type":"allowlist","allowed_domains":["example.test"],"unsupported_policy":true},
-                "unsupported_container":true
-            },
-            "unsupported_tool":true
-        }),
-        serde_json::json!({
-            "type":"image_generation","action":"edit",
-            "input_image_mask":{"file_id":"file_mask","image_url":"data:image/png;base64,AA==","unsupported_mask":true},
-            "quality":"high","unsupported_tool":true
-        }),
-        serde_json::json!({
-            "type":"shell","allowed_callers":["direct"],
-            "environment":{
-                "type":"container_auto","memory_limit":"1g",
-                "skills":[{"type":"inline","name":"skill","description":"test","source":{
-                    "type":"base64","media_type":"application/zip","data":"AA==","unsupported_source":true
-                },"unsupported_skill":true}],
-                "unsupported_environment":true
-            },
-            "unsupported_tool":true
-        }),
-        serde_json::json!({
-            "type":"future_tool","name":"documented-field-name","unsupported_tool":true
-        }),
+        serde_json::json!({"type":"file_search"}),
+        serde_json::json!({"type":"mcp","headers":{"synthetic":"opaque"}}),
+        serde_json::json!({"type":"function","name":"native","parameters":{"type":"string","enum":[{"const":"opaque","name":"opaque"}]}}),
     ]);
-
-    for tool in &tools {
-        assert!(tool.get("unsupported_tool").is_none());
-    }
-    assert!(tools[0]["filters"].get("unsupported_filter").is_none());
-    assert!(
-        tools[0]["ranking_options"]
-            .get("unsupported_ranking")
-            .is_none()
+    assert_eq!(tools.len(), 1);
+    assert_eq!(
+        tools[0]["parameters"]["enum"][0],
+        serde_json::json!({"const":"opaque","name":"opaque"})
     );
-    assert!(
-        tools[0]["ranking_options"]["hybrid_search"]
-            .get("unsupported_hybrid")
-            .is_none()
-    );
-    assert_eq!(tools[1]["headers"]["x-free-form-header"], "preserved");
-    assert!(
-        tools[1]["allowed_tools"][0]
-            .get("unsupported_filter")
-            .is_none()
-    );
-    assert!(
-        tools[1]["require_approval"]
-            .get("unsupported_approval")
-            .is_none()
-    );
-    assert!(tools[2]["container"].get("unsupported_container").is_none());
-    assert!(
-        tools[2]["container"]["network_policy"]
-            .get("unsupported_policy")
-            .is_none()
-    );
-    assert!(
-        tools[3]["input_image_mask"]
-            .get("unsupported_mask")
-            .is_none()
-    );
-    assert!(
-        tools[4]["environment"]["skills"][0]
-            .get("unsupported_skill")
-            .is_none()
-    );
-    assert!(
-        tools[4]["environment"]["skills"][0]["source"]
-            .get("unsupported_source")
-            .is_none()
-    );
-    assert_eq!(tools[5]["name"], "documented-field-name");
 }
 
 #[test]
@@ -267,7 +183,10 @@ fn mixed_default_namespaces_keep_native_position_order_and_latest_nonblank_descr
             .collect::<Vec<_>>(),
         ["a", "b", "a"]
     );
-    assert_eq!(tools[0]["parameters"]["const"], "opaque");
+    assert_eq!(
+        tools[0]["parameters"]["enum"],
+        serde_json::json!(["opaque"])
+    );
     assert!(
         group_tools(vec![
             serde_json::json!({"type":"namespace","name":"functions","tools":[]})

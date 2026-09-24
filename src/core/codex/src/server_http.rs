@@ -37,7 +37,7 @@ pub(super) async fn responses_inner(
         let _guard = diagnostics
             .wait("credential_lock", account_lock.lock())
             .await;
-        let resolved = diagnostics
+        let mut resolved = diagnostics
             .wait(
                 "credential_resolution",
                 resolve_auth(state, &account_ref, None),
@@ -126,12 +126,20 @@ pub(super) async fn responses_inner(
         } else {
             (forward_headers, body)
         };
+        let persistent = !profile.emulates_codex()
+            || forward_headers
+                .get("x-codex-guardian")
+                .is_some_and(|v| v == "classifier");
+        let client = resolved
+            .transport
+            .inference_client(&resolved.upstream_url, persistent)
+            .map_err(|_| CoreFailure::UpstreamConnectFailed)?;
         let started = Instant::now();
         let mut upstream = diagnostics
             .wait(
                 "upstream_request",
                 send_upstream(
-                    &resolved.transport,
+                    &client,
                     &forward_headers,
                     &resolved.upstream_url,
                     &resolved.auth,
@@ -148,7 +156,14 @@ pub(super) async fn responses_inner(
             http_status = upstream.status().as_u16(),
             elapsed_ms = started.elapsed().as_millis() as u64
         );
-        if upstream.status() == StatusCode::UNAUTHORIZED && profile.uses_oauth_refresh() {
+        // Managed native recovery is bounded: reload (even unchanged), then refresh.
+        for (step, phase) in ["credential_reload", "credential_refresh"]
+            .into_iter()
+            .enumerate()
+        {
+            if upstream.status() != StatusCode::UNAUTHORIZED || !profile.uses_oauth_refresh() {
+                break;
+            }
             let failed_access_token = match &resolved.auth {
                 ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
                 ResolvedAuth::OpenAiApiKey { .. } => return Err(CoreFailure::Internal),
@@ -156,48 +171,57 @@ pub(super) async fn responses_inner(
             tracing::info!(
                 event = "upstream_auth_retry",
                 request_id = gateway_request_id,
-                attempt = 2
+                attempt = step + 2,
+                phase
             );
-            let _guard = diagnostics
+            let guard = diagnostics
                 .wait("credential_refresh_lock", account_lock.lock())
                 .await;
-            let retry = diagnostics
-                .wait(
-                    "credential_refresh",
-                    resolve_auth(state, &account_ref, Some(&failed_access_token)),
-                )
-                .await?;
-            drop(_guard);
+            let retry = if step == 0 {
+                diagnostics
+                    .wait(phase, crate::server::reload_auth(state, &account_ref))
+                    .await?
+            } else {
+                diagnostics
+                    .wait(
+                        phase,
+                        resolve_auth(state, &account_ref, Some(&failed_access_token)),
+                    )
+                    .await?
+            };
+            drop(guard);
+            crate::server::validate_recovery_owner(&resolved, &retry)?;
             let retry_headers = headers_for_retry(&forward_headers);
             upstream = diagnostics
                 .wait(
                     "upstream_request",
                     send_upstream(
-                        &retry.transport,
+                        &client,
                         &retry_headers,
                         &retry.upstream_url,
                         &retry.auth,
                         profile,
-                        body,
+                        body.clone(),
                         &gateway_request_id,
                     ),
                 )
                 .await?;
+            resolved = retry;
             tracing::info!(
                 event = "upstream_headers",
                 request_id = gateway_request_id,
-                attempt = 2,
+                attempt = step + 2,
                 http_status = upstream.status().as_u16(),
                 elapsed_ms = started.elapsed().as_millis() as u64
             );
-            if upstream.status() == StatusCode::UNAUTHORIZED {
-                return build_http_failure_response(
-                    upstream,
-                    started.elapsed().as_millis(),
-                    &gateway_request_id,
-                    &CoreFailure::UpstreamAuthFailed,
-                );
-            }
+        }
+        if upstream.status() == StatusCode::UNAUTHORIZED && profile.uses_oauth_refresh() {
+            return build_http_failure_response(
+                upstream,
+                started.elapsed().as_millis(),
+                &gateway_request_id,
+                &CoreFailure::UpstreamAuthFailed,
+            );
         }
         let ttfb_ms = started.elapsed().as_millis();
         diagnostics.phase("response_state");
@@ -244,7 +268,7 @@ pub(super) async fn responses_inner(
 }
 
 async fn send_upstream(
-    transport: &CredentialTransportContext,
+    client: &reqwest::Client,
     inbound_headers: &HeaderMap,
     upstream_url: &str,
     auth: &ResolvedAuth,
@@ -252,7 +276,6 @@ async fn send_upstream(
     body: bytes::Bytes,
     request_id: &str,
 ) -> std::result::Result<reqwest::Response, CoreFailure> {
-    let client = transport.http_client_for_url(upstream_url);
     let request =
         build_upstream_request(client, inbound_headers, upstream_url, auth, profile, body)?;
     client.execute(request).await.map_err(|error| {

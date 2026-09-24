@@ -38,6 +38,31 @@ Usage belongs to the Key. Details default to seven days; `serve --usage-retentio
 and `0` disables automatic pruning. Daily aggregates survive. A bounded provider request ID may be
 retained in private diagnostics, never exposed publicly.
 
+## Ignored-field diagnostics
+
+Subscription normalization emits `codex_ignored_field` before the prepared request reaches the
+sender. Each event has static `path`, `field`, `reason`, `stage`, `profile`, `transport`, `role`,
+bounded `model`, and aggregate `count`; the request span supplies the gateway request ID (the
+connection ID for WS). Group these labels and sum count to analyze unsupported input over time.
+Unknown field names use `unknown`, since even a caller-selected key can contain a secret. Values,
+bodies, business property names, URLs, credentials and machine paths are never recorded.
+
+Required identities, dependency references and authorization still fail closed; ignoring a field
+does not grant a reference to another scope. Admission and construction each aggregate at most 16 distinct labels plus one
+`codex_ignored_fields_overflow` event: at most 34 diagnostic lines per request/create. Repeated
+fields share one count; overflow reports omitted occurrences. Recording happens before mutation,
+then the bounded aggregate is flushed before sending (also on normalization errors). There is no
+separate diagnostic database, retained body, LLM call or background analysis service.
+
+```bash
+sudo journalctl -u mini-sub2api.service --since '1 day ago' -o cat --no-pager | rg 'codex_ignored_field'
+```
+
+These events reuse stderr/tracing and the service's existing journald pipeline. Journal rotation is
+owned by the host's journald size/retention policy; the application sets no N-day runtime-log limit.
+`--usage-retention-days` controls SQLite usage details only (startup and daily cleanup), not journal
+logs. Daily usage aggregates are retained. No journal policy is changed by this feature.
+
 ## Diagnosing long requests
 
 Start with the public `X-Mini-Sub2Api-Request-Id`; it joins coordinator and Core logs:
@@ -50,7 +75,7 @@ sudo journalctl -u mini-sub2api.service --since '30 minutes ago' -o cat --no-pag
 |---|---|
 | `http_request_started`, `http_forward_started` | Accepted request, then buffered body forwarded; `request_bytes` and `body_tag` help recognize repeated attempts. |
 | `core_http_progress` | Waiting phase: credential lock/refresh, normalization or upstream headers. |
-| `upstream_headers`, `upstream_auth_retry` | HTTP status, attempt 1/2 and time since the initial send; retry 2 is the existing OAuth 401 refresh path. Subscription span fields show allowlisted model/effort before and after defaults. API-key passthrough does not parse extra metadata. |
+| `upstream_headers`, `upstream_auth_retry` | HTTP status, attempts 1–3 and time since the initial send; managed OAuth 401 recovery reloads then refreshes once, with account/route checks. Subscription span fields show allowlisted model/effort before and after defaults. API-key passthrough does not parse extra metadata. |
 | `core_http_response` | Response constructed or failed; `response_ready` only means handoff, not inference completion. |
 | `http_sse_progress`, `http_stream_progress` | Core/Go body bytes, event classes and first/last byte/event/output times. Core also reports byte/output idle time. |
 | `transport_error`, `request_failure` | Layer/phase, typed I/O/HTTP/TLS category and available OS/TLS/HTTP2 numeric codes. HTTP2 includes reset/GOAWAY and remote flags. Error-source traversal stops at 16 links. |

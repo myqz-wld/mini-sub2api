@@ -4,7 +4,7 @@ use serde_json::json;
 // Byte order from Codex 0.156.0 tools/src/json_schema/types.rs at fe74a774532a.
 // Literal expected bytes deliberately do not use the normalizer's ordering table.
 const ARRAY: &str = r#"{"type":"array","items":{"type":"string"},"minItems":1}"#;
-const COMPOSED_ARRAY: &str = r#"{"type":"array","items":{"type":"string"},"minItems":1,"anyOf":[{"type":"array"}],"oneOf":[{"type":"array"}],"allOf":[{"type":"array"}],"$defs":{"entry":{"type":"string"}}}"#;
+const COMPOSED_ARRAY: &str = r#"{"type":"array","items":{"type":"string"},"minItems":1,"anyOf":[{"type":"array","items":{"type":"string"}}],"oneOf":[{"type":"array","items":{"type":"string"}}],"allOf":[{"type":"array","items":{"type":"string"}}]}"#;
 
 #[test]
 fn min_items_matches_official_order_in_simple_and_composed_schemas() {
@@ -26,12 +26,11 @@ fn min_items_matches_official_order_in_simple_and_composed_schemas() {
         );
         let tools = canonicalize_tools(vec![json!({"type":"function","name":"lookup",
             "parameters":{"type":"object","properties":{"values":reverse},
-            "additionalProperties":reverse,"anyOf":[reverse],"$defs":{"entry":reverse}}})]);
+            "additionalProperties":reverse,"anyOf":[reverse]}})]);
         for schema in [
             &tools[0]["parameters"]["properties"]["values"],
             &tools[0]["parameters"]["additionalProperties"],
             &tools[0]["parameters"]["anyOf"][0],
-            &tools[0]["parameters"]["$defs"]["entry"],
         ] {
             assert_eq!(serde_json::to_string(schema).unwrap(), expected);
         }

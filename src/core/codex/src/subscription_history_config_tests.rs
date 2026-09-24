@@ -49,6 +49,10 @@ async fn current_settings_do_not_split_verified_anonymous_history() {
             assert_eq!(emitted[field].as_array().unwrap().len(), 1);
             assert!(emitted[field][0]["name"] == "current_tool");
             assert!(emitted[field][0]["parameters"]["type"] == "object");
+        } else if field == "tool_choice" {
+            assert_eq!(emitted[field], "auto");
+        } else if field == "include" {
+            assert_eq!(emitted[field], json!(["reasoning.encrypted_content"]));
         } else if field == "prompt_cache_key" {
             assert!(emitted[field] == current.session_id);
         } else {
@@ -331,4 +335,54 @@ async fn formed_lite_current_settings_are_separate_from_its_actual_input_prefix(
     drop(prepared);
     first["input"][1]["content"] = "edited input base".into();
     assert!(plan(&store, &first, KEY).unwrap().baseline.is_none());
+}
+
+#[tokio::test]
+async fn disabled_configuration_updates_remain_in_stored_history_only() {
+    let (_temp, store) = store();
+    let update = json!({"type":"configuration_update","reasoning":{"effort":"high"}});
+    let first = prepare(&store, request(json!([update, input("first")])))
+        .await
+        .unwrap();
+    let session = first.resolved_identity.as_ref().unwrap().session_id.clone();
+    let wire: Value = serde_json::from_slice(&first.body).unwrap();
+    assert!(
+        wire["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["type"] != "configuration_update")
+    );
+    let response = publish(&store, first, "resp_update_history", json!([assistant()])).await;
+    let next = request(json!([
+        update,
+        input("first"),
+        response["output"][0],
+        input("next")
+    ]));
+    let plan = plan(&store, &next, KEY).unwrap();
+    assert!(
+        plan.baseline
+            .as_ref()
+            .unwrap()
+            .history
+            .as_ref()
+            .unwrap()
+            .values()
+            .contains(&update)
+    );
+    drop(plan);
+    let prepared = prepare(&store, next).await.unwrap();
+    assert_eq!(
+        prepared.resolved_identity.as_ref().unwrap().session_id,
+        session
+    );
+    let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
+    assert!(
+        wire["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["type"] != "configuration_update")
+    );
 }

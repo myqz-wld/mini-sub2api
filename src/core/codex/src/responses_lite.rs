@@ -15,7 +15,8 @@ use tools::canonical_tool;
 
 const DEFAULT_NAMESPACE: &str = "functions";
 
-pub(crate) fn group_tools(tools: Vec<Value>) -> Vec<Value> {
+pub(crate) fn group_tools(mut tools: Vec<Value>) -> Vec<Value> {
+    crate::native_request_policy::filter_tools(&mut tools, false);
     let mut functions = Vec::new();
     let mut functions_index = None;
     let mut description = String::new();
@@ -67,7 +68,8 @@ fn is_default_namespace(tool: &Value) -> bool {
         && tool.get("tools").is_some_and(Value::is_array)
 }
 
-pub(crate) fn canonicalize_tools(tools: Vec<Value>) -> Vec<Value> {
+pub(crate) fn canonicalize_tools(mut tools: Vec<Value>) -> Vec<Value> {
+    crate::native_request_policy::filter_tools(&mut tools, false);
     tools.into_iter().map(canonical_tool).collect()
 }
 
@@ -136,16 +138,8 @@ pub(crate) fn canonicalize_request_items(
             *tool = canonical_tool(std::mem::take(tool));
         }
     }
-    reorder_member(
-        request,
-        "reasoning",
-        &["effort", "summary", "context", "generate_summary", "mode"],
-    );
-    reorder_member(
-        request,
-        "stream_options",
-        &["include_obfuscation", "reasoning_summary_delivery"],
-    );
+    reorder_member(request, "reasoning", &["effort", "summary", "context"]);
+    reorder_member(request, "stream_options", &["reasoning_summary_delivery"]);
     reorder_member(request, "text", &["verbosity", "format"]);
     if let Some(format) = request
         .get_mut("text")
@@ -162,9 +156,6 @@ pub(crate) fn canonicalize_request_items(
                 .or_insert_with(|| Value::String("codex_output_schema".to_string()));
         }
         reorder(format, &["type", "strict", "schema", "name", "description"]);
-        if let Some(schema) = format.get_mut("schema") {
-            self::schema::canonicalize(schema);
-        }
     }
 }
 
@@ -196,6 +187,7 @@ fn reorder_member(object: &mut Map<String, Value>, name: &str, order: &[&str]) {
 }
 
 fn reorder(object: &mut Map<String, Value>, order: &[&str]) {
+    crate::ignored_fields::retain(object, order, "request.member");
     let mut existing = std::mem::take(object);
     for name in order {
         if let Some(value) = existing.remove(*name) {
@@ -211,3 +203,7 @@ mod tests;
 #[cfg(test)]
 #[path = "responses_schema_order_tests.rs"]
 mod schema_order_tests;
+
+pub(crate) fn valid_tool_parameters(value: &Value) -> bool {
+    schema::valid_input(value)
+}

@@ -33,6 +33,7 @@ pub(super) fn apply(object: &mut Map<String, Value>, headers: &mut HeaderMap) ->
     for name in [ROOT_TURN_ID, PARENT_TURN_ID, TURN_STARTED_AT] {
         turn.remove(name);
     }
+    super::turn_metadata::canonical_order(turn);
     let serialized = to_ascii_json_string(&Value::Object(turn.clone())).map_err(|_| ())?;
 
     metadata.insert(TURN_ID.to_string(), Value::String(String::new()));

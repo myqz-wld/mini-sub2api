@@ -138,13 +138,20 @@ every supplied input item to that exact response, including repetitions.
 
 | Overlay | Wire behavior |
 |---|---|
-| Unsupported controls | Remove `max_output_tokens`, `temperature`, `top_p`, `metadata`, `user`, `prompt_cache_retention`, `safety_identifier`, `truncation`, and unsupported structured members. Preserve schema-owned opaque payloads. |
-| Supported options | Retain `stream_options.reasoning_summary_delivery=sequential_cutoff` and explicit `access_programs.cyber`: `standard`, `daybreak_blue`, `daybreak_red`. Do not invent entitlement. |
-| HTTP / WS | HTTP removes `type`, `generate`, `stream_id`; WS removes `background`. Both send `store:false`, `stream:true`. |
+| Unsupported controls | Log bounded static field labels, then omit fields outside native request/tool/history types, including `max_tool_calls`, `top_logprobs`, `background`, `prompt`, `stream_id`, sampling/output controls and unsupported structured members. Preserve business enum values and free output schemas. |
+| Supported options | Retain `stream_options.reasoning_summary_delivery=sequential_cutoff` only with an effective summary, and explicit `access_programs.cyber`: `standard`, `daybreak_blue`, `daybreak_red`. Do not invent entitlement. |
+| HTTP / WS | HTTP removes `type`, `generate` and reconstructed references; both remove `stream_id` and `background`. Both send `store:false`, `stream:true`. |
 | Lite | `parallel_tool_calls:false`, `reasoning.context:all_turns`; caller/upstream format remains distinct. |
-| Input | Map system→developer in place; historical assistant strings use `output_text`. Non-Lite missing image detail defaults to `high`; Lite leaves it absent. |
-| IDs | Project caller inline IDs; ordinary omitted message IDs stay omitted. Required references must resolve. Native Lite prefix UUIDv5 uses OID + thread, then exact tools bytes/base text. |
+| Input | Map system→developer in place; historical assistant strings use `output_text`. Non-Lite missing image detail defaults to `high`; Lite removes explicit detail as well. |
+| IDs | Reverse known aliases first; preserve validated imported native output declarations; project other caller IDs; ordinary omitted message IDs stay omitted. Required references must resolve. Native Lite prefix UUIDv5 uses OID + thread, then exact tools bytes/base text. |
 | Public HTTP output | Retain caller stream preference: translated SSE when true, otherwise the final response object as bounded JSON. API-key traffic stays byte-transparent. |
+
+Ordinary/reviewer requests construct `tool_choice:auto`, encrypted reasoning include, and fixed
+output-schema names; classifiers construct `none`, empty include and no text. Tool schemas lower
+schema-position const to enum and retain the native subset. Output schemas remain free ordered JSON
+with arbitrary-precision numbers. Fixed feature policy stores configuration_update history but
+omits those items from final sends. Named function outputs may omit call_id; explicit null and
+unresolved/cross-scope references still fail closed. See [diagnostics](../../../docs/OPERATIONS.md#ignored-field-diagnostics).
 
 Caller instructions remain verbatim, including whitespace/placeholders; missing/invalid bases are
 omitted, never filled from model defaults. Ordinary-to-Lite emits tools, optional caller-base developer

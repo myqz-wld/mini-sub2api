@@ -243,6 +243,12 @@ fn validate_tools(tools: &[Value]) -> Result<(), Error> {
         {
             return Err(Error::InvalidRequest);
         }
+        if matches!(kind, "function" | "tool_search")
+            && let Some(parameters) = object.get("parameters")
+            && !crate::responses_lite::valid_tool_parameters(parameters)
+        {
+            return Err(Error::InvalidRequest);
+        }
         if kind == "namespace" {
             validate_tools(
                 object
@@ -286,7 +292,16 @@ impl Dependencies {
                 self.items.insert(id);
             }
             let call = optional_id(item.get("call_id"))?;
-            if uses_direct_call_reference(kind) && call.is_none() {
+            let named_output = kind == "function_call_output"
+                && item.get("call_id").is_none()
+                && item
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| !name.trim().is_empty())
+                && item
+                    .get("output")
+                    .is_some_and(|v| v.is_string() || v.is_array());
+            if uses_direct_call_reference(kind) && call.is_none() && !named_output {
                 return Err(Error::InvalidRequest);
             }
             if let Some(call) = call {

@@ -38,10 +38,7 @@ async fn native_1560_prefixes_are_stable_and_supported_per_response_controls_sur
             value["input"][1]["id"],
             format!("msg_{}", uuid::Uuid::new_v5(&namespace, base.as_bytes()))
         );
-        assert_eq!(
-            value["stream_options"]["reasoning_summary_delivery"],
-            "sequential_cutoff"
-        );
+        assert!(value.get("stream_options").is_none());
         assert_eq!(value["reasoning"]["context"], "all_turns");
     }
     assert_eq!(captures[0]["input"][0]["id"], captures[1]["input"][0]["id"]);
@@ -64,7 +61,6 @@ async fn unsupported_native_requirements_fail_before_inference() {
     let (state, account, _temp) = subscription_state(&upstream.base_url).await;
     for member in [
         json!({"access_programs":{"cyber":"invented"}}),
-        json!({"access_programs":{"cyber":"standard","extra":true}}),
         json!({"stream_options":{"reasoning_summary_delivery":"invented"}}),
         json!({"reasoning":{"context":"last_turn"}}),
     ] {
@@ -83,6 +79,18 @@ async fn unsupported_native_requirements_fail_before_inference() {
         assert!(matches!(failure, CoreFailure::InvalidRequest));
     }
     assert_eq!(captures.lock().await.len(), 0);
+    request(
+        &state,
+        &account,
+        json!({"model":"gpt-6-astra","input":[user("known program")],
+        "access_programs":{"cyber":"standard","extra":"private-ignored"}}),
+        HeaderMap::new(),
+    )
+    .await;
+    assert_eq!(
+        captures.lock().await[0]["access_programs"],
+        json!({"cyber":"standard"})
+    );
 }
 
 #[tokio::test]

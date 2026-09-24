@@ -21,9 +21,10 @@ async fn codex1560_generated_lite_setup_has_no_invented_turn_attribution() {
                 .get("internal_chat_message_metadata_passthrough")
                 .is_none()
         );
-        assert_eq!(
-            body["input"][1]["internal_chat_message_metadata_passthrough"],
-            json!({})
+        assert!(
+            body["input"][1]
+                .get("internal_chat_message_metadata_passthrough")
+                .is_none()
         );
         assert!(
             body["input"][2]["internal_chat_message_metadata_passthrough"]["create_time"]
@@ -83,7 +84,7 @@ async fn codex1560_configuration_updates_and_tool_evidence_survive_both_transpor
                 input
                     .iter()
                     .find(|item| item["type"] == "configuration_update"),
-                Some(&update)
+                None
             );
             let message = input.iter().find(|item| item["role"] == "user").unwrap();
             assert_eq!(

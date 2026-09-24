@@ -83,7 +83,13 @@ pub(crate) fn prepare_codex_overlay_for_test(
     body: Bytes,
     max_bytes: usize,
 ) -> Result<PreparedEmulatedRequest, ()> {
-    prepare_codex_overlay(upstream_profile, transport, headers, body, max_bytes, false)
+    let mut prepared =
+        prepare_codex_overlay(upstream_profile, transport, headers, body, max_bytes, false)?;
+    let mut object =
+        serde_json::from_slice::<serde_json::Map<String, Value>>(&prepared.body).map_err(|_| ())?;
+    crate::native_request_policy::filter_send_only(&mut object, transport);
+    prepared.body = Bytes::from(serde_json::to_vec(&object).map_err(|_| ())?);
+    Ok(prepared)
 }
 
 pub(crate) async fn prepare_identity_request(
@@ -188,6 +194,7 @@ pub(crate) async fn prepare_identity_request(
                             Ok::<_, anyhow::Error>((plan, format, lineage))
                         })
                         .transpose()?;
+                    crate::native_request_policy::filter_send_only(&mut object, transport);
                     let encoded = serde_json::to_vec(&Value::Object(object))?;
                     anyhow::ensure!(
                         encoded.len() <= max_bytes_for_edit,

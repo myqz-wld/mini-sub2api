@@ -33,6 +33,7 @@ struct TransportKey {
 }
 
 pub(crate) struct CredentialTransportContext {
+    factory: Arc<TransportFactory>,
     http: Client,
     direct_http: Client,
     websocket: WebSocketConnector,
@@ -40,6 +41,19 @@ pub(crate) struct CredentialTransportContext {
 }
 
 impl CredentialTransportContext {
+    pub(crate) fn inference_client(&self, url: &str, persistent: bool) -> Result<Client> {
+        if persistent {
+            return Ok(self.http_client_for_url(url).clone());
+        }
+        let builder = self.factory.http_builder()?;
+        let builder = if has_literal_loopback_host(url) {
+            builder.no_proxy()
+        } else {
+            builder
+        };
+        builder.build().context("building inference HTTP client")
+    }
+
     pub(crate) fn http_client_for_url(&self, url: &str) -> &Client {
         if has_literal_loopback_host(url) {
             &self.direct_http
@@ -59,7 +73,7 @@ impl CredentialTransportContext {
 
 pub(crate) struct TransportRegistry {
     contexts: Mutex<HashMap<TransportKey, Arc<CredentialTransportContext>>>,
-    factory: TransportFactory,
+    factory: Arc<TransportFactory>,
 }
 
 impl TransportRegistry {
@@ -75,7 +89,7 @@ impl TransportRegistry {
     fn new_inner(explicit_proxy_url: Option<&str>) -> Result<Self> {
         Ok(Self {
             contexts: Mutex::new(HashMap::new()),
-            factory: TransportFactory::new(explicit_proxy_url)?,
+            factory: Arc::new(TransportFactory::new(explicit_proxy_url)?),
         })
     }
 
@@ -122,13 +136,13 @@ impl TransportFactory {
         })
     }
 
-    fn build(&self) -> Result<CredentialTransportContext> {
+    fn build(self: &Arc<Self>) -> Result<CredentialTransportContext> {
         let http = self
-            .http_builder()
+            .http_builder()?
             .build()
             .context("building credential HTTP client")?;
         let direct_http = self
-            .http_builder()
+            .http_builder()?
             .no_proxy()
             .build()
             .context("building direct credential HTTP client")?;
@@ -143,6 +157,7 @@ impl TransportFactory {
         let direct_websocket =
             WebSocketConnector::direct(self.websocket_roots.clone(), CONNECT_TIMEOUT);
         Ok(CredentialTransportContext {
+            factory: Arc::clone(self),
             http,
             direct_http,
             websocket,
@@ -152,15 +167,15 @@ impl TransportFactory {
 
     /// Match Codex HTTP with the deployment platform's native TLS backend. WebSocket TLS remains
     /// on its separate explicit AWS-LC rustls configuration below.
-    fn http_builder(&self) -> ClientBuilder {
-        cloudflare_cookies::apply(
+    fn http_builder(&self) -> Result<ClientBuilder> {
+        crate::custom_ca::apply(cloudflare_cookies::apply(
             self.apply_explicit_test_proxy(
                 native_tls_builder()
                     .connect_timeout(CONNECT_TIMEOUT)
                     .read_timeout(HTTP_READ_TIMEOUT)
                     .redirect(reqwest::redirect::Policy::none()),
             ),
-        )
+        ))
     }
 
     fn apply_explicit_test_proxy(&self, builder: ClientBuilder) -> ClientBuilder {
@@ -182,7 +197,15 @@ fn load_websocket_roots() -> Result<(RootCertStore, usize)> {
             "encountered errors while loading native root certificates"
         );
     }
-    let (accepted, _) = roots.add_parsable_certificates(certs);
+    let (mut accepted, _) = roots.add_parsable_certificates(certs);
+    if let Some(custom) = crate::custom_ca::certificates()? {
+        for certificate in custom {
+            roots
+                .add(certificate)
+                .context("invalid configured CA certificate")?;
+            accepted += 1;
+        }
+    }
     anyhow::ensure!(accepted > 0, "no platform-native TLS roots were available");
     Ok((roots, accepted))
 }
@@ -195,7 +218,7 @@ pub(crate) fn build_websocket_tls_config(roots: RootCertStore) -> Result<ClientC
     Ok(config)
 }
 
-fn ensure_aws_lc_provider() -> Result<()> {
+pub(crate) fn ensure_aws_lc_provider() -> Result<()> {
     static RESULT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
     RESULT
         .get_or_init(|| {

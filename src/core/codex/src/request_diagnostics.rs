@@ -37,7 +37,7 @@ pub(crate) fn record_settings(object: &Map<String, Value>, effective: bool) {
     let effort = match raw_effort.and_then(Value::as_str) {
         Some(
             value @ ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
-            | "persistent"),
+            | "persistent" | "disabled"),
         ) => value,
         None if raw_effort.is_none() => "unspecified",
         _ => "other",

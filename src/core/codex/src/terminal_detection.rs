@@ -1,35 +1,15 @@
-use std::process::Command;
 use std::sync::OnceLock;
 
 static TERMINAL_TOKEN: OnceLock<String> = OnceLock::new();
 
 pub(crate) fn user_agent_token() -> String {
-    TERMINAL_TOKEN
-        .get_or_init(|| detect(&read_env, &tmux_client_info))
-        .clone()
+    TERMINAL_TOKEN.get_or_init(|| detect(&read_env)).clone()
 }
 
-fn detect(
-    get: &dyn Fn(&str) -> Option<String>,
-    tmux_info: &dyn Fn() -> (Option<String>, Option<String>),
-) -> String {
-    let tmux_active = non_empty(get, "TMUX").is_some() || non_empty(get, "TMUX_PANE").is_some();
-    if let Some(program) = non_empty(get, "TERM_PROGRAM") {
-        if program.eq_ignore_ascii_case("tmux") && tmux_active {
-            let (term_type, term_name) = tmux_info();
-            if let Some(term_type) = term_type.and_then(non_whitespace) {
-                let mut parts = term_type.split_whitespace();
-                let program = parts.next().unwrap_or_default();
-                let version = parts.next();
-                return sanitize(match version {
-                    Some(version) => format!("{program}/{version}"),
-                    None => program.to_string(),
-                });
-            }
-            if let Some(term_name) = term_name.and_then(non_whitespace) {
-                return sanitize(term_name);
-            }
-        }
+fn detect(get: &dyn Fn(&str) -> Option<String>) -> String {
+    if let Some(program) =
+        non_empty(get, "TERM_PROGRAM").filter(|v| !v.eq_ignore_ascii_case("tmux"))
+    {
         let version = non_empty(get, "TERM_PROGRAM_VERSION");
         return sanitize(match version {
             Some(version) => format!("{program}/{version}"),
@@ -37,6 +17,9 @@ fn detect(
         });
     }
 
+    if non_empty(get, "GHOSTTY_RESOURCES_DIR").is_some() {
+        return "Ghostty".into();
+    }
     if get("WEZTERM_VERSION").is_some() {
         return named_with_version("WezTerm", non_empty(get, "WEZTERM_VERSION"));
     }
@@ -101,38 +84,14 @@ fn sanitize(value: String) -> String {
         .collect()
 }
 
-fn tmux_client_info() -> (Option<String>, Option<String>) {
-    (
-        tmux_display_message("#{client_termtype}"),
-        tmux_display_message("#{client_termname}"),
-    )
-}
-
-fn tmux_display_message(format: &str) -> Option<String> {
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", format])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8(output.stdout)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .and_then(non_whitespace)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn detected(values: &[(&str, &str)], tmux: (Option<&str>, Option<&str>)) -> String {
+    fn detected(values: &[(&str, &str)], _tmux: (Option<&str>, Option<&str>)) -> String {
         let values = values.iter().copied().collect::<HashMap<_, _>>();
-        detect(
-            &|name| values.get(name).map(|value| (*value).to_string()),
-            &|| (tmux.0.map(str::to_string), tmux.1.map(str::to_string)),
-        )
+        detect(&|name| values.get(name).map(|value| (*value).to_string()))
     }
 
     #[test]
@@ -150,10 +109,15 @@ mod tests {
         );
         assert_eq!(
             detected(
-                &[("TERM_PROGRAM", "tmux"), ("TMUX", "active")],
+                &[
+                    ("TERM_PROGRAM", "tmux"),
+                    ("TMUX", "active"),
+                    ("GHOSTTY_RESOURCES_DIR", "synthetic"),
+                    ("WEZTERM_VERSION", "1.2")
+                ],
                 (Some("ghostty 1.0"), Some("xterm-256color"))
             ),
-            "ghostty/1.0"
+            "Ghostty"
         );
         assert_eq!(
             detected(&[("TERM", "xterm-256color")], (None, None)),

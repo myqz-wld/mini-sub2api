@@ -244,6 +244,16 @@ pub(crate) fn resolve_and_project(
         evidence.thread.as_deref(),
         native_prefixes,
     )?);
+    if history_import
+        .as_ref()
+        .is_some_and(|import| import.plan.allow_history_import)
+    {
+        crate::request_wire_ids::register_imported_outputs(
+            editor,
+            object,
+            &generated_upstream_ids,
+        )?;
+    }
     translate_request_ids(editor, object, &generated_upstream_ids)?;
     Ok(ResolvedProjection {
         identity,

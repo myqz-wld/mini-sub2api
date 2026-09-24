@@ -85,7 +85,7 @@ func TestGrokShapedResponsesRequestIsNormalizedForSubscription(t *testing.T) {
 			"type": "function", "name": "lookup", "description": "Lookup",
 			"parameters": map[string]any{"type": "object"},
 		},
-		map[string]any{"type": "web_search_preview"},
+		map[string]any{"type": "web_search"},
 	}
 	requestJSON, err := json.Marshal(map[string]any{
 		"model": "gpt-5.6-sol", "input": []any{

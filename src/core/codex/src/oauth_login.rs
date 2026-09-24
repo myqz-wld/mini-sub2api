@@ -58,12 +58,12 @@ pub(crate) async fn login(
 ) -> Result<CredentialMetadata> {
     validate_auth_url(&config.issuer)?;
     validate_auth_url(&config.upstream_url)?;
-    let client = apply_loopback_proxy_policy(
+    let client = crate::custom_ca::apply(apply_loopback_proxy_policy(
         native_tls_builder()
             .connect_timeout(Duration::from_secs(15))
             .redirect(reqwest::redirect::Policy::none()),
         &config.issuer,
-    )
+    ))?
     .build()
     .context("building OAuth client")?;
     let tokens = match flow {
@@ -243,13 +243,17 @@ async fn exchange_code(
             http::header::CONTENT_TYPE,
             "application/x-www-form-urlencoded",
         )
-        .body(format!(
-            "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&code_verifier={}",
-            urlencoding::encode(code),
-            urlencoding::encode(redirect_uri),
-            urlencoding::encode(&config.client_id),
-            urlencoding::encode(&pkce.verifier)
-        ))
+        .body(
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs([
+                    ("grant_type", "authorization_code"),
+                    ("client_id", config.client_id.as_str()),
+                    ("code", code),
+                    ("redirect_uri", redirect_uri),
+                    ("code_verifier", pkce.verifier.as_str()),
+                ])
+                .finish(),
+        )
         .send()
         .await
         .context("exchanging OAuth code")?;
@@ -265,33 +269,30 @@ fn authorize_url(
     pkce: &Pkce,
     state: &str,
 ) -> Result<Url> {
-    let query = [
+    let mut url = Url::parse(&format!(
+        "{}/oauth/authorize",
+        config.issuer.trim_end_matches('/')
+    ))
+    .context("building OAuth authorize URL")?;
+    url.query_pairs_mut().extend_pairs([
         ("response_type", "code"),
         ("client_id", config.client_id.as_str()),
         ("redirect_uri", redirect_uri),
+        ("code_challenge", pkce.challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("state", state),
         (
             "scope",
             "openid profile email offline_access api.connectors.read api.connectors.invoke",
         ),
-        ("code_challenge", pkce.challenge.as_str()),
-        ("code_challenge_method", "S256"),
         ("id_token_add_organizations", "true"),
         ("codex_cli_simplified_flow", "true"),
-        ("state", state),
         (
             "originator",
             crate::upstream_request::DEFAULT_CODEX_ORIGINATOR,
         ),
-    ]
-    .into_iter()
-    .map(|(name, value)| format!("{name}={}", urlencoding::encode(value)))
-    .collect::<Vec<_>>()
-    .join("&");
-    Url::parse(&format!(
-        "{}/oauth/authorize?{query}",
-        config.issuer.trim_end_matches('/')
-    ))
-    .context("building OAuth authorize URL")
+    ]);
+    Ok(url)
 }
 
 async fn bind_browser_listener() -> Result<TcpListener> {

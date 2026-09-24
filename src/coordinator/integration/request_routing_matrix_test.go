@@ -119,7 +119,7 @@ func TestRequestRoutingMatrixWithMultipleMessagesAndToolSets(t *testing.T) {
 	}
 	mixedTools := []any{
 		functionTools[0],
-		map[string]any{"type": "web_search_preview", "search_context_size": "low"},
+		map[string]any{"type": "web_search", "search_context_size": "low"},
 	}
 	var runtimeCodexUserAgent string
 	assertSharedRuntimeUserAgent := func(t *testing.T, capture routingMatrixCapture) {

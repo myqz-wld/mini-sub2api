@@ -478,3 +478,6 @@ fn wire_order_tables_cover_every_reviewed_header_without_duplicates() {
         assert!(websocket_subagent.contains(name));
     }
 }
+
+#[path = "upstream_hpack_tests.rs"]
+mod hpack_tests;

@@ -100,6 +100,7 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
         authorizations,
         vec![
             format!("Bearer {}", state.old_access),
+            format!("Bearer {}", state.old_access),
             format!("Bearer {}", state.new_access),
             format!("Bearer {}", state.new_access),
         ]

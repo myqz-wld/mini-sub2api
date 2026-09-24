@@ -6,6 +6,11 @@ pub(crate) struct ModelProfile {
     pub(crate) responses_lite: bool,
     pub(crate) node_repl_auto_review_required: bool,
     pub(crate) node_repl_disabled: bool,
+    pub(crate) ultra_effort: &'static str,
+    pub(crate) supports_verbosity: bool,
+    pub(crate) original_images: bool,
+    pub(crate) priority: bool,
+    pub(crate) ultrafast: bool,
     reasoning_effort: Option<&'static str>,
     reasoning_summary: Option<&'static str>,
     verbosity: Option<&'static str>,
@@ -47,9 +52,21 @@ const MODEL_PROFILES: [(&str, ModelProfile); 9] = [
 const FALLBACK_PROFILE: ModelProfile = profile(false, None, Some("auto"), None);
 
 pub(crate) fn model_profile(model: &str) -> ModelProfile {
-    find_model_by_longest_prefix(model)
+    let mut profile = find_model_by_longest_prefix(model)
         .or_else(|| find_model_by_namespaced_suffix(model))
-        .unwrap_or(FALLBACK_PROFILE)
+        .unwrap_or(FALLBACK_PROFILE);
+    let label = diagnostic_model(model);
+    profile.ultra_effort = match label {
+        "gpt-6-astra" | "gpt-5.4" | "gpt-5.5" => "xhigh",
+        "other" => "high",
+        _ => "max",
+    };
+    profile.priority = !matches!(
+        label,
+        "other" | "gpt-daybreak-blue-latest" | "gpt-daybreak-red-latest"
+    );
+    profile.ultrafast = label == "gpt-5.6-sol";
+    profile
 }
 
 pub(crate) fn diagnostic_model(model: &str) -> &'static str {
@@ -90,6 +107,11 @@ const fn profile(
 ) -> ModelProfile {
     ModelProfile {
         responses_lite,
+        ultra_effort: "high",
+        supports_verbosity: verbosity.is_some(),
+        original_images: verbosity.is_some(),
+        priority: false,
+        ultrafast: false,
         node_repl_auto_review_required: false,
         node_repl_disabled: false,
         reasoning_effort,
@@ -98,10 +120,32 @@ const fn profile(
     }
 }
 
+impl ModelProfile {
+    pub(crate) fn supports_tier(self, tier: &str) -> bool {
+        tier == "flex"
+            || (tier == "priority" && self.priority)
+            || (tier == "ultrafast" && self.ultrafast)
+    }
+}
+
 pub(crate) fn merge_request_defaults(
     object: &mut Map<String, Value>,
     profile: ModelProfile,
     include_stream: bool,
+) {
+    merge_for_role(
+        object,
+        profile,
+        include_stream,
+        crate::native_request_policy::Role::Model,
+    );
+}
+
+pub(crate) fn merge_for_role(
+    object: &mut Map<String, Value>,
+    profile: ModelProfile,
+    include_stream: bool,
+    role: crate::native_request_policy::Role,
 ) {
     crate::request_diagnostics::record_settings(object, false);
     object
@@ -123,8 +167,10 @@ pub(crate) fn merge_request_defaults(
             .or_insert(Value::Bool(true));
     }
     merge_reasoning(object, profile);
-    merge_text(object, profile);
-    merge_include(object);
+    if role != crate::native_request_policy::Role::Classifier {
+        merge_text(object, profile);
+    }
+    crate::native_request_policy::apply_controls(object, profile, role);
     crate::request_diagnostics::record_settings(object, true);
 }
 
@@ -166,10 +212,6 @@ fn merge_text(object: &mut Map<String, Value>, profile: ModelProfile) {
         text.entry("verbosity".to_string())
             .or_insert_with(|| Value::String(verbosity.to_string()));
     }
-}
-
-fn merge_include(object: &mut Map<String, Value>) {
-    crate::reasoning_visibility::require_upstream(object);
 }
 
 #[cfg(test)]
@@ -220,7 +262,7 @@ mod tests {
             model_profile("gpt-5.2"),
             true,
         );
-        assert_eq!(disabled_summary["reasoning"]["summary"], "none");
+        assert!(disabled_summary["reasoning"].get("summary").is_none());
         assert!(disabled_summary["reasoning"].get("effort").is_none());
     }
 
@@ -236,6 +278,7 @@ mod tests {
             "include": null
         });
         let mut expected = request.clone();
+        expected["tool_choice"] = "auto".into();
         expected["parallel_tool_calls"] = Value::Bool(false);
         expected["include"] = serde_json::json!(["reasoning.encrypted_content"]);
         merge_request_defaults(
@@ -254,6 +297,6 @@ mod tests {
             model_profile("future-model"),
             true,
         );
-        assert_eq!(request["text"]["verbosity"], "high");
+        assert!(request.get("text").is_none());
     }
 }

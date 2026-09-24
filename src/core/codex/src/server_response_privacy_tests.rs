@@ -167,7 +167,7 @@ async fn subscription_failure_uses_the_same_normalized_privacy_boundary() {
 }
 
 #[tokio::test]
-async fn final_oauth_unauthorized_keeps_only_the_second_private_diagnostic() {
+async fn final_oauth_unauthorized_keeps_only_the_final_private_diagnostic() {
     let inference_calls = Arc::new(AtomicUsize::new(0));
     let refresh_calls = Arc::new(AtomicUsize::new(0));
     let account_id = "chatgpt-response-auth-privacy";
@@ -247,7 +247,7 @@ async fn final_oauth_unauthorized_keeps_only_the_second_private_diagnostic() {
     assert_eq!(response.headers()["x-request-id"], "req_test");
     assert_eq!(
         response.headers()[PROVIDER_REQUEST_ID_HEADER],
-        "provider-auth-2"
+        "provider-auth-3"
     );
     assert!(!response.headers().contains_key("x-provider-future-id"));
     let body = response
@@ -261,7 +261,7 @@ async fn final_oauth_unauthorized_keeps_only_the_second_private_diagnostic() {
     assert_eq!(body["error"]["deliveryState"], "delivered");
     assert!(!body.to_string().contains("resp_1"));
     assert!(!body.to_string().contains("resp_2"));
-    assert_eq!(inference_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(inference_calls.load(Ordering::SeqCst), 3);
     assert_eq!(refresh_calls.load(Ordering::SeqCst), 1);
 }
 

@@ -31,6 +31,16 @@ pub(crate) async fn prepare_stateful_codex_request(
     }
     let mut object = serde_json::from_slice::<serde_json::Map<String, Value>>(&body)
         .map_err(|_| Error::InvalidRequest)?;
+    let role = crate::native_request_policy::Role::read(&object, headers);
+    let model = crate::request_defaults::diagnostic_model(
+        object
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    crate::ignored_fields::scope(transport, role.label(), model, "admission", || {
+        crate::native_request_policy::filter_admission(&mut object);
+    });
     let native_metadata_order = object
         .get("client_metadata")
         .filter(|value| crate::request_identity::has_complete_native_client_metadata(value))

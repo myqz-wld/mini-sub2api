@@ -54,18 +54,7 @@ async fn include_preference_is_per_operation_and_filters_all_response_containers
         }
         let prepared = prepare(&store, body).await.unwrap();
         let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
-        let mut expected = include
-            .as_ref()
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if !expected.iter().any(|v| v == "reasoning.encrypted_content") {
-            expected.push(json!("reasoning.encrypted_content"));
-        }
-        assert!(
-            wire["include"] == json!(expected),
-            "caller include order or duplicates changed"
-        );
+        assert_eq!(wire["include"], json!(["reasoning.encrypted_content"]));
         let context = shared.get_or_insert_with(|| {
             ResponseStateContext::new(OWNER, NAMESPACE, KEY, &store, None, None)
         });

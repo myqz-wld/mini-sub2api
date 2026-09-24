@@ -209,3 +209,50 @@ async fn clients_do_not_follow_redirects() {
         .expect("redirect response");
     assert_eq!(response.status(), reqwest::StatusCode::TEMPORARY_REDIRECT);
 }
+
+#[tokio::test]
+async fn inference_pool_lifetime_matches_model_and_classifier_roles() {
+    async fn peer(
+        ConnectInfo(peer): ConnectInfo<SocketAddr>,
+        State(capture): State<PeerCapture>,
+    ) -> &'static str {
+        capture.0.lock().await.push(peer);
+        "ok"
+    }
+    let capture = PeerCapture::default();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let app = Router::new()
+        .route("/", get(peer))
+        .with_state(capture.clone());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let registry = TransportRegistry::new().unwrap();
+    let transport = registry
+        .context("acct_role_pool", CredentialTransportPolicy::default())
+        .unwrap();
+    for persistent in [false, false, true, true] {
+        let client = transport.inference_client(&url, persistent).unwrap();
+        // Each operation's retries share its client; the next ModelClient call gets a fresh pool.
+        for _ in 0..2 {
+            assert_eq!(
+                client.get(&url).send().await.unwrap().text().await.unwrap(),
+                "ok"
+            );
+        }
+    }
+    let peers = capture.0.lock().await.clone();
+    assert_eq!(peers.len(), 8);
+    assert_eq!(peers[0], peers[1]);
+    assert_eq!(peers[2], peers[3]);
+    assert_ne!(peers[0], peers[2]);
+    assert_ne!(peers[2], peers[4]);
+    assert!(peers[4..].iter().all(|p| *p == peers[4]));
+    server.abort();
+}

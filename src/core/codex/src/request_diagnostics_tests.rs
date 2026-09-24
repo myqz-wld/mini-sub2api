@@ -108,3 +108,73 @@ fn metadata_uses_defaults_and_allowlists_without_private_labels() {
         "max_output_tokens"
     );
 }
+
+#[test]
+fn ignored_field_events_are_bounded_aggregated_and_private_before_send() {
+    use crate::request_normalizer::{EmulationTransport, prepare_codex_overlay_for_test};
+    let capture = Capture::default();
+    let _guard = tracing::subscriber::set_default(capture.subscriber());
+    let mut body = serde_json::json!({"model":"private-model-label","input":[],"tools":[]});
+    for key in [
+        "max_tool_calls",
+        "top_logprobs",
+        "background",
+        "prompt",
+        "stream_id",
+        "metadata",
+        "context_management",
+        "moderation",
+        "prompt_cache_options",
+        "max_output_tokens",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "prompt_cache_retention",
+        "safety_identifier",
+        "truncation",
+        "user",
+    ] {
+        body[key] = "synthetic-secret-value".into();
+    }
+    for i in 0..200 {
+        body[format!("synthetic-secret-key-{i}")] = "synthetic-secret-value".into();
+    }
+    let prepared = prepare_codex_overlay_for_test(
+        crate::request_profile::UpstreamProfile::CodexSubscription1560,
+        EmulationTransport::Http,
+        &http::HeaderMap::new(),
+        bytes::Bytes::from(body.to_string()),
+        1 << 20,
+    )
+    .unwrap();
+    // The diagnostic scope has flushed before the caller can hand these bytes to the sender.
+    let logs = capture.logs();
+    assert!(logs.contains("codex_ignored_field"));
+    assert!(logs.contains("codex_ignored_fields_overflow"));
+    assert!(logs.lines().count() <= 17);
+    assert!(!logs.contains("synthetic-secret"));
+    assert!(!logs.contains("private-model-label"));
+    assert!(
+        !std::str::from_utf8(&prepared.body)
+            .unwrap()
+            .contains("synthetic-secret")
+    );
+
+    let before = capture.logs().lines().count();
+    crate::ignored_fields::scope(
+        EmulationTransport::Http,
+        "model",
+        "other",
+        "construction",
+        || {
+            for _ in 0..200 {
+                crate::ignored_fields::record("input[]", "status", "unsupported_field");
+            }
+        },
+    );
+    let logs = capture.logs();
+    assert_eq!(logs.lines().count(), before + 1);
+    assert!(logs.contains("count=200"));
+}

@@ -406,7 +406,9 @@ fn authenticated_headers(
     };
     let mut authorization =
         HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| CoreFailure::Internal)?;
-    authorization.set_sensitive(true);
+    // Native bearer HeaderValue is not sensitive: h2 encodes Authorization without
+    // indexing (never dynamically indexed). Logging/redaction is independently enforced.
+    authorization.set_sensitive(matches!(auth, ResolvedAuth::OpenAiApiKey { .. }));
     headers.insert(http::header::AUTHORIZATION, authorization);
     Ok(headers)
 }

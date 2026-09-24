@@ -50,19 +50,6 @@ impl ReasoningVisibility {
     }
 }
 
-pub(crate) fn require_upstream(object: &mut Map<String, Value>) {
-    if let Some(Value::Array(values)) = object.get_mut("include") {
-        if !values
-            .iter()
-            .any(|value| value.as_str() == Some(ENCRYPTED_REASONING))
-        {
-            values.push(ENCRYPTED_REASONING.into());
-        }
-    } else {
-        object.insert("include".into(), serde_json::json!([ENCRYPTED_REASONING]));
-    }
-}
-
 pub(crate) fn ciphertext(item: &Value) -> Option<&Value> {
     (item.get("type").and_then(Value::as_str) == Some("reasoning"))
         .then(|| item.get("encrypted_content"))

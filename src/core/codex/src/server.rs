@@ -136,10 +136,41 @@ async fn responses(
     }
 }
 
+pub(crate) fn validate_recovery_owner(
+    previous: &ResolvedCredential,
+    next: &ResolvedCredential,
+) -> std::result::Result<(), CoreFailure> {
+    let same_account = matches!((&previous.auth, &next.auth),
+        (ResolvedAuth::CodexOAuth { account_id: a, .. }, ResolvedAuth::CodexOAuth { account_id: b, .. }) if a == b);
+    if !same_account
+        || previous.state_namespace != next.state_namespace
+        || previous.upstream_url != next.upstream_url
+    {
+        return Err(CoreFailure::CredentialRequiresLogin);
+    }
+    Ok(())
+}
+
 pub(crate) async fn resolve_auth(
     state: &AppState,
     account_ref: &str,
     failed_access_token: Option<&str>,
+) -> std::result::Result<ResolvedCredential, CoreFailure> {
+    resolve_auth_inner(state, account_ref, failed_access_token, false).await
+}
+
+pub(crate) async fn reload_auth(
+    state: &AppState,
+    account_ref: &str,
+) -> std::result::Result<ResolvedCredential, CoreFailure> {
+    resolve_auth_inner(state, account_ref, None, true).await
+}
+
+async fn resolve_auth_inner(
+    state: &AppState,
+    account_ref: &str,
+    failed_access_token: Option<&str>,
+    reload_only: bool,
 ) -> std::result::Result<ResolvedCredential, CoreFailure> {
     let mut locked = state
         .vault
@@ -169,7 +200,10 @@ pub(crate) async fn resolve_auth(
             (CredentialMaterial::CodexOAuth { .. }, None) => true,
             (CredentialMaterial::OpenAiApiKey { .. }, _) => false,
         };
-        if refresh_needed {
+        let managed_reload = reload_only
+            && matches!(&locked.record.material,
+            CredentialMaterial::CodexOAuth { refresh_token, .. } if !refresh_token.is_empty());
+        if refresh_needed && !managed_reload {
             refresh_if_needed(
                 &mut locked,
                 transport.http_client_for_url(&issuer),

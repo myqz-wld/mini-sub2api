@@ -36,10 +36,33 @@ async fn device_flow_uses_loopback_mock_and_persists_tokens() {
             post({
                 let id_token = id_token.clone();
                 let access_token = access_token.clone();
-                move || {
+                move |headers: http::HeaderMap, body: String| {
                     let id_token = id_token.clone();
                     let access_token = access_token.clone();
                     async move {
+                        assert_eq!(
+                            headers[http::header::CONTENT_TYPE],
+                            "application/x-www-form-urlencoded"
+                        );
+                        let fields = body.split('&').collect::<Vec<_>>();
+                        assert_eq!(
+                            fields
+                                .iter()
+                                .map(|f| f.split('=').next().unwrap())
+                                .collect::<Vec<_>>(),
+                            [
+                                "grant_type",
+                                "client_id",
+                                "code",
+                                "redirect_uri",
+                                "code_verifier"
+                            ]
+                        );
+                        assert_eq!(fields[0], "grant_type=authorization_code");
+                        assert_eq!(fields[1], "client_id=client-test");
+                        assert_eq!(fields[2], "code=authorization-test");
+                        assert!(fields[3].starts_with("redirect_uri=http%3A%2F%2F127.0.0.1%3A"));
+                        assert_eq!(fields[4], "code_verifier=verifier-test");
                         Json(serde_json::json!({
                             "id_token": id_token,
                             "access_token": access_token,
@@ -122,7 +145,24 @@ fn browser_authorize_url_uses_codex_originator_and_registered_ports() {
         pairs.get("redirect_uri").map(String::as_str),
         Some("http://localhost:1455/auth/callback")
     );
-    assert!(url.as_str().contains("scope=openid%20profile%20email"));
+    assert!(url.as_str().contains("scope=openid+profile+email"));
+    assert_eq!(
+        url.query_pairs()
+            .map(|(key, _)| key.into_owned())
+            .collect::<Vec<_>>(),
+        [
+            "response_type",
+            "client_id",
+            "redirect_uri",
+            "code_challenge",
+            "code_challenge_method",
+            "state",
+            "scope",
+            "id_token_add_organizations",
+            "codex_cli_simplified_flow",
+            "originator"
+        ]
+    );
     assert_eq!(FALLBACK_CALLBACK_PORT, 1457);
 }
 

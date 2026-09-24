@@ -124,7 +124,8 @@ async fn store_false_preserves_scoped_item_ids_calls_and_explicit_references() {
                 );
             }
             assert!(items[4].get("id").is_none());
-            assert_eq!(items[5]["id"], "msg_provider_reference");
+            assert_eq!(items.len(), 5);
+            assert!(items.iter().all(|item| item["type"] != "item_reference"));
             assert_ne!(items[2]["call_id"], "call_old");
             assert_eq!(items[2]["call_id"], items[3]["call_id"]);
             assert_eq!(items[3]["output"]["id"], "opaque_output_id");

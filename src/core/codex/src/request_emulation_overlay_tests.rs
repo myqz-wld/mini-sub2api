@@ -4,99 +4,39 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped() {
-    let caller = serde_json::json!({
-        "model": "gpt-5.4",
-        "instructions": "caller instructions",
-        "previous_response_id": "resp_http_explicit",
-        "input": [],
-        "tools": [{
-            "type":"function",
-            "name":"lookup",
-            "description":"",
-            "strict":false,
-            "parameters":{"type":"object","x-schema-extension":{"opaque":true}},
-            "unsupported_tool_member":{"enabled":true}
-        }],
-        "tool_choice": "none",
-        "parallel_tool_calls": false,
-        "reasoning": {"effort":"high","summary":"none"},
-        "store": true,
-        "stream": false,
-        "stream_options": {"include_obfuscation":false},
-        "include": ["file_search_call.results"],
-        "service_tier": "flex",
-        "prompt_cache_key": "caller-cache-key",
-        "text": {"verbosity":"high"},
-        "background": true,
-        "context_management": [{"type":"compaction","compact_threshold":1200}],
-        "conversation": "conv_explicit",
-        "max_output_tokens": 2048,
-        "max_tool_calls": 4,
-        "metadata": {"public":"metadata"},
-        "moderation": {"model":"omni-moderation-latest","policy":"default"},
-        "prompt": {"id":"pmpt_explicit","variables":{"name":"value"}},
-        "prompt_cache_options": {"mode":"explicit","ttl":"30m"},
-        "prompt_cache_retention": "24h",
-        "safety_identifier": "safety_explicit",
-        "temperature": 0.25,
-        "top_logprobs": 3,
-        "top_p": 0.75,
-        "truncation": "disabled",
-        "user": "user_explicit",
-        "future_top_level": {"opaque":[1,2,3]}
-    });
-    let normalized = prepare_subscription(caller.clone(), EmulationTransport::Http);
-
-    for (name, expected) in caller
-        .as_object()
-        .expect("caller object")
-        .iter()
-        .filter(|(name, _)| {
-            !matches!(
-                name.as_str(),
-                "future_top_level"
-                    | "metadata"
-                    | "prompt_cache_retention"
-                    | "safety_identifier"
-                    | "store"
-                    | "stream"
-                    | "tools"
-                    | "max_output_tokens"
-                    | "temperature"
-                    | "top_p"
-                    | "stream_options"
-                    | "include"
-                    | "truncation"
-                    | "user"
-            )
-        })
-    {
-        assert_eq!(&normalized[name], expected, "explicit field {name}");
-    }
-    assert!(normalized.get("future_top_level").is_none());
-    for name in [
+    let caller = serde_json::json!({"model":"gpt-5.4","instructions":"caller instructions","input":[],
+        "tools":[],"tool_choice":"required","include":["file_search_call.results"],
+        "max_tool_calls":3,"top_logprobs":2,"background":true,"prompt":{"id":"test"},
+        "conversation":"conv_test","context_management":[],"moderation":{},"prompt_cache_options":{},
+        "metadata":{},"max_output_tokens":99,"temperature":0.1,"top_p":0.4,"user":"synthetic",
+        "prompt_cache_retention":"24h","safety_identifier":"synthetic","truncation":"auto","future":true});
+    let value = prepare_subscription(caller, EmulationTransport::Http);
+    for key in [
+        "max_tool_calls",
+        "top_logprobs",
+        "background",
+        "prompt",
+        "conversation",
+        "context_management",
+        "moderation",
+        "prompt_cache_options",
         "metadata",
+        "max_output_tokens",
+        "temperature",
+        "top_p",
+        "user",
         "prompt_cache_retention",
         "safety_identifier",
         "truncation",
-        "user",
+        "future",
     ] {
-        assert!(normalized.get(name).is_none(), "field {name} crossed");
+        assert!(value.get(key).is_none(), "{key}");
     }
-    assert_eq!(normalized["store"], false);
-    assert_eq!(normalized["stream"], true);
+    assert_eq!(value["instructions"], "caller instructions");
+    assert_eq!(value["tool_choice"], "auto");
     assert_eq!(
-        normalized["include"],
-        serde_json::json!(["file_search_call.results", "reasoning.encrypted_content"])
-    );
-    assert!(
-        normalized["tools"][0]
-            .get("unsupported_tool_member")
-            .is_none()
-    );
-    assert_eq!(
-        normalized["tools"][0]["parameters"]["x-schema-extension"]["opaque"],
-        true
+        value["include"],
+        serde_json::json!(["reasoning.encrypted_content"])
     );
 }
 
@@ -111,8 +51,12 @@ fn explicit_previous_response_id_survives_http_and_websocket_for_both_profiles()
         });
         let openai = prepare_subscription(caller.clone(), transport);
         let subscription = prepare_subscription(caller, transport);
-        assert_eq!(openai["previous_response_id"], "resp_explicit");
-        assert_eq!(subscription["previous_response_id"], "resp_explicit");
+        if transport == EmulationTransport::WebSocket {
+            assert_eq!(openai["previous_response_id"], "resp_explicit");
+            assert_eq!(subscription["previous_response_id"], "resp_explicit");
+        } else {
+            assert!(subscription.get("previous_response_id").is_none());
+        }
     }
 }
 
@@ -134,21 +78,21 @@ fn codex_defaults_preserve_controls_except_fixed_transport_and_required_include(
     });
     let normalized = prepare_subscription(explicit.clone(), EmulationTransport::Http);
     for name in [
-        "tool_choice",
         "reasoning",
-        "service_tier",
         "prompt_cache_key",
         "text",
         "previous_response_id",
     ] {
         assert_eq!(normalized[name], explicit[name], "explicit field {name}");
     }
+    assert_eq!(normalized["tool_choice"], "auto");
+    assert!(normalized.get("service_tier").is_none());
     assert_eq!(normalized["parallel_tool_calls"], false);
     assert_eq!(normalized["store"], false);
     assert_eq!(normalized["stream"], true);
     assert_eq!(
         normalized["include"],
-        serde_json::json!(["file_search_call.results", "reasoning.encrypted_content"])
+        serde_json::json!(["reasoning.encrypted_content"])
     );
 
     let defaults = prepare_subscription(
@@ -197,8 +141,8 @@ fn image_detail_defaults_are_profile_aware_and_explicit_values_are_authoritative
     );
     assert_image_detail(&lite, "normal-missing", None);
     assert_image_detail(&lite, "structured-missing", None);
-    assert_image_detail(&lite, "explicit-low", Some(&serde_json::json!("low")));
-    assert_image_detail(&lite, "explicit-null", Some(&Value::Null));
+    assert_image_detail(&lite, "explicit-low", None);
+    assert_image_detail(&lite, "explicit-null", None);
 }
 
 #[test]
@@ -296,9 +240,7 @@ fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque()
         normalized["prompt_cache_options"].get("unsupported_cache"),
         normalized["conversation"].get("unsupported_conversation"),
         normalized["moderation"].get("unsupported_moderation"),
-        normalized["context_management"][0].get("unsupported_context"),
         normalized["tool_choice"].get("unsupported_choice"),
-        normalized["tool_choice"]["tools"][0].get("unsupported_ref"),
         normalized["reasoning"].get("unsupported_reasoning"),
         normalized["stream_options"].get("unsupported_stream"),
         normalized["text"].get("unsupported_text"),
@@ -306,13 +248,11 @@ fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque()
     ] {
         assert!(path.is_none());
     }
-    assert_eq!(
-        normalized["prompt"]["variables"]["arbitrary_variable"]["keep"],
-        true
-    );
-    assert_eq!(
-        normalized["tools"][1]["parameters"]["x-schema-extension"]["keep"],
-        true
+    assert!(normalized.get("prompt").is_none());
+    assert!(
+        normalized["tools"][1]["parameters"]
+            .get("x-schema-extension")
+            .is_none()
     );
     assert_eq!(
         normalized["text"]["format"]["schema"]["x-schema-extension"]["keep"],
@@ -327,7 +267,11 @@ fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque()
         normalized["input"][2]["output"]["arbitrary_output"]["keep"],
         true
     );
-    assert_eq!(normalized["client_metadata"]["unsupported_client"], true);
+    assert!(
+        normalized["client_metadata"]
+            .get("unsupported_client")
+            .is_none()
+    );
     for item in normalized["input"].as_array().expect("items") {
         assert!(item.get("unsupported_item").is_none());
     }
@@ -426,7 +370,7 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
         for field in ["max_output_tokens", "temperature", "top_p"] {
             assert!(subscription.get(field).is_none(), "field {field} crossed");
         }
-        assert_eq!(subscription["max_tool_calls"], 3);
+        assert!(subscription.get("max_tool_calls").is_none());
     }
 }
 

@@ -247,6 +247,13 @@ async fn ambiguous_compaction_windows_remain_unavailable() {
         }
         let first = prepare(&store, body).await.unwrap();
         let completed = finish(&store, first, output, mode != "unobserved").await;
+        if mode == "unknown-input" {
+            assert!(
+                history(&store, &completed).is_some(),
+                "ignored variants must not create phantom dependencies"
+            );
+            continue;
+        }
         assert!(
             history(&store, &completed).is_none(),
             "ambiguous mode {mode} created history"

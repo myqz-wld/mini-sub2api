@@ -1,3 +1,7 @@
+use crate::error::CoreFailure;
+use crate::request_profile::UpstreamProfile;
+use crate::transport_registry::CredentialTransportContext;
+use crate::upstream_request::{ResolvedAuth, build_websocket};
 use crate::websocket_connector::WebSocketHandshake;
 use axum::body::Body;
 use axum::http::HeaderMap;
@@ -53,4 +57,25 @@ pub(crate) fn copy_headers(destination: &mut HeaderMap, source: &HeaderMap) {
     for (name, value) in source {
         destination.append(name.clone(), value.clone());
     }
+}
+
+pub(crate) async fn send_handshake(
+    transport: &CredentialTransportContext,
+    headers: &HeaderMap,
+    upstream_url: &str,
+    auth: &ResolvedAuth,
+    profile: UpstreamProfile,
+) -> Result<WebSocketHandshake, CoreFailure> {
+    let (request, config) = build_websocket(
+        headers,
+        upstream_url,
+        auth,
+        profile,
+        crate::inference_limits::get().output_bytes,
+    )?;
+    transport
+        .websocket_connector_for_url(upstream_url)
+        .connect(request, config)
+        .await
+        .map_err(|_| CoreFailure::UpstreamConnectFailed)
 }

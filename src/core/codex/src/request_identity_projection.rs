@@ -104,6 +104,7 @@ fn canonical_turn_metadata(
             ProjectionDecision::Preserve => {}
         }
     }
+    crate::request_identity::turn_metadata::canonical_order(&mut turn);
     turn
 }
 

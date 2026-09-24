@@ -13,14 +13,9 @@ pub(crate) fn apply_generated(
         let item = object["input"][*index]
             .as_object_mut()
             .expect("generated prefix");
-        if item.get("type").and_then(Value::as_str) == Some("additional_tools") {
-            item.shift_remove("internal_chat_message_metadata_passthrough");
-        } else {
-            item.insert(
-                "internal_chat_message_metadata_passthrough".into(),
-                Value::Object(Map::new()),
-            );
-        }
+        // Classification is disabled in the fixed emulation feature policy. Native
+        // skips empty metadata; the base has neither a turn stamp nor a creation time.
+        item.shift_remove("internal_chat_message_metadata_passthrough");
     }
     Ok(ids)
 }

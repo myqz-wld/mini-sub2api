@@ -14,6 +14,13 @@ pub(crate) fn canonicalize_optionals(object: &mut Map<String, Value>) {
         .map(str::to_string);
     match kind.as_deref() {
         Some("reasoning") => {
+            if object
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            {
+                object.shift_remove("content");
+            }
             object
                 .entry("encrypted_content".to_string())
                 .or_insert(Value::Null);
@@ -213,6 +220,43 @@ fn reorder(object: &mut Map<String, Value>, order: &[&str]) {
     for name in order {
         if let Some(value) = existing.remove(*name) {
             object.insert((*name).to_string(), value);
+        }
+    }
+}
+
+// Only schema-defined image positions are traversed; business JSON and free output schemas stay opaque.
+pub(crate) fn normalize_images(
+    input: Option<&mut Value>,
+    profile: crate::request_defaults::ModelProfile,
+) {
+    let Some(items) = input.and_then(Value::as_array_mut) else {
+        return;
+    };
+    for item in items {
+        let name = match item.get("type").and_then(Value::as_str) {
+            None | Some("message" | "agent_message") => "content",
+            Some("function_call_output" | "custom_tool_call_output") => "output",
+            _ => continue,
+        };
+        if let Some(blocks) = item.get_mut(name).and_then(Value::as_array_mut) {
+            for block in blocks.iter_mut().filter_map(Value::as_object_mut) {
+                if block.get("type").and_then(Value::as_str) != Some("input_image") {
+                    continue;
+                }
+                if profile.responses_lite {
+                    crate::ignored_fields::remove(
+                        block,
+                        "detail",
+                        "input[].image",
+                        "lite_image_policy",
+                    );
+                } else if !profile.original_images
+                    && block.get("detail").and_then(Value::as_str) == Some("original")
+                {
+                    crate::ignored_fields::record("input[].image", "detail", "model_policy");
+                    block.insert("detail".into(), "high".into());
+                }
+            }
         }
     }
 }

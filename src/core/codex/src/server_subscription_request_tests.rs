@@ -41,7 +41,7 @@ async fn subscription_route_normalizes_plain_request_and_preserves_client_tools(
         .expect("OAuth record");
     let tools = serde_json::json!([
         {"type":"function","name":"lookup","description":"Lookup","parameters":{"type":"object"}},
-        {"type":"web_search_preview"}
+        {"type":"web_search"}
     ]);
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({

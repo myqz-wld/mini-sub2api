@@ -33,6 +33,20 @@ pub(crate) fn candidate_key(item: &Value) -> Vec<u8> {
             }
         }
     }
+    if projected.get("type").and_then(Value::as_str) == Some("reasoning")
+        && let Some(object) = projected.as_object_mut()
+    {
+        for field in ["status", "agent", "metadata"] {
+            object.shift_remove(field);
+        }
+        if object
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        {
+            object.shift_remove("content");
+        }
+    }
     project_completed_metadata(&mut projected);
     canonical(&projected)
 }

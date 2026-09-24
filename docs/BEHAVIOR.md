@@ -71,7 +71,8 @@ content, never execution owners/tool consumption. Current-thread, ancestor or de
 still requires the same session, including remote-only continuation.
 
 Retain the first upstream turn token across same-turn retries/reconnects. HTTP learns it from
-response headers and replays it only in headers; WS also learns `response.metadata` tokens and
+response headers and replays it only in headers; ordinary WS learns `response.metadata` tokens,
+ignores the upgrade handshake token, and
 carries the selected token in `response.create` metadata, preserving a native carrier's key order.
 Synthesized metadata includes the token in native-style randomized key ordering. Routing tokens are
 opaque header values with a separate 64 KiB limit, retain the first value (including an empty one),
@@ -99,14 +100,14 @@ are offline test fixtures only.
 Lite UUIDv5 uses OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
 base text (`msg_`). Regenerate only Core-owned/proven native prefixes; retain durable aliases.
 Generated setup carries no turn/time attribution: the tool prefix omits message metadata and the
-base prefix has an empty metadata object. Proven native setup preserves the caller's supplied fields.
+base prefix also omits metadata when classification is disabled. Proven native setup preserves the caller's supplied fields.
 Group loose functions/custom tools and function namespaces in encounter order, preserving duplicates
 and the last nonblank description.
 
 Preserve caller workspace/personality/AGENTS/Skills/permissions/environment text. Core discovers or
 executes none of these or client tools. Legal sandbox meaning survives with Core OS implementation;
-root-agent/time/REPL defaults and valid overrides do not enable execution. Filter unsupported
-`max_output_tokens`/`temperature`/`top_p`; supported field details live in the
+root-agent/time/REPL defaults and valid overrides do not enable execution. Filter unsupported native roots, including `max_tool_calls`, `top_logprobs`, `background`, `prompt`
+and `stream_id`, with bounded diagnostics. Supported field details live in the
 [protocol](../src/protocol/v1/README.md#subscription-request-preparation).
 
 Valid numeric item `create_time` survives absent optional IDs. Retained history preserves first-assigned
@@ -120,17 +121,35 @@ Native exec/wait exposure and host availability differ. Bare API/OpenCode keep d
 provides no JavaScript bridge or claim of complete default-native code-mode equivalence.
 
 Codex 0.156.0 `configuration_update` input items retain their reasoning effort and history position
-without item IDs or turn stamps. Native analytics flags and opaque executed-tool result metadata
+in stored history, without item IDs or turn stamps. The fixed native feature policy disables effort
+updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags and opaque executed-tool result metadata
 survive normalization. Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
 service-tier/routing hints, and their parent response IDs require an existing mapping in the same Key.
 Bare non-reviewer Subscription callers receive the backend Guardian credit metadata flag. WS delta
 reuse compares late executed-tool result metadata and its call binding; changed evidence requires
 full input. See [wire-shape evidence and limits](CODEX_COMPATIBILITY.md#field-order-and-presence).
 
+Tool declarations use native function/namespace/tool_search/web_search/custom types; history uses
+ResponseItem separately, including image_generation_call and local_shell_call. Tool schema positions
+lower `const` to a one-element `enum`, keep the native schema subset and sort property names. Enum
+business objects and free output schemas keep their content/order. JSON numbers retain arbitrary
+precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
+strictness may be false. `ultra` resolves by the model catalog and `persistent` becomes `disabled`;
+local metadata may retain the selected alias. Unsupported/default tiers and `summary:none` are
+omitted; `flex` remains available. Lite removes image detail, including in structured tool outputs.
+Reasoning omits empty content arrays but preserves explicit null. Inner turn metadata follows native
+struct order plus sorted extras; outer client metadata keeps its separate HashMap ordering policy.
+Legacy item_reference carriers still require scoped ownership, then are logged and omitted from
+native sends; callers should supply complete items when replaying content. Named function outputs can omit call_id; explicit null and missing references still fail validation.
+The pinned CustomToolCallOutput type still requires call_id. Anonymous reasoning lookup ignores
+status, agent, empty content and non-model metadata while checking IDs and ciphertext; provider
+item-done/terminal consistency remains strict.
+
 ## Reasoning visibility
 
-Subscription always appends `reasoning.encrypted_content` to upstream `include`, preserving other
-entries/order. Missing `include` exposes ciphertext by default; explicit lists expose it only when
+Ordinary and synchronous reviewer Subscription requests send exactly
+`include:["reasoning.encrypted_content"]` and `tool_choice:"auto"`. Async Guardian classifiers send
+`include:[]`, `tool_choice:"none"`, no text controls and no invented tier. Missing `include` exposes ciphertext by default; explicit lists expose it only when
 requested; null hides optional ciphertext. Other types/non-string entries fail before inference.
 
 Retain complete output before filtering public JSON/SSE/WS. Hide only reasoning
@@ -157,8 +176,9 @@ opaque control items do not qualify. No source body or active source work may re
 
 Each imported turn receives a separate stable identity in the target thread. Its original owner and
 aliases are never reassigned. Later full replay, eligible references, descendants and declared forks
-can reuse the target's copies. Message/tool IDs and call/result associations retain their existing
-scoped translations. The gateway uses only supplied content and same-Key/account identity evidence;
+can reuse the target's copies. Known downstream aliases still reverse first. Newly imported native output item/call declarations
+retain valid native IDs through the existing scoped upstream map; their call/result pairs remain
+intact. A prefix never authorizes an external response/item reference. The gateway uses only supplied content and same-Key/account identity evidence;
 it never reconstructs expired ciphertext or fetches another scope's history. This checks protocol
 self-containment, not equality with unavailable old text. Explicit unrelated-session copies still
 require their declared ownership relationship; stable original-session reconstruction is unchanged.
@@ -182,7 +202,9 @@ See [Memory](MEMORY.md) for small hosts.
 
 Device mode converges account installation UUIDv4 across duplicate credentials/Keys; off uses scoped
 aliases while keeping emulation. Logical UUIDv7 identities stay Key-isolated. Mode changes require
-disabled/drained credentials; stale WS revisions fail. Transport pools/TLS resumption are credential-isolated,
+disabled/drained credentials; stale WS revisions fail. Ordinary and synchronous-review HTTP clients live for one inference plus internal retries; async
+classifiers retain a credential-scoped pool. Infrastructure cookies remain process-wide. Pools/TLS
+resumption remain credential-isolated,
 without configurable JA3/uTLS or per-credential source-IP/proxy selection.
 
 Private schema-v1 identity files store bounded typed ID pairs, never bodies/raw Keys or arbitrary

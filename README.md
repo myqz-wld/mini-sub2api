@@ -80,7 +80,12 @@ OpenCode custom providers and bare clients can associate full histories without 
 - History lookup tolerates omitted assistant-message metadata; supplied conflicts remain
   significant and matching stays within the current Key.
 - Subscription preserves caller instructions and tool order, inserts no default base, and requests
-  encrypted reasoning; `include` controls public visibility. Workspace, Skills and tools belong to the client.
+  encrypted reasoning for ordinary/reviewer requests; `include` controls public visibility. The async
+  classifier uses its own native defaults. Workspace, Skills and tools belong to the client.
+- Subscription ignores fields outside native request/tool/history types and emits bounded,
+  content-free `codex_ignored_field` diagnostics before sending. See [log analysis and retention](docs/OPERATIONS.md#ignored-field-diagnostics).
+- Custom CA bundles use `CODEX_CA_CERTIFICATE`, then `SSL_CERT_FILE`; empty values are unset.
+  HTTP uses native TLS by default and rustls for an override; WS appends the selected roots.
 - Valid caller turn-start timestamps survive normalization; omitted values reuse the recorded turn
   time or receive a server-clock fallback. These timestamps do not control retention.
 - Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the

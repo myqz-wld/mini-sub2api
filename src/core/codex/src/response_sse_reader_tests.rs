@@ -183,7 +183,7 @@ async fn framing_and_final_eof_fragment_are_independent_of_chunking() {
             events.push(event);
         }
         assert_eq!(events.len(), 2);
-        assert_eq!(events.concat(), wire.as_bytes());
+        assert_eq!(events.concat(), wire.replace("\r\n", "\n").as_bytes());
     }
 }
 
@@ -228,6 +228,35 @@ fn terminal_detection_matches_json_consumers_without_inspecting_nested_types() {
         assert_eq!(
             sse_progress::classify(data.as_bytes()) == Class::Terminal,
             expected
+        );
+    }
+}
+
+#[tokio::test]
+async fn bom_cr_and_mixed_delimiters_work_across_every_byte_boundary() {
+    let wire = "\u{feff}data: {\"type\":\"response.created\"}\r\rdata: {\"type\":\"response.completed\"}\r\n\r\ndata: [DONE]\n\n";
+    for size in 1..=wire.len() {
+        let chunks: Vec<_> = wire
+            .as_bytes()
+            .chunks(size)
+            .map(|b| Ok(Bytes::copy_from_slice(b)))
+            .collect();
+        let mut reader = SseReader::new(Box::pin(stream::iter(chunks)), 4096);
+        let mut payloads = Vec::new();
+        while let Some(event) = reader.next_event().await.unwrap() {
+            payloads.push(
+                data_payload(std::str::from_utf8(&event).unwrap())
+                    .unwrap()
+                    .into_owned(),
+            );
+        }
+        assert_eq!(
+            payloads,
+            [
+                "{\"type\":\"response.created\"}",
+                "{\"type\":\"response.completed\"}",
+                "[DONE]"
+            ]
         );
     }
 }

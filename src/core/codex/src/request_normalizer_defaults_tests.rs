@@ -73,7 +73,7 @@ fn gpt_5_2_preserves_explicit_null_members_except_required_include() {
     assert!(value["reasoning"]["summary"].is_null());
     assert!(value["reasoning"]["context"].is_null());
     assert!(value["text"].is_null());
-    assert!(value["tool_choice"].is_null());
+    assert_eq!(value["tool_choice"], "auto");
     assert!(value["parallel_tool_calls"].is_null());
     assert!(value.get("stream_options").is_none());
     assert!(value.get("instructions").is_none());

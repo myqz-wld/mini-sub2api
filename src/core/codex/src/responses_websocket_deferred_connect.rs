@@ -46,30 +46,38 @@ pub(super) async fn connect(
     )
     .await
     .map_err(DeferredConnectFailure::without_response)?;
-    if handshake.status() == StatusCode::UNAUTHORIZED && context.profile.uses_oauth_refresh() {
+    for step in 0..2 {
+        if handshake.status() != StatusCode::UNAUTHORIZED || !context.profile.uses_oauth_refresh() {
+            break;
+        }
         let initial_provider_request_id = provider_request_id(handshake.headers());
         let failed_access_token = match &context.resolved.auth {
             ResolvedAuth::CodexOAuth { token, .. } => token.clone(),
             ResolvedAuth::OpenAiApiKey { .. } => {
-                return Err(DeferredConnectFailure {
-                    error: CoreFailure::Internal,
-                    provider_request_id: initial_provider_request_id,
-                });
+                return Err(DeferredConnectFailure::without_response(
+                    CoreFailure::Internal,
+                ));
             }
         };
         let lock = account_lock(&context.state, &context.account_ref).await;
-        let _guard = lock.lock().await;
-        let retry = resolve_auth(
-            &context.state,
-            &context.account_ref,
-            Some(&failed_access_token),
-        )
-        .await
+        let guard = lock.lock().await;
+        let retry = if step == 0 {
+            crate::server::reload_auth(&context.state, &context.account_ref).await
+        } else {
+            resolve_auth(
+                &context.state,
+                &context.account_ref,
+                Some(&failed_access_token),
+            )
+            .await
+        }
         .map_err(|error| DeferredConnectFailure {
             error,
             provider_request_id: initial_provider_request_id.clone(),
         })?;
-        drop(_guard);
+        drop(guard);
+        crate::server::validate_recovery_owner(&context.resolved, &retry)
+            .map_err(DeferredConnectFailure::without_response)?;
         handshake = send_handshake(
             &retry.transport,
             headers,
@@ -82,18 +90,13 @@ pub(super) async fn connect(
             error,
             provider_request_id: initial_provider_request_id,
         })?;
-        if handshake.status() == StatusCode::UNAUTHORIZED {
-            return Err(DeferredConnectFailure {
-                error: CoreFailure::UpstreamAuthFailed,
-                provider_request_id: provider_request_id(handshake.headers()),
-            });
-        }
-        if handshake.status() == StatusCode::SWITCHING_PROTOCOLS {
-            context.resolved.upstream_url = retry.upstream_url;
-            context.resolved.auth = retry.auth;
-            context.resolved.transport = retry.transport;
-            context.resolved.state_namespace = retry.state_namespace;
-        }
+        context.resolved = retry;
+    }
+    if handshake.status() == StatusCode::UNAUTHORIZED && context.profile.uses_oauth_refresh() {
+        return Err(DeferredConnectFailure {
+            error: CoreFailure::UpstreamAuthFailed,
+            provider_request_id: provider_request_id(handshake.headers()),
+        });
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
         return Err(DeferredConnectFailure {

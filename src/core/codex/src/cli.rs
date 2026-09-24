@@ -242,12 +242,12 @@ impl CredentialCommand {
                         anyhow::bail!("credential is not OAuth-backed")
                     }
                 };
-                let client = apply_loopback_proxy_policy(
+                let client = crate::custom_ca::apply(apply_loopback_proxy_policy(
                     native_tls_builder()
                         .connect_timeout(Duration::from_secs(15))
                         .redirect(reqwest::redirect::Policy::none()),
                     &issuer,
-                )
+                ))?
                 .build()
                 .context("building revoke client")?;
                 oauth::revoke(&mut locked, &client).await?;

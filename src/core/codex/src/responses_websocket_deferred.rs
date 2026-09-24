@@ -187,7 +187,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
     else {
         return;
     };
-    let (mut upstream, mut turn_state, provider_request_id) = match connected {
+    let (mut upstream, _handshake_turn_state, provider_request_id) = match connected {
         Ok(connected) => connected,
         Err(failure) => {
             if !send_provider_request_id_control(
@@ -253,9 +253,8 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                 return;
             };
             match reconnected {
-                Ok((replacement, replacement_turn_state, replacement_request_id)) => {
+                Ok((replacement, _replacement_turn_state, replacement_request_id)) => {
                     upstream = replacement;
-                    turn_state = replacement_turn_state;
                     if !send_provider_request_id_control(
                         &mut internal,
                         replacement_request_id.as_deref(),
@@ -291,6 +290,9 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             }
         }
     }
+    // Native ModelClient learns routing state from metadata events, independently of
+    // caller metadata completeness. Native and hidden prewarm event tokens remain eligible.
+    let mut turn_state: Option<http::HeaderValue> = None;
     if let Some(operation) = &operation {
         for token in [
             turn_state.as_ref().and_then(|v| v.to_str().ok()),

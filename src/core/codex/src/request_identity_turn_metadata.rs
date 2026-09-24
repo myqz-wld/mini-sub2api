@@ -11,6 +11,7 @@ pub(crate) fn bounded_turn_metadata(raw: &str) -> Option<String> {
         turn_metadata_rules().any(|rule| rule.name == name && rule.header_visible())
             || is_extra_metadata(name, value)
     });
+    canonical_order(value.as_object_mut()?);
     to_ascii_json_string(&value).ok()
 }
 
@@ -19,24 +20,21 @@ pub(super) fn complete_turn_metadata(raw: &str, generated: &str) -> Option<Strin
     let existing = existing.as_object_mut()?;
     let before = existing.len();
     existing.retain(|name, value| {
-        turn_metadata_rules().any(|rule| rule.name == name) || is_extra_metadata(name, value)
+        let keep =
+            turn_metadata_rules().any(|rule| rule.name == name) || is_extra_metadata(name, value);
+        if !keep {
+            crate::ignored_fields::record("turn_metadata", "unknown", "unsupported_field");
+        }
+        keep
     });
     let stripped = existing.len() != before;
     if existing.get("request_kind").and_then(Value::as_str) == Some("memory") {
-        return if stripped {
-            encode_reordered(existing, None)
-        } else {
-            Some(raw.to_string())
-        };
+        return encode_reordered(existing, None);
     }
     // Codex 0.156.0 deliberately emits startup prewarm metadata with an empty turn ID and without
     // root-turn or turn-start fields. That native shape is complete and must remain byte-stable.
     if is_complete_native_prewarm_metadata(existing) {
-        return if stripped {
-            encode_reordered(existing, None)
-        } else {
-            Some(raw.to_string())
-        };
+        return encode_reordered(existing, None);
     }
     let generated = serde_json::from_str::<Value>(generated).ok()?;
     let generated = generated.as_object()?;
@@ -47,7 +45,7 @@ pub(super) fn complete_turn_metadata(raw: &str, generated: &str) -> Option<Strin
             .iter()
             .all(|name| !generated.contains_key(*name) || existing.contains_key(*name));
     if complete && !stripped {
-        return Some(raw.to_string());
+        return encode_reordered(existing, None);
     }
     encode_reordered(existing, Some(generated))
 }
@@ -73,7 +71,55 @@ fn encode_reordered(
             existing.insert((*name).to_string(), value.clone());
         }
     }
+    canonical_order(existing);
     to_ascii_json_string(&Value::Object(std::mem::take(existing))).ok()
+}
+
+pub(crate) fn canonical_order(object: &mut Map<String, Value>) {
+    // CodexTurnMetadataPayload struct order followed by its flattened BTreeMap extras.
+    const ORDER: &[&str] = &[
+        "installation_id",
+        "session_id",
+        "thread_id",
+        "agent_name",
+        "turn_id",
+        "window_id",
+        "window_number",
+        "context_window_id",
+        "request_kind",
+        "forked_from_thread_id",
+        "forked_from_ordinal_exclusive",
+        "parent_thread_id",
+        "parent_turn_id",
+        "root_turn_id",
+        "subagent_kind",
+        "thread_source",
+        "turn_trigger",
+        "sandbox",
+        "sandbox_mode",
+        "auto_review_enabled",
+        "node_repl_auto_review_required",
+        "node_repl_disabled",
+        "workspaces",
+        "tool_namespaces_info",
+        "turn_started_at_unix_ms",
+        "history_ingest_requested",
+        "analytics_enabled",
+        "compaction",
+    ];
+    let mut rest = std::mem::take(object);
+    for name in ORDER {
+        if let Some(value) = rest.shift_remove(*name) {
+            if value.is_null() {
+                crate::ignored_fields::record("turn_metadata", "optional", "null_optional");
+            } else {
+                object.insert((*name).into(), value);
+            }
+        }
+    }
+    let mut rest = rest.into_iter().collect::<Vec<_>>();
+    rest.sort_by(|a, b| a.0.cmp(&b.0));
+    object.extend(rest);
 }
 
 // Native app-server extras are strings with reserved keys removed. Its stricter 16/64/128
@@ -134,12 +180,12 @@ mod tests {
         let raw = serde_json::to_string_pretty(&value).unwrap();
         assert_eq!(
             complete_turn_metadata(&raw, &generated.to_string()).unwrap(),
-            raw
+            serde_json::to_string(&value).unwrap()
         );
         let memory = r#"{ "request_kind": "memory", "sandbox": "none" }"#;
         assert_eq!(
             complete_turn_metadata(memory, &generated.to_string()).unwrap(),
-            memory
+            r#"{"request_kind":"memory","sandbox":"none"}"#
         );
     }
 

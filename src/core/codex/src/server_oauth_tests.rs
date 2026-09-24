@@ -100,7 +100,7 @@ async fn corrupt_request_state_is_a_retryable_503_before_upstream_delivery() {
 }
 
 #[tokio::test]
-async fn oauth_401_refreshes_and_replays_exactly_once() {
+async fn oauth_401_reloads_then_refreshes_with_bounded_exact_replays() {
     let account_id = "chatgpt-server-test";
     let mock_state = OAuthMockState {
         old_access: test_jwt(None, 3600),
@@ -221,7 +221,7 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
             .get_version_num(),
         7
     );
-    assert_eq!(mock_state.inference_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(mock_state.inference_calls.load(Ordering::SeqCst), 3);
     assert_eq!(mock_state.refresh_calls.load(Ordering::SeqCst), 1);
     let fingerprint_headers = mock_state.fingerprint_headers.lock().await;
     assert!(fingerprint_headers.is_empty());
@@ -240,7 +240,8 @@ async fn oauth_401_refreshes_and_replays_exactly_once() {
         4
     );
     let bodies = mock_state.bodies.lock().await;
-    assert_eq!(bodies.len(), 2);
+    assert_eq!(bodies.len(), 3);
+    assert_eq!(bodies[1], bodies[2]);
     assert_eq!(bodies[0], bodies[1]);
     let decoded = zstd::stream::decode_all(std::io::Cursor::new(bodies[0].as_ref()))
         .expect("decompress replay body");
@@ -353,8 +354,63 @@ async fn concurrent_oauth_401s_share_one_forced_refresh() {
     );
     assert_eq!(first.expect("first response").status(), StatusCode::OK);
     assert_eq!(second.expect("second response").status(), StatusCode::OK);
-    assert_eq!(mock_state.inference_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(mock_state.inference_calls.load(Ordering::SeqCst), 6);
     assert_eq!(mock_state.refresh_calls.load(Ordering::SeqCst), 1);
     let fingerprint_headers = mock_state.fingerprint_headers.lock().await;
     assert!(fingerprint_headers.is_empty());
+}
+
+#[tokio::test]
+async fn oauth_reload_observes_updated_managed_credential_without_refresh() {
+    let slot: Arc<Mutex<Option<(Vault, String)>>> = Arc::new(Mutex::new(None));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let refreshes = Arc::new(AtomicUsize::new(0));
+    let updated_token = test_jwt(None, 7200);
+    let app = Router::new().route("/responses", axum_post({
+        let slot = slot.clone(); let calls = calls.clone(); let token = updated_token.clone();
+        move |headers: HeaderMap| {
+            let slot = slot.clone(); let calls = calls.clone(); let token = token.clone();
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    let (vault, account) = slot.lock().await.clone().unwrap();
+                    let mut locked = vault.lock_record(&account).await.unwrap();
+                    if let CredentialMaterial::CodexOAuth { access_token, .. } = &mut locked.record.material { *access_token = token; }
+                    locked.persist().await.unwrap();
+                    return (StatusCode::UNAUTHORIZED, "");
+                }
+                assert_eq!(headers[http::header::AUTHORIZATION], format!("Bearer {token}"));
+                (StatusCode::OK, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_reload\",\"output\":[]}}\n\n")
+            }
+        }
+    })).route("/oauth/token", axum_post({let count=refreshes.clone(); move || {let count=count.clone(); async move {count.fetch_add(1,Ordering::SeqCst); StatusCode::INTERNAL_SERVER_ERROR}}}));
+    let mock = spawn_loopback(app).await;
+    let temp = tempfile::tempdir().unwrap();
+    let vault = Vault::open(temp.path().into()).unwrap();
+    let metadata = vault
+        .create_oauth(
+            CredentialMaterial::CodexOAuth {
+                id_token: test_jwt(Some("synthetic-reload-account"), 3600),
+                access_token: test_jwt(None, 3600),
+                refresh_token: "synthetic-refresh".into(),
+                account_id: "synthetic-reload-account".into(),
+                access_expires_at: Some(chrono::Utc::now() + chrono::Duration::hours(1)),
+                issuer: mock.base_url.clone(),
+                client_id: "synthetic-client".into(),
+            },
+            format!("{}/responses", mock.base_url),
+            crate::fingerprint::FingerprintMode::Device,
+        )
+        .await
+        .unwrap();
+    *slot.lock().await = Some((vault.clone(), metadata.account_ref.clone()));
+    let response = call_core(
+        &app_state(vault),
+        &metadata.account_ref,
+        Bytes::from_static(br#"{"model":"gpt-5.4","input":"synthetic"}"#),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(refreshes.load(Ordering::SeqCst), 0);
 }

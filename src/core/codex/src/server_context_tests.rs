@@ -299,3 +299,6 @@ async fn aggregated_http_retains_item_events_when_terminal_omits_output() {
     );
     assert!(captures[1].get("previous_response_id").is_none());
 }
+
+#[path = "server_native_fidelity_tests.rs"]
+mod native_fidelity;

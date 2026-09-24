@@ -114,16 +114,20 @@ pub async fn refresh_if_needed(
     }
 
     let endpoint = format!("{}/oauth/token", issuer.trim_end_matches('/'));
-    let response = codex_auth_request(client.post(&endpoint))
-        .header(http::header::CONTENT_TYPE, "application/json")
-        .json(&RefreshRequest {
-            client_id: &client_id,
-            grant_type: "refresh_token",
-            refresh_token: &refresh_token,
-        })
-        .send()
-        .await
-        .map_err(|error| OAuthFailure::Transport(anyhow::Error::new(error)))?;
+    let response = codex_auth_request(
+        client
+            .post(&endpoint)
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .header(http::header::ACCEPT, "*/*"),
+    )
+    .json(&RefreshRequest {
+        client_id: &client_id,
+        grant_type: "refresh_token",
+        refresh_token: &refresh_token,
+    })
+    .send()
+    .await
+    .map_err(|error| OAuthFailure::Transport(anyhow::Error::new(error)))?;
     let status = response.status();
     if !status.is_success() {
         if status == StatusCode::UNAUTHORIZED {

@@ -42,8 +42,10 @@ pub(crate) struct SseReader {
     buffer: Vec<u8>,
     pending: Bytes,
     maximum: usize,
+    event_bytes: usize,
     line_length: u8,
     line_cr: bool,
+    stream_start: bool,
     timeouts: SseTimeouts,
     idle_deadline: Instant,
     output_deadline: Instant,
@@ -68,8 +70,10 @@ impl SseReader {
             buffer: Vec::new(),
             pending: Bytes::new(),
             maximum,
+            event_bytes: 0,
             line_length: 0,
             line_cr: false,
+            stream_start: true,
             idle_deadline: now + timeouts.idle,
             output_deadline: now + timeouts.output_idle,
             has_output: false,
@@ -147,35 +151,46 @@ impl SseReader {
             if !self.pending.is_empty() {
                 let available = self
                     .maximum
-                    .saturating_sub(self.buffer.len())
+                    .saturating_sub(self.event_bytes)
                     .min(self.pending.len());
                 if available == 0 {
                     self.diagnostics.read_end = "event_too_large";
                     self.close();
                     return Err(SseReadError::EventTooLarge);
                 }
-                let mut end = None;
-                for (index, byte) in self.pending[..available].iter().copied().enumerate() {
-                    if byte == b'\n' {
-                        let empty =
-                            self.line_length == 0 || (self.line_length == 1 && self.line_cr);
-                        self.line_length = 0;
+                let mut take = 0;
+                let mut complete = false;
+                for byte in self.pending[..available].iter().copied() {
+                    take += 1;
+                    if self.line_cr && byte == b'\n' {
                         self.line_cr = false;
+                        continue;
+                    }
+                    self.line_cr = byte == b'\r';
+                    if matches!(byte, b'\r' | b'\n') {
+                        self.buffer.push(b'\n');
+                        let empty = self.line_length == 0;
+                        self.line_length = 0;
                         if empty {
-                            end = Some(index + 1);
+                            complete = true;
                             break;
                         }
                     } else {
-                        if self.line_length == 0 {
-                            self.line_cr = byte == b'\r';
-                        }
+                        self.buffer.push(byte);
                         self.line_length = self.line_length.saturating_add(1).min(2);
+                        if self.stream_start && self.buffer.len() == 3 {
+                            self.stream_start = false;
+                            if self.buffer == [0xef, 0xbb, 0xbf] {
+                                self.buffer.clear();
+                                self.line_length = 0;
+                            }
+                        }
                     }
                 }
-                let take = end.unwrap_or(available);
-                self.buffer.extend_from_slice(&self.pending[..take]);
+                self.event_bytes += take;
                 self.pending = self.pending.slice(take..);
-                if end.is_some() {
+                if complete {
+                    self.stream_start = false;
                     return Ok(Some(self.take_event()));
                 }
                 continue;
@@ -210,6 +225,7 @@ impl SseReader {
     }
 
     fn take_event(&mut self) -> Vec<u8> {
+        self.event_bytes = 0;
         let event = std::mem::take(&mut self.buffer);
         if let Ok(text) = std::str::from_utf8(&event)
             && let Some(data) = data_payload(text)
@@ -235,7 +251,7 @@ impl SseReader {
 }
 
 pub(crate) fn data_payload(text: &str) -> Option<Cow<'_, str>> {
-    let mut parts = text.lines().filter_map(|line| {
+    let mut parts = text.split(['\r', '\n']).filter_map(|line| {
         line.strip_suffix('\r')
             .unwrap_or(line)
             .strip_prefix("data:")

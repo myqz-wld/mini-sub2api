@@ -9,62 +9,27 @@ use http::HeaderMap;
 use serde_json::Map;
 use serde_json::Value;
 
-// Transport-neutral documented Responses create fields plus the captured Codex
-// `client_metadata` carrier. HTTP- and WebSocket-only fields are selected separately below.
+// Pinned ResponsesApiRequest / ResponseCreateWsRequest fields. Local reference carriers
+// are consumed by admission and reconstructed before this final projection.
 const SUPPORTED_REQUEST_FIELDS: &[&str] = &[
+    "model",
+    "instructions",
+    "input",
+    "tools",
+    "tool_choice",
+    "parallel_tool_calls",
+    "reasoning",
+    "store",
+    "stream",
+    "stream_options",
+    "include",
+    "service_tier",
+    "prompt_cache_key",
+    "text",
     "client_metadata",
     "access_programs",
-    "context_management",
-    "conversation",
-    "include",
-    "input",
-    "instructions",
-    "max_output_tokens",
-    "max_tool_calls",
-    "metadata",
-    "model",
-    "moderation",
-    "parallel_tool_calls",
-    "previous_response_id",
-    "prompt",
-    "prompt_cache_key",
-    "prompt_cache_options",
-    "prompt_cache_retention",
-    "reasoning",
-    "safety_identifier",
-    "service_tier",
-    "store",
-    "stream_options",
-    "temperature",
-    "text",
-    "tool_choice",
-    "tools",
-    "top_logprobs",
-    "top_p",
-    "truncation",
-    "user",
 ];
-
-const SUPPORTED_HTTP_FIELDS: &[&str] = &["background", "stream"];
-const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "stream_id", "stream"];
-// Codex 0.156.0 does not expose these public Responses fields in its request builder.
-const UNSUPPORTED_CODEX_EMULATION_FIELDS: &[&str] = &[
-    "metadata",
-    "prompt_cache_retention",
-    "safety_identifier",
-    "truncation",
-    "user",
-];
-const UNSUPPORTED_SUBSCRIPTION_FIELDS: &[&str] = &[
-    "max_output_tokens",
-    "max_completion_tokens",
-    "max_tokens",
-    "temperature",
-    "top_p",
-    "frequency_penalty",
-    "presence_penalty",
-    "stream_options",
-];
+const SUPPORTED_WEBSOCKET_FIELDS: &[&str] = &["type", "generate", "previous_response_id"];
 
 pub(super) fn apply(
     object: &mut Map<String, Value>,
@@ -73,10 +38,34 @@ pub(super) fn apply(
     profile: UpstreamProfile,
     force_lite: bool,
 ) -> Result<(Vec<String>, Vec<usize>), ()> {
+    let role = crate::native_request_policy::Role::read(object, headers);
+    let model = request_defaults::diagnostic_model(
+        object
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    );
+    crate::ignored_fields::scope(transport, role.label(), model, "construction", || {
+        apply_inner(object, headers, transport, profile, force_lite, role)
+    })
+}
+
+fn apply_inner(
+    object: &mut Map<String, Value>,
+    headers: &mut HeaderMap,
+    transport: EmulationTransport,
+    profile: UpstreamProfile,
+    force_lite: bool,
+    role: crate::native_request_policy::Role,
+) -> Result<(Vec<String>, Vec<usize>), ()> {
     crate::reasoning_visibility::ReasoningVisibility::read(object).map_err(|_| ())?;
+    crate::native_request_policy::filter_admission(object);
     let caller_base = codex_instructions::has_valid_instructions(object);
     retain_codex_fields(object, transport);
-    canonicalize_structured_request_members(object);
+    if object.contains_key("conversation") {
+        crate::ignored_fields::record("request", "conversation", "local_reference_only");
+    }
+
     let mut model_profile = object
         .get("model")
         .and_then(Value::as_str)
@@ -105,11 +94,26 @@ pub(super) fn apply(
         rewrite_subscription_system_roles(object);
     }
 
-    request_defaults::merge_request_defaults(
+    // Build local metadata before effort aliases are resolved for the wire.
+    let selected_effort = object
+        .get("reasoning")
+        .and_then(|r| r.get("effort"))
+        .cloned();
+    request_defaults::merge_for_role(
         object,
         model_profile,
         transport == EmulationTransport::Http,
+        role,
     );
+    let wire_effort = object
+        .get("reasoning")
+        .and_then(|r| r.get("effort"))
+        .cloned();
+    if let Some(effort) = &selected_effort
+        && let Some(reasoning) = object.get_mut("reasoning").and_then(Value::as_object_mut)
+    {
+        reasoning.insert("effort".into(), effort.clone());
+    }
     enforce_upstream_transport_controls(object, transport);
     let guardian_reviewer = headers
         .get("x-codex-guardian")
@@ -131,6 +135,40 @@ pub(super) fn apply(
             tool_namespaces_info: None,
         },
     );
+    if let Some(metadata) = object
+        .get_mut("client_metadata")
+        .and_then(Value::as_object_mut)
+    {
+        metadata.retain(|_, value| {
+            if value.is_string() {
+                true
+            } else {
+                crate::ignored_fields::record("client_metadata", "unknown", "non_string_metadata");
+                false
+            }
+        });
+    }
+    if let Some(effort) = wire_effort
+        && let Some(reasoning) = object.get_mut("reasoning").and_then(Value::as_object_mut)
+    {
+        reasoning.insert("effort".into(), effort);
+    }
+    crate::response_item_metadata::normalize_images(object.get_mut("input"), model_profile);
+    // Recorded now, removed from the sending copy only after state projection has completed.
+    if let Some(input) = object.get("input").and_then(Value::as_array) {
+        for item in input {
+            if item.get("type").and_then(Value::as_str) == Some("configuration_update") {
+                crate::ignored_fields::record(
+                    "input[]",
+                    "configuration_update",
+                    "feature_disabled",
+                );
+            }
+            if item.get("type").and_then(Value::as_str) == Some("item_reference") {
+                crate::ignored_fields::record("input[]", "item_reference", "unsupported_variant");
+            }
+        }
+    }
     responses_lite::canonicalize_request_items(
         object,
         (!model_profile.responses_lite).then_some("high"),
@@ -154,18 +192,12 @@ pub(super) fn apply(
 }
 
 fn retain_codex_fields(object: &mut Map<String, Value>, transport: EmulationTransport) {
-    object.retain(|name, _| {
-        SUPPORTED_REQUEST_FIELDS.contains(&name.as_str())
-            || match transport {
-                EmulationTransport::Http => SUPPORTED_HTTP_FIELDS.contains(&name.as_str()),
-                EmulationTransport::WebSocket => {
-                    SUPPORTED_WEBSOCKET_FIELDS.contains(&name.as_str())
-                }
-            }
-    });
-    for field in UNSUPPORTED_CODEX_EMULATION_FIELDS {
-        object.remove(*field);
+    let mut fields = SUPPORTED_REQUEST_FIELDS.to_vec();
+    fields.extend(["conversation", "previous_response_id"]);
+    if transport == EmulationTransport::WebSocket {
+        fields.extend(SUPPORTED_WEBSOCKET_FIELDS);
     }
+    crate::ignored_fields::retain(object, &fields, "request");
 }
 
 /// History eligibility compares effective caller settings using the same field policy as sending.
@@ -185,63 +217,6 @@ fn enforce_upstream_transport_controls(
     object.insert("store".to_string(), Value::Bool(false));
     let _ = transport;
     object.insert("stream".to_string(), Value::Bool(true));
-}
-
-fn canonicalize_structured_request_members(object: &mut Map<String, Value>) {
-    retain_object_member(object, "conversation", &["id"]);
-    retain_object_member(object, "moderation", &["model", "policy"]);
-    if let Some(policy) = object
-        .get_mut("moderation")
-        .and_then(Value::as_object_mut)
-        .and_then(|moderation| moderation.get_mut("policy"))
-        .and_then(Value::as_object_mut)
-    {
-        policy.retain(|name, _| matches!(name.as_str(), "input" | "output"));
-        for value in policy.values_mut() {
-            if let Some(mode) = value.as_object_mut() {
-                mode.retain(|name, _| name == "mode");
-            }
-        }
-    }
-    retain_object_member(object, "prompt", &["id", "variables", "version"]);
-    retain_object_member(object, "prompt_cache_options", &["mode", "ttl"]);
-    if let Some(entries) = object
-        .get_mut("context_management")
-        .and_then(Value::as_array_mut)
-    {
-        for entry in entries {
-            if let Some(entry) = entry.as_object_mut() {
-                entry.retain(|name, _| matches!(name.as_str(), "type" | "compact_threshold"));
-            }
-        }
-    } else if let Some(entry) = object
-        .get_mut("context_management")
-        .and_then(Value::as_object_mut)
-    {
-        entry.retain(|name, _| matches!(name.as_str(), "type" | "compact_threshold"));
-    }
-    let Some(tool_choice) = object.get_mut("tool_choice").and_then(Value::as_object_mut) else {
-        return;
-    };
-    tool_choice.retain(|name, _| {
-        matches!(
-            name.as_str(),
-            "type" | "name" | "server_label" | "mode" | "tools"
-        )
-    });
-    if let Some(tools) = tool_choice.get_mut("tools").and_then(Value::as_array_mut) {
-        for tool in tools {
-            if let Some(tool) = tool.as_object_mut() {
-                tool.retain(|name, _| matches!(name.as_str(), "type" | "name" | "server_label"));
-            }
-        }
-    }
-}
-
-fn retain_object_member(object: &mut Map<String, Value>, name: &str, fields: &[&str]) {
-    if let Some(member) = object.get_mut(name).and_then(Value::as_object_mut) {
-        member.retain(|name, _| fields.contains(&name.as_str()));
-    }
 }
 
 fn relocate_lite_tools(object: &mut Map<String, Value>) {
@@ -327,8 +302,14 @@ fn strip_unsupported_subscription_fields(object: &mut Map<String, Value>) {
         .and_then(|options| options.get("reasoning_summary_delivery"))
         .filter(|value| value.as_str() == Some("sequential_cutoff"))
         .cloned();
-    for field in UNSUPPORTED_SUBSCRIPTION_FIELDS {
-        object.remove(*field);
+    if let Some(options) = object
+        .get_mut("stream_options")
+        .and_then(Value::as_object_mut)
+    {
+        crate::ignored_fields::retain(options, &["reasoning_summary_delivery"], "stream_options");
+    }
+    if summary_delivery.is_none() {
+        crate::ignored_fields::remove(object, "stream_options", "request", "unsupported_field");
     }
     if let Some(delivery) = summary_delivery {
         object.insert(
@@ -412,7 +393,6 @@ pub(super) fn canonicalize_request_order(
         "model",
         "instructions",
         "previous_response_id",
-        "stream_id",
         "input",
         "tools",
         "tool_choice",

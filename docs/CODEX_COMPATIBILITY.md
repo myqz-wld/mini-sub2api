@@ -17,7 +17,7 @@ gateway decision is a Codex requirement or a separately selected user policy.
 | User-selected caller semantics | Preserve supplied instructions/tools/environment; omit absent or invalid bases; do not insert model-default prompts or discover client AGENTS/Skills. | Avoids changing the caller's task. Native CLI prompt/environment construction remains client-owned. |
 | User-selected isolation | Scoped reversible session/thread/turn/item/response IDs; account-level installation convergence in device mode. | Separates callers and preserves correlation. UUID formats follow native conventions, but the aliasing and convergence policy is gateway-specific. |
 | User-selected continuation | Keep the caller's transport; resolve eligible anonymous histories and referenced continuations; rebuild HTTP full context; expire local history after three business-idle hours. | Supports ordinary clients. These ownership, matching and retention rules extend native client behavior. |
-| User-selected output/parameter policy | Always retain upstream reasoning ciphertext, filter public visibility by include; keep the established Subscription sampling/output-limit filter. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
+| User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests, filter public visibility by include; classifier requests keep their native empty include. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
 | Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and 0.156.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
 | Gateway implementation defaults | Pin a Codex TUI identity using the Core runtime; synthesize missing root-agent/timing/analytics metadata and model catalog flags; choose backend Guardian metadata for bare non-reviewer requests. | Supplies a consistent emulated session. Individual fallback values are not all explicit user choices or evidence of the caller's real execution environment. |
 | Gateway implementation mechanisms | Infer omitted turns; suppress additional gateway prewarm/incrementality for callers with Originator; choose bounded storage, admission, retry and timeout mechanisms. | Prevents duplicated client automation and bounds resource use. Exact budgets/mechanisms are implementation choices, distinct from native wire behavior. |
@@ -172,7 +172,9 @@ libgcc_s/libm/libc, with no shared libssl/libcrypto; musl has no shared-library 
 Both contain the OpenSSL 3.6.4 identity and pass build-prefix scans.
 
 Matching versions and build configuration does not certify byte-identical TLS fingerprints.
-Codex's custom-CA-triggered HTTP switch to rustls remains outside this dependency alignment.
+Custom CA overrides now use native precedence (`CODEX_CA_CERTIFICATE` then `SSL_CERT_FILE`),
+append configured roots and select rustls for HTTP. Both HTTP/2 and WSS were verified against a
+loopback root/leaf CA; default HTTP native TLS remains unchanged.
 
 ## Field order and presence
 
@@ -188,7 +190,7 @@ The same assertion now runs in the native message and transport-lifecycle compar
 | HTTP routing token | Learn it from response headers and replay it only as a header. Do not learn it from SSE `response.metadata` or add it to HTTP JSON. |
 | Infrastructure cookies | HTTPS and WSS share the restricted jar, including `__oailb`. Successful and rejected upgrades refresh it; explicit Cookie headers take precedence. Host/path/secure/expiry checks apply, and account/authentication cookies are excluded. |
 | Function/schema serialization | Omit local `function.output_schema`, including namespace children. Place `minItems` after `items` and before composition/object fields, matching native schema serialization and Lite UUIDv5 input bytes. Response text schemas and schema property names remain intact. |
-| Lite setup | Native `additional_tools` has no message metadata; its base message has an empty metadata object. Generated setup follows that shape; proven native prefixes retain supplied fields without invented `turn_id`/`create_time`. Business-item metadata remains intact. |
+| Lite setup | Native `additional_tools` has no message metadata; its base message omits empty metadata with classification disabled. Generated setup follows that shape; proven native prefixes retain supplied fields without invented `turn_id`/`create_time`. Business-item metadata remains intact. |
 | No-tool ordinary requests | Emit `tools: []` when the caller omits tools, matching the native non-Lite builder. Lite still omits top-level tools. Explicit caller `null` follows the existing caller-control policy. |
 | Built-in provider | OpenAI adds `Version: 0.156.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
 | HTTP/WS headers | Compare the complete ordered name list and original casing, with no optional-header exclusion in the built-in capture. Check stable values separately from scoped identity/credential/nonce values. |
@@ -224,6 +226,18 @@ restores protocol field order without reconstructing tool/schema bytes or opaque
 Explicit gateway policies remain part of the oracle: absent bases stay absent; caller nullable
 controls are not conflated with omission; unsupported Subscription metadata/sampling/output controls
 are removed; `stream_options` retains only supported sequential reasoning-summary delivery.
+The subsequent fidelity repair narrows roots/ToolSpec/ResponseItem to pinned native types, resolves
+model effort aliases, constructs role-specific choice/include/text combinations, orders inner turn
+metadata, preserves imported output IDs and uses metadata events for ordinary WS routing state.
+Managed auth now follows reload → refresh with at most three inference attempts. HPACK Authorization
+uses native without-indexing (`0f08`), verified from a production-built request on a loopback peer.
+Ordinary HTTP pools live per call/retry group; classifiers retain pooling. OAuth form/query/header
+order, exact large integers and free output-schema order were also verified. SSE BOM/CR support is
+a compatibility improvement: native 0.156.0 also failed those bounded fixtures. These local results
+do not establish byte equality for every release/platform/optional-role combination. A legacy local
+shell mock was accepted by native, but no local_shell_call appeared in its subsequent request, so
+producer-specific metadata fidelity remains unproven.
+
 Complete and incremental WS requests are validated as separate native schemas: a missing reference
 requires complete input, while null/empty references and a suffix without its reference fail.
 This is protocol alignment under those policies, not a claim that arbitrary third-party prompts,

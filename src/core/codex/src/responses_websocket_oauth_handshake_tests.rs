@@ -270,7 +270,7 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert!(matches!(second_completion, DownstreamMessage::Text(_)));
     let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
-    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 3);
     assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 1);
     let frames = state.frames.lock().await.clone();
     assert_eq!(frames.len(), 2);

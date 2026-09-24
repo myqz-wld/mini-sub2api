@@ -20,7 +20,7 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     );
     let tools = serde_json::json!([
         {"type":"function","name":"lookup","description":"Lookup","parameters":{"type":"object"}},
-        {"type":"web_search_preview"}
+        {"type":"web_search"}
     ]);
     let body = serde_json::to_vec(&serde_json::json!({
         "model": "gpt-5.6-sol",
@@ -297,11 +297,8 @@ fn strips_subscription_incompatible_and_codex_unemitted_fields() {
     ] {
         assert!(value.get(field).is_none(), "field {field} crossed");
     }
-    assert_eq!(
-        value["stream_options"]["reasoning_summary_delivery"],
-        "sequential_cutoff"
-    );
-    assert_eq!(value["service_tier"], "auto");
+    assert!(value.get("stream_options").is_none());
+    assert!(value.get("service_tier").is_none());
     assert_eq!(value["reasoning"]["effort"], "medium");
 }
 

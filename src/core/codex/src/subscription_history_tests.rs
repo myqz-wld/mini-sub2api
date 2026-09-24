@@ -391,7 +391,12 @@ async fn direct_tool_items_require_a_nonblank_call_id_before_inference() {
             if let Some(call) = call {
                 item["call_id"] = call;
             }
+            let standalone = kind == "function_call_output" && item.get("call_id").is_none();
             let body = request(json!([item]));
+            if standalone {
+                assert!(prepare(&store, body).await.is_ok());
+                continue;
+            }
             assert!(
                 matches!(
                     prepare(&store, body).await,
