@@ -77,6 +77,10 @@ exhaustion or eviction falls back to the complete transaction. These limits do n
 Caches are allocated only for eligible deltas, retain no bodies/full ledgers, and are released on
 operation teardown; an already running blocking transaction keeps ownership only until it finishes.
 File changes, deletion, permission changes, day rollover and identity changes prevent stale reuse.
+Both modification and change timestamps must be at least two seconds old before a successful full
+transaction can seed the cache. Recent, future or invalid timestamps use the complete transaction;
+this catches rapid same-length rewrites even when a filesystem reports identical timestamps.
+Settled cache hits continue to use metadata checks without rereading or hashing the full ledger.
 
 Run the synthetic 13 MiB identity-ledger benchmark locally; it exercises one/two concurrent streams
 without provider calls and verifies cache budget release. Linux also checks process read counters to

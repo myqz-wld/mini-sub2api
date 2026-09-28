@@ -32,6 +32,7 @@ async fn unchanged_deltas_hit_and_preserve_validation_and_opaque_fields() {
         .await
         .unwrap();
     let path = store.state_path_for_test(NS);
+    StateStamp::wait_until_cacheable(&path);
     store
         .translate_response(NS, ACCOUNT, SCOPE, edit(delta("item_up"), &cache), |_| {
             Ok(())
@@ -86,6 +87,7 @@ async fn concurrent_request_caches_do_not_invalidate_each_other_on_private_reads
         .translate_response(NS, ACCOUNT, SCOPE, edit(delta("item_up"), &a), |_| Ok(()))
         .await
         .unwrap();
+    StateStamp::wait_until_cacheable(&store.state_path_for_test(NS));
     store
         .translate_response(NS, ACCOUNT, SCOPE, edit(delta("item_up"), &b), |_| Ok(()))
         .await
@@ -241,6 +243,7 @@ async fn cache_hits_respect_the_cross_process_file_lock() {
         })
         .await
         .unwrap();
+    StateStamp::wait_until_cacheable(&store.state_path_for_test(NS));
     store
         .translate_response(NS, ACCOUNT, SCOPE, edit(delta("item_up"), &cache), |_| {
             Ok(())

@@ -73,6 +73,9 @@ fn large_state() -> (tempfile::TempDir, RequestStateStore, usize) {
 #[ignore = "manual resource benchmark; run in release mode"]
 async fn benchmark_large_identity_state_deltas() {
     let (_temporary, store, bytes) = large_state();
+    crate::response_state_stamp::StateStamp::wait_until_cacheable(
+        &store.state_path_for_test(NAMESPACE),
+    );
     for concurrency in [1, 2] {
         let mut contexts = Vec::new();
         for index in 0..concurrency {

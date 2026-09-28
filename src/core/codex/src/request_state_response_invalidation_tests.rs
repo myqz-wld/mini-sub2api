@@ -32,6 +32,11 @@ async fn independent_store_writes_and_in_place_corruption_invalidate_cached_pair
     let store = RequestStateStore::new(temp.path().into());
     let cache = store.response_cache();
     let initial = translate(&store, &cache).await.unwrap();
+    StateStamp::wait_until_cacheable(&store.state_path_for_test(NS));
+    translate(&store, &cache).await.unwrap();
+    translate(&store, &cache).await.unwrap();
+    let hits = store.response_cache_budget.hits.load(Ordering::Relaxed);
+    assert_eq!(hits, 1);
     let second = RequestStateStore::new(temp.path().into());
     second
         .edit(NS, OWNER, SCOPE, |editor| {
@@ -40,8 +45,12 @@ async fn independent_store_writes_and_in_place_corruption_invalidate_cached_pair
         .await
         .unwrap();
     assert_eq!(translate(&store, &cache).await.unwrap(), initial);
-    assert_eq!(store.response_cache_budget.hits.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        store.response_cache_budget.hits.load(Ordering::Relaxed),
+        hits
+    );
     let path = store.state_path_for_test(NS);
+    assert!(StateStamp::read(&path).unwrap().is_none());
     let valid = std::fs::read(&path).unwrap();
     let mut corrupt = valid.clone();
     corrupt[0] = b'!';
@@ -106,6 +115,7 @@ fn day_rollover_uses_full_transaction_and_refreshes_retention() {
         .translate_response_locked(NS, OWNER, SCOPE, day, response(event(), &cache), |_| Ok(()))
         .unwrap();
     let path = store.state_path_for_test(NS);
+    StateStamp::wait_until_cacheable(&path);
     store
         .translate_response_locked(NS, OWNER, SCOPE, day, response(event(), &cache), |_| Ok(()))
         .unwrap();

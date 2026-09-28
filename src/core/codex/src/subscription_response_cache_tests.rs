@@ -37,7 +37,12 @@ async fn warmed_cache_keeps_terminal_integrity_and_rejects_late_deltas() {
     for valid in [false, true] {
         let (_temp, store) = store();
         let context = context(&store).await;
-        for event in prefix() {
+        for (index, event) in prefix().into_iter().enumerate() {
+            if index == 3 {
+                crate::response_state_stamp::StateStamp::wait_until_cacheable(
+                    &store.state_path_for_test(NAMESPACE),
+                );
+            }
             context.translate_value(event).await.unwrap();
         }
         assert!(store.response_cache_metrics().1 > 0);
@@ -63,12 +68,19 @@ async fn dropping_a_live_sse_stream_releases_cache_even_with_a_retained_context_
     let (_temp, store) = store();
     let context = context(&store).await;
     let retained = context.clone();
+    for event in prefix().into_iter().take(3) {
+        context.translate_value(event).await.unwrap();
+    }
+    crate::response_state_stamp::StateStamp::wait_until_cacheable(
+        &store.state_path_for_test(NAMESPACE),
+    );
     let frames = prefix()
         .into_iter()
+        .skip(3)
         .map(|event| Ok(Bytes::from(format!("data: {event}\n\n"))));
     let upstream: UpstreamByteStream = Box::pin(stream::iter(frames).chain(stream::pending()));
     let mut translated = Box::pin(translated_sse_frames(upstream, context, 4096));
-    for _ in 0..5 {
+    for _ in 0..2 {
         assert!(
             translated
                 .next()

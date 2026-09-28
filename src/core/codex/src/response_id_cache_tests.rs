@@ -31,6 +31,9 @@ async fn id_storage_is_bounded_and_does_not_grow_with_delta_bodies() {
         })
         .await
         .unwrap();
+    crate::response_state_stamp::StateStamp::wait_until_cacheable(
+        &store.state_path_for_test("synthetic"),
+    );
     let budget = Arc::new(CacheBudget::default());
     let cache = budget.cache().unwrap();
     for index in 0..100 {
