@@ -82,6 +82,11 @@ func TestCrossLanguageWebSocketPassthroughAndHTTPIndependence(t *testing.T) {
 		response.Header.Get("X-Models-Etag") != "e2e-etag" {
 		t.Fatalf("public handshake = %d/%#v", response.StatusCode, response.Header)
 	}
+	if response.Header.Get("X-Codex-Safety-Buffering-Enabled") != "true" ||
+		response.Header.Get("X-Codex-Safety-Buffering-Faster-Model") != "synthetic-fast-model" ||
+		response.Header.Get("X-Codex-Safety-Buffering-Private") != "" {
+		t.Fatal("WebSocket safety buffering handshake header policy changed")
+	}
 
 	prewarm := `{"type":"response.create","model":"prewarm","generate":false}`
 	inference := `{"type":"response.create","model":"e2e","previous_response_id":"resp_warm"}`
@@ -151,6 +156,9 @@ func newWebSocketE2EUpstream(t *testing.T) *websocketE2EUpstream {
 		upstream.headers = request.Header.Clone()
 		upstream.mu.Unlock()
 		writer.Header().Set("X-Models-Etag", "e2e-etag")
+		writer.Header().Set("X-Codex-Safety-Buffering-Enabled", "true")
+		writer.Header().Set("X-Codex-Safety-Buffering-Faster-Model", "synthetic-fast-model")
+		writer.Header().Set("X-Codex-Safety-Buffering-Private", "synthetic-private-extension")
 		connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 			CompressionMode: websocket.CompressionDisabled,
 		})

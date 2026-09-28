@@ -14,6 +14,16 @@ pub(super) const RULES: &[CarrierRule] = &[
     header("x-models-etag", None, CarrierAction::Opaque),
     header("x-reasoning-included", None, CarrierAction::Opaque),
     header("x-codex-turn-state", None, CarrierAction::Opaque),
+    header(
+        "x-codex-safety-buffering-enabled",
+        None,
+        CarrierAction::Opaque,
+    ),
+    header(
+        "x-codex-safety-buffering-faster-model",
+        None,
+        CarrierAction::Opaque,
+    ),
     header("x-ratelimit-limit-requests", None, CarrierAction::Opaque),
     header(
         "x-ratelimit-remaining-requests",

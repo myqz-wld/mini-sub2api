@@ -266,6 +266,9 @@ mod tests {
             "X-Codex-Installation-Id":"synthetic-private", "future-private":"synthetic-private",
             "X-Request-Id":["provider-one","provider-two"],
             "Openai-Request-Id":"provider-three", "x-codex-turn-state":[["routing-state"]],
+            "X-Codex-Safety-Buffering-Enabled":["true","false"],
+            "x-codex-safety-buffering-faster-model":"synthetic-fast-model",
+            "x-codex-safety-buffering-private":"synthetic-private",
             "retry-after":"5", "openai-model":{"private":"synthetic-private"},
             "cache-control":"bad\r\nheader"}});
         filter_response(&mut value, "req_gateway");
@@ -273,7 +276,9 @@ mod tests {
             value["headers"],
             json!({
             "X-Request-Id":["req_gateway","req_gateway"], "Openai-Request-Id":"req_gateway",
-            "x-codex-turn-state":[["routing-state"]], "retry-after":"5"})
+            "x-codex-turn-state":[["routing-state"]], "retry-after":"5",
+            "X-Codex-Safety-Buffering-Enabled":["true","false"],
+            "x-codex-safety-buffering-faster-model":"synthetic-fast-model"})
         );
         filter_response(&mut value, "");
         assert!(value["headers"].get("X-Request-Id").is_none());

@@ -97,7 +97,9 @@ OpenCode custom providers and bare clients can associate full histories without 
 - Bare and actual OpenCode captures also check ordered protocol objects and complete upstream
   header order/casing against independently captured 0.156.0 baselines. Late identity insertion
   and automatic WS continuation preserve native field positions.
-- Subscription response metadata headers use the public HTTP header policy. Protocol errors
+- HTTP response headers, WS handshake headers and Subscription response metadata preserve
+  upstream `x-codex-safety-buffering-enabled` and `x-codex-safety-buffering-faster-model` values.
+  Subscription response metadata headers use the public HTTP header policy. Protocol errors
   preserve stream correlation, reviewed codes and generic messages, including flat errors with
   `error: null`; supported numeric retry delays survive. Private SSE
   IDs/comments/extensions are removed. Model text, tool content and API-key bodies remain opaque.

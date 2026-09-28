@@ -214,7 +214,10 @@ connection. Pinned tungstenite forks and compression match v0.156.0; Go need not
 
 - The core preserves the upstream status but default-denies provider response headers. It allows
   only content/cache encoding metadata, retry and rate-limit fields, model/timing fields,
-  `x-reasoning-included`, `x-models-etag`, and opaque `x-codex-turn-state`. Recognized
+  `x-reasoning-included`, `x-models-etag`, opaque `x-codex-turn-state`,
+  `x-codex-safety-buffering-enabled`, and `x-codex-safety-buffering-faster-model`. The two safety
+  buffering fields retain upstream values in HTTP responses, WS handshakes and Subscription
+  response metadata events (including `codex.response.metadata`). Recognized
   `x-request-id`, `openai-request-id`, and `request-id` names are retained with every value replaced
   by the current gateway `req_*` alias. Lifecycle identity headers and unknown headers are removed.
 - One raw provider request ID is selected in `x-request-id`, `openai-request-id`, `request-id`

@@ -13,6 +13,9 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	source.Set("Cache-Control", "no-store")
 	source.Set("X-Request-Id", "provider-raw")
 	source.Set("X-Codex-Turn-State", "opaque")
+	source["x-codex-safety-buffering-enabled"] = []string{"true", "false"}
+	source.Set("X-Codex-Safety-Buffering-Faster-Model", "synthetic-fast-model")
+	source.Set("X-Codex-Safety-Buffering-Private", "must-not-cross")
 	source.Set("X-Codex-Installation-Id", "must-not-cross")
 	source.Set("X-Codex-Guardian", "reviewer")
 	source.Set("X-Unrecognized-Provider-Extension", "must-not-cross")
@@ -23,6 +26,8 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	if destination.Get("Cache-Control") != "no-store" ||
 		destination.Get("X-Request-Id") != "req_gateway" ||
 		destination.Get("X-Codex-Turn-State") != "opaque" ||
+		strings.Join(destination.Values("X-Codex-Safety-Buffering-Enabled"), ",") != "true,false" ||
+		destination.Get("X-Codex-Safety-Buffering-Faster-Model") != "synthetic-fast-model" ||
 		destination.Get("Server-Timing") != "upstream_ttfb;dur=6" ||
 		ttfb == nil || ttfb.Milliseconds() != 6 {
 		t.Fatalf("safe response headers = %#v / %v", destination, ttfb)
@@ -30,6 +35,7 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	for _, name := range []string{
 		"X-Codex-Installation-Id",
 		"X-Codex-Guardian",
+		"X-Codex-Safety-Buffering-Private",
 		"X-Unrecognized-Provider-Extension",
 		protocolv1.ProviderRequestIDHeader,
 		protocolv1.CoreTTFBHeader,

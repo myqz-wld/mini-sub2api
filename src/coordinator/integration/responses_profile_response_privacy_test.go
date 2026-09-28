@@ -11,19 +11,22 @@ import (
 	"github.com/coder/websocket"
 )
 
-func privacyMetadata() map[string]any {
-	return map[string]any{"type": "response.metadata", "headers": map[string]any{
+func privacyMetadata(eventType string) map[string]any {
+	return map[string]any{"type": eventType, "headers": map[string]any{
 		"Authorization": "synthetic-private-auth", "Set-Cookie": "synthetic-private-cookie",
 		"X-Codex-Installation-Id": "synthetic-private-installation", "X-Future-Private": "synthetic-private-extension",
 		"X-Request-Id": []any{"synthetic-provider-id"}, "retry-after": "5",
-		"x-codex-turn-state": []any{"synthetic-routing-state"},
+		"x-codex-turn-state":                    []any{"synthetic-routing-state"},
+		"x-codex-safety-buffering-enabled":      "true",
+		"X-Codex-Safety-Buffering-Faster-Model": []any{"synthetic-fast-model"},
+		"x-codex-safety-buffering-private":      "synthetic-private-extension",
 	}}
 }
 
 func privacyFailure(responseID string) map[string]any {
 	return map[string]any{"type": "response.failed", "response": map[string]any{
 		"id": responseID, "object": "response", "output": []any{},
-		"headers": privacyMetadata()["headers"],
+		"headers": privacyMetadata("response.metadata")["headers"],
 		"error":   map[string]any{"code": "context_length_exceeded", "message": "synthetic-private-error", "id": "synthetic-private-id"},
 	}}
 }
@@ -34,13 +37,17 @@ func assertPublicMetadataPrivacy(t *testing.T, event map[string]any, requestID s
 	if !ok {
 		t.Fatal("metadata header container missing")
 	}
+	models, ok := headers["X-Codex-Safety-Buffering-Faster-Model"].([]any)
+	if headers["x-codex-safety-buffering-enabled"] != "true" || !ok || len(models) != 1 || models[0] != "synthetic-fast-model" {
+		t.Fatal("safety buffering metadata changed")
+	}
 	if !subscription {
 		if headers["Authorization"] != "synthetic-private-auth" {
 			t.Fatal("API-key metadata changed")
 		}
 		return
 	}
-	for _, name := range []string{"Authorization", "Set-Cookie", "X-Codex-Installation-Id", "X-Future-Private"} {
+	for _, name := range []string{"Authorization", "Set-Cookie", "X-Codex-Installation-Id", "X-Future-Private", "x-codex-safety-buffering-private"} {
 		if _, exists := headers[name]; exists {
 			t.Fatalf("private metadata field crossed: %s", name)
 		}
@@ -90,9 +97,12 @@ func TestProfilesApplyResponsePrivacyToHTTPJSONAndSSE(t *testing.T) {
 		}
 		w.Header().Set("X-Request-Id", "synthetic-provider-id")
 		w.Header().Set("Authorization", "synthetic-private-auth")
+		w.Header().Set("X-Codex-Safety-Buffering-Enabled", "false")
+		w.Header().Set("X-Codex-Safety-Buffering-Faster-Model", "synthetic-fast-model")
+		w.Header().Set("X-Codex-Safety-Buffering-Private", "synthetic-private-extension")
 		if request["stream"] == true {
 			w.Header().Set("Content-Type", "text/event-stream")
-			for _, event := range []map[string]any{privacyMetadata(), privacyFailure(responseID)} {
+			for _, event := range []map[string]any{privacyMetadata("response.metadata"), privacyMetadata("codex.response.metadata"), privacyFailure(responseID)} {
 				_, _ = fmt.Fprint(w, ": synthetic-private-sse\nid: synthetic-private-sse\nretry: synthetic-private-sse\n")
 				_, _ = fmt.Fprintf(w, "data: %s\n\n", mustRequestJSONValue(event))
 			}
@@ -114,6 +124,11 @@ func TestProfilesApplyResponsePrivacyToHTTPJSONAndSSE(t *testing.T) {
 				if status != http.StatusOK || headers.Get("Authorization") != "" {
 					t.Fatal("HTTP privacy fixture failed")
 				}
+				if headers.Get("X-Codex-Safety-Buffering-Enabled") != "false" ||
+					headers.Get("X-Codex-Safety-Buffering-Faster-Model") != "synthetic-fast-model" ||
+					headers.Get("X-Codex-Safety-Buffering-Private") != "" {
+					t.Fatal("HTTP safety buffering header policy changed")
+				}
 				if !stream {
 					assertPublicFailurePrivacy(t, decodeRequestObject(t, []byte(body)), subscription)
 					return
@@ -121,7 +136,7 @@ func TestProfilesApplyResponsePrivacyToHTTPJSONAndSSE(t *testing.T) {
 				if strings.Contains(body, "synthetic-private-sse") == subscription {
 					t.Fatal("SSE envelope privacy differs from its credential profile")
 				}
-				metadataSeen, failureSeen := false, false
+				metadataSeen, failureSeen := map[string]bool{}, false
 				for _, line := range strings.Split(body, "\n") {
 					data, ok := strings.CutPrefix(line, "data: ")
 					if !ok {
@@ -129,15 +144,15 @@ func TestProfilesApplyResponsePrivacyToHTTPJSONAndSSE(t *testing.T) {
 					}
 					event := decodeRequestObject(t, []byte(data))
 					switch event["type"] {
-					case "response.metadata":
+					case "response.metadata", "codex.response.metadata":
 						assertPublicMetadataPrivacy(t, event, headers.Get("X-Mini-Sub2Api-Request-Id"), subscription)
-						metadataSeen = true
+						metadataSeen[event["type"].(string)] = true
 					case "response.failed":
 						assertPublicFailurePrivacy(t, event, subscription)
 						failureSeen = true
 					}
 				}
-				if !metadataSeen || !failureSeen {
+				if len(metadataSeen) != 2 || !failureSeen {
 					t.Fatal("missing privacy fixture events")
 				}
 			})
@@ -147,7 +162,7 @@ func TestProfilesApplyResponsePrivacyToHTTPJSONAndSSE(t *testing.T) {
 
 func TestProfilesApplyResponsePrivacyToWebSocket(t *testing.T) {
 	fixture := newResponsesProfileWebSocketFixtureWithResponder(t, func(connection *websocket.Conn, _ []byte, responseID string) {
-		for _, event := range []map[string]any{privacyMetadata(), privacyFailure(responseID)} {
+		for _, event := range []map[string]any{privacyMetadata("response.metadata"), privacyMetadata("codex.response.metadata"), privacyFailure(responseID)} {
 			_ = connection.Write(context.Background(), websocket.MessageText, mustRequestJSONValue(event))
 		}
 	})
@@ -160,8 +175,13 @@ func TestProfilesApplyResponsePrivacyToWebSocket(t *testing.T) {
 			connection := dialResponsesProfileWebSocket(t, fixture.public, key, http.Header{"Originator": []string{"codex_exec"}})
 			defer connection.CloseNow()
 			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.4","input":[]}`)
-			metadata := decodeRequestObject(t, []byte(readE2EWebSocketText(t, connection)))
-			assertPublicMetadataPrivacy(t, metadata, "", subscription)
+			for _, eventType := range []string{"response.metadata", "codex.response.metadata"} {
+				metadata := decodeRequestObject(t, []byte(readE2EWebSocketText(t, connection)))
+				if metadata["type"] != eventType {
+					t.Fatal("metadata event type changed")
+				}
+				assertPublicMetadataPrivacy(t, metadata, "", subscription)
+			}
 			failure := decodeRequestObject(t, []byte(readE2EWebSocketText(t, connection)))
 			assertPublicFailurePrivacy(t, failure, subscription)
 		})
