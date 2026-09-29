@@ -100,6 +100,9 @@ OpenCode custom providers and bare clients can associate full histories without 
 - Codex 0.158.0 adds numeric reasoning effort and gpt-6-sol/luna profiles. Supplied MCP attribution
   is bounded and scoped; optional tool observations follow native prompt and outgoing-message
   budgets with persistent completeness revocation. See [release changes](docs/CODEX_COMPATIBILITY.md#changes-from-01560).
+- Native typed tool schemas retain type-free enums and optional schema fields; raw MCP-style
+  schemas still use import lowering. Code Mode cell origins follow call-ID mappings, and inventory
+  loss remains revoked after historical-turn import, restart or optional output-ID omission.
 - HTTP response headers, WS handshake headers and Subscription response metadata preserve
   upstream `x-codex-safety-buffering-enabled` and `x-codex-safety-buffering-faster-model` values.
   Subscription response metadata headers use the public HTTP header policy. Protocol errors
@@ -113,6 +116,9 @@ OpenCode custom providers and bare clients can associate full histories without 
   separate bounded budget and no longer hit the logical-ID length limit.
 - Success requires consistent terminal/output evidence. Failed or partial output cannot become
   reusable history; uncertain sends are not automatically replayed.
+- WS accepts native numeric error status fields. After a non-flex, statusless error, one matching
+  failed footer can supply usage within one second without owning a newer request. Native terminal
+  HTTP/deferred-WS error categories survive bounded, private normalization.
 - Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state
   still uses the persistent transaction. Files changed within the last two seconds require full
   validation before cache reuse. See [cache bounds](docs/MEMORY.md#response-identity-work).

@@ -38,7 +38,7 @@ func TestNative1580ObservationBudgetAtUpstream(t *testing.T) {
 				input := []any{map[string]any{"role": "user", "content": content},
 					map[string]any{"type": "function_call", "call_id": "budget-call", "name": "probe", "arguments": "{}"},
 					map[string]any{"type": "function_call_output", "call_id": "budget-call", "output": "synthetic tool result", meta: map[string]any{
-						"cell_id": "budget-cell", "executed_tool_calls": []any{map[string]any{"name": "tools.probe", "arguments": map[string]any{"data": argument}, "tool_result_metadata": result}}, "tool_calls_complete": true}}}
+						"cell_id": "budget-call", "executed_tool_calls": []any{map[string]any{"name": "tools.probe", "arguments": map[string]any{"data": argument}, "tool_result_metadata": result}}, "tool_calls_complete": true}}}
 				body := map[string]any{"model": "gpt-5.5", "input": input, "tools": []any{map[string]any{"type": "function", "name": "probe", "parameters": map[string]any{"type": "object"}}}}
 				response := client.send(body)
 				wires := businessWires(capture.snapshot())
@@ -59,6 +59,9 @@ func TestNative1580ObservationBudgetAtUpstream(t *testing.T) {
 				items := wires[0].value["input"].([]any)
 				last := items[len(items)-1].(map[string]any)
 				observation := last[meta].(map[string]any)
+				if observation["cell_id"] != last["call_id"] {
+					t.Fatal("observation origin did not follow its source call")
+				}
 				call := observation["executed_tool_calls"].([]any)[0].(map[string]any)
 				if call["tool_result_metadata"].(map[string]any)["openai/resource_access"] == nil || last["output"] != "synthetic tool result" {
 					t.Fatal("budgeting lost resource evidence or business output")
@@ -75,7 +78,7 @@ func TestNative1580ObservationBudgetAtUpstream(t *testing.T) {
 				output := response["output"].([]any)
 				input = append(input, output...)
 				input = append(input, map[string]any{"type": "function_call", "call_id": "wait-call", "name": "probe", "arguments": "{}"},
-					map[string]any{"type": "function_call_output", "call_id": "wait-call", "output": "synthetic wait", meta: map[string]any{"cell_id": "budget-cell", "executed_tool_calls": []any{}, "tool_calls_complete": true}},
+					map[string]any{"type": "function_call_output", "call_id": "wait-call", "output": "synthetic wait", meta: map[string]any{"cell_id": "budget-call", "executed_tool_calls": []any{}, "tool_calls_complete": true}},
 					map[string]any{"role": "user", "content": "next synthetic turn"})
 				body["input"] = input
 				client.send(body)

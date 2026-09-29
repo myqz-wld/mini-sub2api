@@ -3,6 +3,13 @@ use super::*;
 pub(super) const RULES: &[CarrierRule] = &[
     wire(
         CarrierDirection::Response,
+        CarrierContainer::ItemPassthroughMetadata,
+        "cell_id",
+        CarrierShape::Scalar,
+        Some(WireIdDomain::Call),
+    ),
+    wire(
+        CarrierDirection::Response,
         CarrierContainer::TopLevel,
         "context_window_id",
         CarrierShape::Scalar,
@@ -293,7 +300,7 @@ pub(super) const RULES: &[CarrierRule] = &[
         CarrierDirection::Response,
         CarrierContainer::Item,
         "internal_chat_message_metadata_passthrough",
-        CarrierShape::IdentityMetadataObject,
+        CarrierShape::ItemPassthroughMetadataObject,
         None,
     ),
     wire(

@@ -33,3 +33,26 @@ func TestParseWebSocketEventRejectsInvalidTypeOrUsage(t *testing.T) {
 		t.Fatalf("negative usage event = %#v, %v", event, ok)
 	}
 }
+
+func TestWebSocketErrorsDoNotDependOnStatusOrOptionalUsage(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"error","status":400,"error":{"code":"invalid_prompt"}}`,
+		`{"type":"error","status":429,"error":{"code":"flex_unavailable"}}`,
+		`{"type":"error","status":400,"usage":{"total_tokens":"invalid"}}`,
+		`{"type":"error","status":400,"response":"optional-provider-extension"}`,
+	} {
+		event, ok := ParseWebSocketEvent([]byte(raw))
+		if !ok || event.Type != "error" || event.Usage != nil {
+			t.Fatal("valid error event was rejected by optional fields")
+		}
+	}
+	event, ok := ParseWebSocketEvent([]byte(`{"type":"error","status":400,"usage":{"total_tokens":7}}`))
+	if !ok || event.Usage == nil || event.Usage.TotalTokens != 7 {
+		t.Fatal("numeric error status prevented valid usage extraction")
+	}
+	observer := NewObserver("application/json")
+	observer.Observe([]byte(`{"type":"error","status":400}`))
+	if observer.TerminalStatus() != TerminalUpstreamError {
+		t.Fatal("numeric error status prevented HTTP error observation")
+	}
+}

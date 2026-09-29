@@ -11,7 +11,7 @@ fn large_store() -> (tempfile::TempDir, RequestStateStore) {
 }
 
 fn observed(text: &str, bytes: usize) -> Value {
-    json!({"role":"user","content":text,META:{"cell_id":text,"executed_tool_calls":[{
+    json!({"id":format!("msg_{text}"),"role":"user","content":text,META:{"executed_tool_calls":[{
         "name":"tools.probe","arguments":{},"tool_result_metadata":{"large":"x".repeat(bytes)}}],
         "tool_calls_complete":true}})
 }

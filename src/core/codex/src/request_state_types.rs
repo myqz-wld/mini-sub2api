@@ -46,6 +46,8 @@ pub(crate) struct PersistedRequestState {
     pub(crate) tool_inventory_revocations: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) tool_inventory_uncertain: bool,
+    #[serde(default, skip_serializing_if = "inventory_revision_is_zero")]
+    pub(crate) tool_inventory_revision: u8,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -98,6 +100,9 @@ pub(crate) struct ChildThreadEntry {
 pub(crate) struct TurnEntry {
     pub(crate) id: String,
     pub(crate) thread_id: String,
+    // Inventory provenance survives copying a historical turn to a new execution owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) inventory_source_thread_id: Option<String>,
     pub(crate) root_turn_id: String,
     pub(crate) parent_turn_id: Option<String>,
     pub(crate) started_at_unix_ms: i64,
@@ -174,8 +179,13 @@ impl PersistedRequestState {
             scopes: BTreeMap::new(),
             tool_inventory_revocations: BTreeSet::new(),
             tool_inventory_uncertain: false,
+            tool_inventory_revision: 0,
         }
     }
+}
+
+fn inventory_revision_is_zero(revision: &u8) -> bool {
+    *revision == 0
 }
 
 impl ScopeState {

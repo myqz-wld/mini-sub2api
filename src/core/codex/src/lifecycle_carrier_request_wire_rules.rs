@@ -141,6 +141,19 @@ pub(super) const RULES: &[CarrierRule] = &[
         CarrierShape::Scalar,
         Some(WireIdDomain::Item),
     ),
+    wire(
+        CarrierDirection::Request,
+        CarrierContainer::Item,
+        "internal_chat_message_metadata_passthrough",
+        CarrierShape::ItemPassthroughMetadataObject,
+        None,
+    ),
+    wire_reference(
+        CarrierContainer::ItemPassthroughMetadata,
+        "cell_id",
+        CarrierShape::Scalar,
+        Some(WireIdDomain::Call),
+    ),
     wire_reference(
         CarrierContainer::SafetyCheck,
         "id",

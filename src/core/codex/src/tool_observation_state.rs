@@ -2,26 +2,70 @@
 use super::RequestStateEditor;
 use crate::request_state_store::RequestStateStore;
 use crate::request_state_types::MAX_TOOL_INVENTORY_REVOCATIONS;
+use crate::request_state_types::WireIdDomain;
 use crate::tool_observation_budget::{self as budget, Origin};
 use serde_json::{Map, Value};
 
 impl RequestStateEditor<'_> {
-    fn inventory_keys(&mut self, origin: &Origin, thread: &str) -> Option<Vec<String>> {
-        let owner = if let Some(turn) = &origin.turn {
-            self.turn_by_id(turn)?.1.thread_id
+    pub(crate) fn preserve_inventory_origin(
+        &mut self,
+        imported_key: &str,
+        source: &super::TurnAssignment,
+    ) -> anyhow::Result<()> {
+        let owner = source
+            .inventory_source_thread_id
+            .as_ref()
+            .unwrap_or(&source.thread_id);
+        let entry = self
+            .scope_mut()
+            .turns
+            .get_mut(imported_key)
+            .ok_or_else(|| anyhow::anyhow!("imported inventory turn is missing"))?;
+        if let Some(existing) = &entry.inventory_source_thread_id {
+            anyhow::ensure!(existing == owner, "inventory source ownership changed");
         } else {
-            thread.to_string()
+            entry.inventory_source_thread_id = Some(owner.clone());
+            self.changed = true;
+        }
+        Ok(())
+    }
+
+    fn inventory_keys(&mut self, origin: &Origin, thread: &str) -> Option<Vec<String>> {
+        let owners = if let Some(turn) = &origin.turn {
+            let turn = self.turn_by_id(turn)?.1;
+            let mut owners = vec![turn.thread_id];
+            if let Some(source) = turn.inventory_source_thread_id
+                && !owners.contains(&source)
+            {
+                owners.push(source);
+            }
+            owners
+        } else {
+            vec![thread.to_string()]
         };
         let mut keys = Vec::new();
-        for (kind, raw) in [
-            ("tool-cell-loss", &origin.cell),
-            ("tool-item-loss", &origin.item),
-        ] {
-            if let Some(raw) = raw {
-                keys.push(self.derived_lookup(kind, &[owner.as_bytes(), raw.as_bytes()]));
+        for owner in owners {
+            for (kind, raw, domain) in [
+                ("tool-cell-loss", &origin.cell, WireIdDomain::Call),
+                ("tool-item-loss", &origin.item, WireIdDomain::Item),
+                ("tool-call-loss", &origin.call, WireIdDomain::Call),
+            ] {
+                if let Some(raw) = raw.as_deref().filter(|raw| !raw.is_empty()) {
+                    // Full imported history and ordinary replay may use opposite
+                    // representations of the same scoped invocation. Neither alias
+                    // choice nor optional item-ID omission restores completeness.
+                    let mut anchors = std::collections::BTreeSet::from([raw.to_string()]);
+                    anchors.extend(self.existing_wire_from_upstream(domain, raw).ok()?);
+                    anchors.extend(self.existing_wire_from_downstream(domain, raw).ok()?);
+                    for anchor in anchors {
+                        keys.push(
+                            self.derived_lookup(kind, &[owner.as_bytes(), anchor.as_bytes()]),
+                        );
+                    }
+                }
             }
         }
-        Some(keys)
+        (!keys.is_empty()).then_some(keys)
     }
 
     pub(crate) fn revoke_tool_inventories(&mut self, losses: &[Origin], thread: &str) {
@@ -29,6 +73,10 @@ impl RequestStateEditor<'_> {
             return;
         }
         for origin in losses {
+            if self.state.tool_inventory_revision == 0 {
+                self.state.tool_inventory_revision = 1;
+                self.changed = true;
+            }
             let Some(keys) = self.inventory_keys(origin, thread) else {
                 // An imported turn alias may have no retained owner assignment. Keep negative
                 // evidence conservatively even if the same cell later has a resolvable turn.

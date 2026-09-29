@@ -72,17 +72,8 @@ func canonicalExpectedTools(tools []any) []any {
 			copy[name] = value
 		}
 		if copy["type"] == "function" {
-			if schema, ok := copy["parameters"].(map[string]any); ok && schema["type"] == "object" {
-				cloned := make(map[string]any, len(schema)+1)
-				for key, value := range schema {
-					cloned[key] = value
-				}
-				if _, ok := cloned["properties"]; !ok {
-					cloned["properties"] = map[string]any{}
-				}
-				copy["parameters"] = cloned
-			}
-
+			// These fixtures supply native typed parameters. Missing properties
+			// stays absent, as in JsonSchema's optional field serialization.
 			if _, ok := copy["strict"]; !ok {
 				copy["strict"] = false
 			}

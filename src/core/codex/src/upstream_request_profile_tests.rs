@@ -43,6 +43,112 @@ fn guardian_headers_survive_http_and_websocket_without_crossing_response_privacy
 }
 
 #[test]
+fn guardian_reviewer_uses_native_01580_late_header_merge_order() {
+    // Pinned ModelClient reviewer builder + endpoint/default merge, followed by
+    // tungstenite handshake serialization. Ordinary and classifier controls live
+    // in oauth_wire_tests and classifier_tests.
+    let http_order = [
+        "version",
+        "x-codex-beta-features",
+        "x-codex-window-id",
+        "x-codex-turn-metadata",
+        "x-codex-parent-thread-id",
+        "x-openai-subagent",
+        "x-openai-internal-codex-responses-lite",
+        "x-codex-guardian",
+        "x-codex-inference-call-id",
+        "x-client-request-id",
+        "session-id",
+        "thread-id",
+        "accept",
+        "content-encoding",
+        "content-type",
+        "authorization",
+        "chatgpt-account-id",
+        "originator",
+        "user-agent",
+    ];
+    let mut headers = HeaderMap::new();
+    for name in http_order {
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_static("synthetic"),
+        );
+    }
+    headers.insert("x-codex-guardian", HeaderValue::from_static("reviewer"));
+    headers.remove("content-encoding");
+    let auth = ResolvedAuth::CodexOAuth {
+        token: "synthetic".into(),
+        account_id: "synthetic".into(),
+    };
+    let request = build(
+        &offline_client(),
+        &headers,
+        "http://127.0.0.1:1/responses",
+        &auth,
+        UpstreamProfile::CodexSubscription1580,
+        Bytes::from_static(b"{}"),
+    )
+    .unwrap();
+    assert_eq!(
+        request
+            .headers()
+            .keys()
+            .map(|n| n.as_str())
+            .collect::<Vec<_>>(),
+        http_order
+    );
+    let (request, config) = build_websocket(
+        &headers,
+        "http://127.0.0.1:1/responses",
+        &auth,
+        UpstreamProfile::CodexSubscription1580,
+        4096,
+    )
+    .unwrap();
+    let (bytes, _) = tokio_tungstenite::tungstenite::handshake::client::generate_request(
+        request,
+        Some(&config.extensions),
+    )
+    .unwrap();
+    let raw = std::str::from_utf8(&bytes).unwrap();
+    let names = raw
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(name, _)| name.to_ascii_lowercase())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "host",
+            "connection",
+            "upgrade",
+            "sec-websocket-version",
+            "sec-websocket-key",
+            "chatgpt-account-id",
+            "authorization",
+            "user-agent",
+            "originator",
+            "x-codex-guardian",
+            "version",
+            "x-codex-beta-features",
+            "x-client-request-id",
+            "session-id",
+            "thread-id",
+            "x-codex-window-id",
+            "x-codex-turn-metadata",
+            "x-codex-parent-thread-id",
+            "x-openai-subagent",
+            "openai-beta",
+            "sec-websocket-extensions",
+        ]
+    );
+}
+
+#[test]
 fn originator_profile_cannot_promote_an_api_key_to_subscription_auth() {
     let auth = ResolvedAuth::OpenAiApiKey {
         token: "offline-profile-key-not-real".to_string(),

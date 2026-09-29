@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::subscription_context::{Operation, Pending};
 
-/// Failed SSE validation stays charged to its existing lease without owning an execution lane.
+/// Failed-stream validation stays charged to its existing lease without owning an execution lane.
 /// It can validate a failure footer but can never publish history or commit compaction.
 #[derive(Clone)]
 pub(crate) struct SseFailureTail(Arc<FailedOperation>);
@@ -45,7 +45,11 @@ impl SseFailureTail {
             .lock()
             .map_err(|_| anyhow::anyhow!("failed response state unavailable"))?;
         let response = event.get("response").unwrap_or(&Value::Null);
-        if let Some(id) = response.get("id").and_then(Value::as_str) {
+        if let Some(id) = response
+            .get("id")
+            .or_else(|| event.get("response_id"))
+            .and_then(Value::as_str)
+        {
             if let Some(previous) = &facts.response_id {
                 anyhow::ensure!(previous == id, "response ownership changed after SSE error");
             } else {
@@ -67,6 +71,34 @@ impl SseFailureTail {
 }
 
 impl ResponseStateContext {
+    pub(crate) fn operation_id(&self) -> Result<Option<String>> {
+        Ok(self
+            .operation
+            .lock()
+            .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
+            .as_ref()
+            .map(|operation| operation.0.id.clone()))
+    }
+
+    pub(crate) fn frozen_failure(&self) -> Result<(Self, Option<SseFailureTail>)> {
+        let mut frozen = self.clone();
+        frozen.owner = Arc::new(Mutex::new(
+            self.owner
+                .lock()
+                .map_err(|_| anyhow::anyhow!("response owner unavailable"))?
+                .clone(),
+        ));
+        frozen.operation = Arc::new(Mutex::new(
+            self.operation
+                .lock()
+                .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
+                .clone(),
+        ));
+        frozen.identity_cache = Arc::new(Mutex::new(Default::default()));
+        let tail = frozen.detach_sse_failure()?;
+        Ok((frozen, tail))
+    }
+
     pub(crate) fn detach_sse_failure(&self) -> Result<Option<SseFailureTail>> {
         let operation = self
             .operation

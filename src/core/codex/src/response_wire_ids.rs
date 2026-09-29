@@ -97,6 +97,18 @@ fn translate_response_container(
                     translate_identity_metadata(editor, metadata)?;
                 }
             }
+            CarrierShape::ItemPassthroughMetadataObject => {
+                if let Some(metadata) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_identity_metadata(editor, metadata)?;
+                    translate_response_container(
+                        editor,
+                        metadata,
+                        CarrierContainer::ItemPassthroughMetadata,
+                        owner,
+                        false,
+                    )?;
+                }
+            }
             CarrierShape::CallerObject => {
                 if let Some(caller) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
                     translate_response_container(

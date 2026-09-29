@@ -43,6 +43,12 @@ pub(crate) fn canonicalize_optionals(object: &mut Map<String, Value>) {
 }
 
 pub(crate) fn canonicalize_action(action: &mut Map<String, Value>) {
+    if matches!(
+        action.get("type").and_then(Value::as_str),
+        Some("search" | "open_page" | "find_in_page")
+    ) {
+        action.retain(|_, value| !value.is_null());
+    }
     let order: &[&str] = match action.get("type").and_then(Value::as_str) {
         Some("exec") => {
             for name in ["timeout_ms", "working_directory", "env", "user"] {
@@ -57,7 +63,7 @@ pub(crate) fn canonicalize_action(action: &mut Map<String, Value>) {
                 "user",
             ]
         }
-        Some("search") => &["type", "queries", "query", "sources"],
+        Some("search") => &["type", "query", "queries"],
         Some("open_page") => &["type", "url"],
         Some("find_in_page") => &["type", "url", "pattern"],
         Some("click") => &["type", "button", "x", "y", "keys"],

@@ -2,8 +2,13 @@ use serde_json::Map;
 use serde_json::Value;
 
 pub(super) fn canonicalize(value: &mut Value) {
-    sanitize(value);
-    prune_definitions(value);
+    // Catalog overrides and native ToolSpecs already use the typed subset. The
+    // raw MCP importer is a different producer: applying it again can change a
+    // legal type-free enum or erase a description-only schema.
+    if !valid(value) {
+        sanitize(value);
+        prune_definitions(value);
+    }
     order(value);
 }
 
@@ -29,6 +34,9 @@ fn order(value: &mut Value) {
     let Some(schema) = value.as_object_mut() else {
         return;
     };
+    // Every field in the typed JsonSchema is optional; explicit null is None.
+    // Enum entries and other business values are not schema positions.
+    schema.retain(|_, value| !value.is_null());
     if let Some(value) = schema.get_mut("items") {
         order(value);
     }
@@ -275,6 +283,9 @@ fn prune_definitions(root: &mut Value) {
 // Enforce the pinned JsonSchema field types after import lowering. A whitelist alone
 // would still transmit malformed required schemas that native deserialization rejects.
 pub(super) fn valid_input(value: &Value) -> bool {
+    if valid(value) {
+        return true;
+    }
     let mut value = value.clone();
     canonicalize(&mut value);
     value.get("type").and_then(Value::as_str) != Some("null") && valid(&value)
@@ -284,28 +295,47 @@ fn valid(value: &Value) -> bool {
     let Some(schema) = value.as_object() else {
         return false;
     };
-    schema.iter().all(|(key, value)| match key.as_str() {
-        "$ref" | "description" => value.is_string(),
-        "encrypted" => value.is_boolean(),
-        "enum" => value.is_array(),
-        "type" => {
-            value.is_string()
-                || value
-                    .as_array()
-                    .is_some_and(|items| items.iter().all(Value::is_string))
+    schema.iter().all(|(key, value)| {
+        if value.is_null() {
+            return FIELDS.contains(&key.as_str());
         }
-        "minItems" => value.as_u64().is_some_and(|n| usize::try_from(n).is_ok()),
-        "required" => value
-            .as_array()
-            .is_some_and(|items| items.iter().all(Value::is_string)),
-        "items" => valid(value),
-        "additionalProperties" => value.is_boolean() || valid(value),
-        "properties" | "$defs" | "definitions" => value
-            .as_object()
-            .is_some_and(|entries| entries.values().all(valid)),
-        "anyOf" | "oneOf" | "allOf" => value
-            .as_array()
-            .is_some_and(|items| items.iter().all(valid)),
-        _ => false,
+        match key.as_str() {
+            "$ref" | "description" => value.is_string(),
+            "encrypted" => value.is_boolean(),
+            "enum" => value.is_array(),
+            "type" => {
+                let native_type = |value: &Value| {
+                    value.as_str().is_some_and(|name| {
+                        matches!(
+                            name,
+                            "string"
+                                | "number"
+                                | "boolean"
+                                | "integer"
+                                | "object"
+                                | "array"
+                                | "null"
+                        )
+                    })
+                };
+                native_type(value)
+                    || value
+                        .as_array()
+                        .is_some_and(|items| items.iter().all(native_type))
+            }
+            "minItems" => value.as_u64().is_some_and(|n| usize::try_from(n).is_ok()),
+            "required" => value
+                .as_array()
+                .is_some_and(|items| items.iter().all(Value::is_string)),
+            "items" => valid(value),
+            "additionalProperties" => value.is_boolean() || valid(value),
+            "properties" | "$defs" | "definitions" => value
+                .as_object()
+                .is_some_and(|entries| entries.values().all(valid)),
+            "anyOf" | "oneOf" | "allOf" => value
+                .as_array()
+                .is_some_and(|items| items.iter().all(valid)),
+            _ => false,
+        }
     })
 }

@@ -93,7 +93,6 @@ fn canonicalizes_nested_additional_properties_schema() {
         tools[0]["parameters"],
         serde_json::json!({
             "type": "object",
-            "properties": {},
             "additionalProperties": {
                 "type": "string",
                 "description": "nested"

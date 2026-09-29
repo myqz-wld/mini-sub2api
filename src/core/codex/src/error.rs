@@ -8,6 +8,10 @@ use mini_sub2api_protocol_v1::FailureMetadata;
 use mini_sub2api_protocol_v1::FailurePhase;
 use mini_sub2api_protocol_v1::RetryAdvice;
 
+#[path = "native_error_category.rs"]
+mod native_error_category;
+pub(crate) use native_error_category::NativeErrorCategory;
+
 #[derive(Debug, thiserror::Error)]
 pub enum CoreFailure {
     #[error("invalid internal authentication")]
@@ -32,6 +36,8 @@ pub enum CoreFailure {
     FlexUnavailable,
     #[error("upstream rejected the prompt")]
     UpstreamInvalidPrompt,
+    #[error("upstream rejected the request ({0:?})")]
+    NativeResponse(NativeErrorCategory, StatusCode),
     #[error("upstream WebSocket handshake was rejected")]
     UpstreamHandshakeRejected,
     #[error("upstream authentication failed")]
@@ -54,6 +60,7 @@ impl CoreFailure {
             Self::UpstreamResponseFailed => "upstream_response_failed",
             Self::FlexUnavailable => "flex_unavailable",
             Self::UpstreamInvalidPrompt => "invalid_prompt",
+            Self::NativeResponse(category, _) => category.code(),
             Self::UpstreamHandshakeRejected => "upstream_handshake_rejected",
             Self::UpstreamAuthFailed => "upstream_auth_failed",
             Self::Internal => "internal_error",
@@ -68,6 +75,7 @@ impl CoreFailure {
             Self::StateUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::FlexUnavailable => StatusCode::TOO_MANY_REQUESTS,
             Self::UpstreamInvalidPrompt => StatusCode::BAD_REQUEST,
+            Self::NativeResponse(_, status) => *status,
             Self::CredentialRequiresLogin | Self::UpstreamAuthFailed => StatusCode::UNAUTHORIZED,
             Self::UpstreamConnectFailed
             | Self::UpstreamDeliveryUnknown
@@ -90,6 +98,7 @@ impl CoreFailure {
             Self::UpstreamResponseFailed => "The upstream response could not be completed.",
             Self::FlexUnavailable => "Flex capacity is unavailable.",
             Self::UpstreamInvalidPrompt => "The upstream request is invalid.",
+            Self::NativeResponse(category, _) => category.public_message(),
             Self::UpstreamHandshakeRejected => "The upstream WebSocket handshake was rejected.",
             Self::UpstreamAuthFailed => "Upstream authentication failed.",
             Self::Internal => "The core encountered an internal error.",
@@ -131,7 +140,8 @@ impl CoreFailure {
             Self::UpstreamAuthFailed
             | Self::UpstreamResponseFailed
             | Self::FlexUnavailable
-            | Self::UpstreamInvalidPrompt => failure(
+            | Self::UpstreamInvalidPrompt
+            | Self::NativeResponse(_, _) => failure(
                 RetryAdvice::Never,
                 FailurePhase::UpstreamResponse,
                 DeliveryState::Delivered,
@@ -141,6 +151,20 @@ impl CoreFailure {
                 FailurePhase::UpstreamResponse,
                 DeliveryState::NotDelivered,
             ),
+        }
+    }
+
+    pub(crate) fn is_native_response(&self) -> bool {
+        matches!(
+            self,
+            Self::FlexUnavailable | Self::UpstreamInvalidPrompt | Self::NativeResponse(_, _)
+        )
+    }
+
+    pub(crate) fn native_error_type(&self) -> Option<&'static str> {
+        match self {
+            Self::NativeResponse(category, _) => category.error_type(),
+            _ => None,
         }
     }
 

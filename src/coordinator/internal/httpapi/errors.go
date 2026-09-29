@@ -14,20 +14,30 @@ import (
 const maxCoreErrorBytes = 64 * 1024
 
 var knownCoreErrors = map[string]bool{
-	"invalid_internal_auth":       true,
-	"unsupported_protocol":        true,
-	"invalid_request":             true,
-	"unknown_account":             true,
-	"state_unavailable":           true,
-	"credential_disabled":         true,
-	"credential_requires_login":   true,
-	"credential_busy":             true,
-	"upstream_connect_failed":     true,
-	"upstream_delivery_unknown":   true,
-	"upstream_response_failed":    true,
-	"upstream_handshake_rejected": true,
-	"upstream_auth_failed":        true,
-	"internal_error":              true,
+	"invalid_internal_auth":         true,
+	"unsupported_protocol":          true,
+	"invalid_request":               true,
+	"unknown_account":               true,
+	"state_unavailable":             true,
+	"credential_disabled":           true,
+	"credential_requires_login":     true,
+	"credential_busy":               true,
+	"upstream_connect_failed":       true,
+	"upstream_delivery_unknown":     true,
+	"upstream_response_failed":      true,
+	"invalid_prompt":                true,
+	"flex_unavailable":              true,
+	"server_is_overloaded":          true,
+	"slow_down":                     true,
+	"misalignment_policy_violation": true,
+	"cyber_policy":                  true,
+	"bio_policy":                    true,
+	"usage_limit_reached":           true,
+	"usage_not_included":            true,
+	"insufficient_quota":            true,
+	"upstream_handshake_rejected":   true,
+	"upstream_auth_failed":          true,
+	"internal_error":                true,
 }
 
 func detectCoreError(response *http.Response, requestID string) (protocolv1.CoreError, bool) {
@@ -95,10 +105,16 @@ func writeOpenAIErrorWithFailure(
 		writer.Header().Set("X-Mini-Sub2Api-Request-Id", requestID)
 	}
 	writer.WriteHeader(status)
+	errorType := "mini_sub2api_error"
+	// The pinned native 429 classifier reads these fixed types, not the code.
+	switch code {
+	case "usage_limit_reached", "usage_not_included", "insufficient_quota":
+		errorType = code
+	}
 	_ = json.NewEncoder(writer).Encode(map[string]any{
 		"error": map[string]any{
 			"message":       message,
-			"type":          "mini_sub2api_error",
+			"type":          errorType,
 			"code":          code,
 			"retryAdvice":   failure.RetryAdvice,
 			"phase":         failure.Phase,

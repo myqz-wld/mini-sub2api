@@ -105,4 +105,6 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+mod subscription_observation_identity_tests;
+#[cfg(test)]
 mod subscription_state_tests;

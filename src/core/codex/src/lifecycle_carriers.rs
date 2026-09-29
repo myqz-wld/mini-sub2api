@@ -48,6 +48,7 @@ pub(crate) enum CarrierShape {
     ItemArray,
     ResponseObject,
     IdentityMetadataObject,
+    ItemPassthroughMetadataObject,
     CallerObject,
     SafetyCheckArray,
     Opaque,

@@ -5,6 +5,7 @@ fn origin() -> Origin {
     Origin {
         cell: Some("synthetic-cell".into()),
         item: Some("synthetic-item".into()),
+        call: None,
         turn: None,
     }
 }
@@ -149,6 +150,7 @@ async fn exhausted_revocation_budget_keeps_completeness_unknown() {
                     &[Origin {
                         cell: Some(format!("cell-{i}")),
                         item: None,
+                        call: None,
                         turn: None,
                     }],
                     "thread",
@@ -160,6 +162,73 @@ async fn exhausted_revocation_budget_keeps_completeness_unknown() {
             editor.filter_tool_completeness(&mut request, "thread");
             assert!(
                 request["input"][0][budget::META]
+                    .get("tool_calls_complete")
+                    .is_none()
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn legacy_one_anchor_revocations_remain_negative_across_upgrade_and_reload() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = RequestStateStore::new(temp.path().into());
+    store
+        .edit("synthetic-account", "acct_budget", "key-a", |editor| {
+            let legacy =
+                editor.derived_lookup("tool-item-loss", &[b"source-thread", b"synthetic-item"]);
+            editor.state.tool_inventory_revocations.insert(legacy);
+            editor.state.tool_inventory_revision = 0;
+            editor.changed = true;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    for _ in 0..2 {
+        let store = RequestStateStore::new(temp.path().into());
+        store.edit("synthetic-account", "acct_budget", "key-a", |editor| {
+            assert_eq!(editor.state.tool_inventory_revision, 1);
+            assert!(editor.state.tool_inventory_uncertain);
+            assert_eq!(editor.state.tool_inventory_revocations.len(), 1, "legacy evidence must not be erased");
+            let mut replay = json!({"input":[{"call_id":"call-only-replay",budget::META:{"tool_calls_complete":true}}]});
+            editor.filter_tool_completeness(&mut replay, "imported-thread");
+            assert!(replay["input"][0][budget::META].get("tool_calls_complete").is_none());
+            Ok(())
+        }).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn loss_without_any_usable_anchor_remains_unknown_after_reload() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = RequestStateStore::new(temp.path().into());
+    store
+        .edit("synthetic-account", "acct_budget", "key-a", |editor| {
+            editor.revoke_tool_inventories(
+                &[Origin {
+                    cell: None,
+                    item: None,
+                    call: None,
+                    turn: None,
+                }],
+                "source-thread",
+            );
+            assert!(editor.state.tool_inventory_uncertain);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    drop(store);
+    let store = RequestStateStore::new(temp.path().into());
+    store
+        .edit("synthetic-account", "acct_budget", "key-a", |editor| {
+            let mut replay = request();
+            editor.filter_tool_completeness(&mut replay, "source-thread");
+            assert!(
+                replay["input"][0][budget::META]
                     .get("tool_calls_complete")
                     .is_none()
             );

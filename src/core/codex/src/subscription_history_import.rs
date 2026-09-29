@@ -131,6 +131,7 @@ impl HistoryImport<'_> {
                 );
                 if let Some(imported) = editor.existing_turn(&candidate) {
                     anyhow::ensure!(imported.thread_id == thread, "imported turn owner changed");
+                    editor.preserve_inventory_origin(&candidate, source)?;
                     return Ok(Some(imported.id));
                 }
                 let Some(parent) = editor
@@ -172,6 +173,7 @@ impl HistoryImport<'_> {
         }
         drop(inner);
         let imported = editor.turn_with_id(&key, &target.thread_id, None, None, None)?;
+        editor.preserve_inventory_origin(&key, source)?;
         editor.wire_from_upstream(WireIdDomain::Turn, &imported.id)?;
         Ok(Some(imported.id))
     }

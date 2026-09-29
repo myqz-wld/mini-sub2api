@@ -219,7 +219,6 @@ fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMa
 
     let mut extra_headers = HeaderMap::new();
     copy_header(&mut extra_headers, source, "x-codex-beta-features");
-    copy_header(&mut extra_headers, source, "x-codex-guardian");
     copy_header(&mut extra_headers, source, "x-client-request-id");
     copy_header(&mut extra_headers, source, "traceparent");
     copy_header(&mut extra_headers, source, "tracestate");
@@ -248,6 +247,8 @@ fn insert_oauth_websocket_headers(destination: &mut HeaderMap, source: &HeaderMa
     ] {
         copy_header(&mut extra_headers, source, name);
     }
+    // Synchronous Guardian extends the completed ModelClient header map.
+    copy_header(&mut extra_headers, source, "x-codex-guardian");
 
     let mut default_headers = HeaderMap::new();
     default_headers.insert(

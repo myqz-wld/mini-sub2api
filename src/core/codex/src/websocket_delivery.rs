@@ -7,34 +7,49 @@ use mini_sub2api_protocol_v1::FAILURE_CLOSE_CODE;
 use mini_sub2api_protocol_v1::FailureMetadata;
 use mini_sub2api_protocol_v1::FailurePhase;
 use mini_sub2api_protocol_v1::RetryAdvice;
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
-const DELIVERY_IDLE: u8 = 0;
-const DELIVERY_ATTEMPTED: u8 = 1;
-const DELIVERY_OBSERVED: u8 = 2;
+const DELIVERY_IDLE: u64 = 0;
+const DELIVERY_ATTEMPTED: u64 = 1;
+const DELIVERY_OBSERVED: u64 = 2;
 const MAX_CLOSE_REASON_BYTES: usize = 123;
 const INTERNAL_FAILURE_REASON: &str =
     r#"{"retryAdvice":"never","phase":"internal","deliveryState":"not_delivered"}"#;
 
 #[derive(Default)]
 pub(crate) struct WebSocketDeliveryTracker {
-    state: AtomicU8,
+    // Low two bits are delivery state; the rest identify the public create.
+    state: AtomicU64,
 }
 
 impl WebSocketDeliveryTracker {
     pub(crate) fn mark_attempted(&self) {
-        self.state.store(DELIVERY_ATTEMPTED, Ordering::Release);
+        let _ = self
+            .state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                Some((state & !3).wrapping_add(4) | DELIVERY_ATTEMPTED)
+            });
     }
 
     pub(crate) fn mark_response_observed(&self) {
-        if self.state.load(Ordering::Acquire) != DELIVERY_IDLE {
-            self.state.store(DELIVERY_OBSERVED, Ordering::Release);
-        }
+        let _ = self
+            .state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state & 3 != DELIVERY_IDLE).then_some((state & !3) | DELIVERY_OBSERVED)
+            });
     }
 
-    pub(crate) fn mark_terminal(&self) {
-        self.state.store(DELIVERY_IDLE, Ordering::Release);
+    pub(crate) fn generation(&self) -> u64 {
+        self.state.load(Ordering::Acquire) >> 2
+    }
+
+    pub(crate) fn mark_terminal(&self, generation: u64) {
+        let _ = self
+            .state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state >> 2 == generation).then_some(state & !3)
+            });
     }
 
     pub(crate) fn failure(&self) -> FailureMetadata {
@@ -42,7 +57,7 @@ impl WebSocketDeliveryTracker {
     }
 
     pub(crate) fn failure_for_phase(&self, phase: FailurePhase) -> FailureMetadata {
-        match self.state.load(Ordering::Acquire) {
+        match self.state.load(Ordering::Acquire) & 3 {
             DELIVERY_ATTEMPTED => failure(
                 RetryAdvice::Ambiguous,
                 phase,
@@ -64,7 +79,8 @@ pub(crate) fn failure_before_websocket_delivery(error: &CoreFailure) -> FailureM
         CoreFailure::UpstreamHandshakeRejected
         | CoreFailure::UpstreamResponseFailed
         | CoreFailure::FlexUnavailable
-        | CoreFailure::UpstreamInvalidPrompt => failure(
+        | CoreFailure::UpstreamInvalidPrompt
+        | CoreFailure::NativeResponse(_, _) => failure(
             RetryAdvice::Never,
             FailurePhase::UpstreamResponse,
             DeliveryState::NotDelivered,
@@ -97,16 +113,6 @@ pub(crate) fn internal_close(code: u16) -> Message {
     }))
 }
 
-pub(crate) fn is_terminal_response_event(text: &str) -> bool {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-        return false;
-    };
-    matches!(
-        value.get("type").and_then(serde_json::Value::as_str),
-        Some("response.completed" | "response.failed" | "response.incomplete" | "error")
-    )
-}
-
 pub(crate) fn is_response_create(text: &str) -> Result<bool, ()> {
     let value = serde_json::from_str::<serde_json::Value>(text).map_err(|_| ())?;
     let message_type = value
@@ -137,11 +143,25 @@ mod tests {
                 DeliveryState::Delivered,
             )
         );
-        tracker.mark_terminal();
+        tracker.mark_terminal(tracker.generation());
         assert_eq!(
             tracker.failure().delivery_state,
             DeliveryState::NotDelivered
         );
+    }
+
+    #[test]
+    fn late_terminal_never_resets_a_new_create_delivery_proof() {
+        let tracker = WebSocketDeliveryTracker::default();
+        tracker.mark_attempted();
+        tracker.mark_response_observed();
+        let failed = tracker.generation();
+        tracker.mark_attempted();
+        tracker.mark_terminal(failed);
+        assert_eq!(tracker.failure().retry_advice, RetryAdvice::Ambiguous);
+        tracker.mark_response_observed();
+        tracker.mark_terminal(failed);
+        assert_eq!(tracker.failure().delivery_state, DeliveryState::Delivered);
     }
 
     #[test]

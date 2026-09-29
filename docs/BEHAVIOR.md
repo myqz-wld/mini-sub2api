@@ -124,7 +124,8 @@ Codex 0.158.0 `configuration_update` input items retain their reasoning effort a
 in stored history, without item IDs or turn stamps. The fixed native feature policy disables effort
 updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags survive normalization; optional tool observations follow the budgets below.
 Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
-service-tier/routing hints, and their parent response IDs require an existing mapping in the same Key.
+service-tier/routing hints, use the native late HTTP/WS header merge position, and their parent
+response IDs require an existing mapping in the same Key.
 Ordinary Subscription callers receive the backend Guardian credit metadata flag. Classifiers use
 the source thread's scoped `guardian-v2:` cache key, separate request thread/turn and validated
 parent linkage, without ModelClient installation/credits/input timing metadata. Classifier HTTP
@@ -135,8 +136,10 @@ reuse compares late executed-tool result metadata and its call binding; changed 
 full input. See [wire-shape evidence and limits](CODEX_COMPATIBILITY.md#field-order-and-presence).
 
 Tool declarations use native function/namespace/tool_search/web_search/custom types; history uses
-ResponseItem separately, including image_generation_call and local_shell_call. Tool schema positions
-lower `const` to a one-element `enum`, keep the native schema subset and sort property names. Enum
+ResponseItem separately, including image_generation_call and local_shell_call. Already typed native
+tool schemas keep type-free enums, description-only nodes and unused definitions. Raw import schemas
+lower `const` to a one-element `enum` and keep the native subset. Both paths use native field/property
+ordering and omit null optional schema fields. Search actions place `query` before `queries`. Enum
 business objects and free output schemas keep their content/order. JSON numbers retain arbitrary
 precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
 strictness is false for basic Guardian. Invalid optional container/value types are logged and
@@ -164,7 +167,10 @@ generic metadata before resource evidence/inventory. Ordinary content is never t
 meet that soft limit. WS message shedding leaves logical reuse snapshots intact; an available
 explicit-reference prefix is rebuilt when its combined prompt needs reduction. Unseen remote
 prefixes remain caller-owned. Inventory loss revokes later completeness claims, including
-wait-only frames and after restart. Malformed optional inventories are removed conservatively.
+wait-only frames, optional output-ID omission, detached historical-turn imports and restart.
+Item metadata `cell_id` refers to the originating exec call and uses that call's scoped ID mapping;
+runtime cell handles in arguments/results remain opaque. Unresolved optional origins lose the origin
+and completeness claim while retaining ordinary output. Malformed inventories are removed conservatively.
 Only hashed negative evidence is persisted, scoped by Key/source thread; exhausting the
 4,096-entry budget or an unresolved lost origin switches that account's completeness to unknown. No `true`
 claim is synthesized. Old state files load unchanged; binaries predating these state fields
@@ -249,6 +255,13 @@ live/retained dependencies. Installation/session/thread nodes have no fixed TTL.
 Startup cleanup rechecks final-owner deletion under lock; unreadable ownership preserves evidence.
 Usage details default to seven days; daily aggregates survive.
 
+Inventory ledger revision 1 retains item and call anchors plus imported turns' original source-thread
+ownership. Existing schema-v1 files without these optional fields remain readable. Old nonempty
+one-anchor revocation ledgers cannot reconstruct missing anchors, so upgrade retains their negative
+evidence and conservatively makes completeness unknown for that account ledger. Existing clean
+ledgers remain unaffected. Older Core readers that reject unknown fields cannot read ledgers once
+the new inventory fields have been written; this extension does not provide a downgrade migration.
+
 ## Completion and recovery
 
 SSE requires a completed/failed/incomplete/error terminal. EOF, keepalives and `[DONE]` alone cannot
@@ -283,6 +296,18 @@ fail. Error-only EOF and a valid failed footer need no extra failure trailers, b
 request as failed. Neither path publishes history or commits compaction. JSON aggregation always
 rejects an error event. Valid SSE prefix events survive later malformed/oversized chunks; failure
 trailers cross the internal HTTP hop even after a previously delivered terminal.
+
+WS retains at most one failed operation's validation/accounting facts for one second after a
+statusless non-flex error. A matching `response.failed` contributes usage once, including when a
+new create has started. Its response identity and delivery generation cannot own the new operation.
+Conflicting output/success is rejected for Subscription; API-key application frames stay transparent.
+Expiry/EOF releases retained facts and finalizes failed usage without inventing a safe replay.
+Wrapped native numeric error statuses and flex errors are immediately terminal.
+
+Subscription HTTP/deferred-WS failures preserve the native invalid-prompt, flex, overload, slowdown,
+policy and quota/usage categories. Inspection is limited to 64 KiB and one second; arbitrary provider
+messages and extensions stay private. Recognized categories use the public gateway error envelope
+and typed diagnostics. Native quota classifiers also receive their fixed `error.type`.
 
 V2 compaction requires matching completion and exactly one valid encrypted item-done; a final array
 alone is insufficient. Concurrent same-base commits advance once. With complete source history,

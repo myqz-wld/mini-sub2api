@@ -13,6 +13,10 @@ impl PersistedRequestState {
         );
         validate_uuid_version(&self.installation_id, 4, "installation")?;
         anyhow::ensure!(
+            self.tool_inventory_revision <= 1,
+            "unsupported inventory revision"
+        );
+        anyhow::ensure!(
             self.tool_inventory_revocations.len() <= MAX_TOOL_INVENTORY_REVOCATIONS,
             "too many tool inventory revocations"
         );
@@ -101,6 +105,10 @@ impl ScopeState {
         for entry in self.turns.values() {
             validate_uuid_version(&entry.id, 7, "turn")?;
             validate_uuid_version(&entry.thread_id, 7, "turn thread")?;
+            validate_optional_uuid_v7(
+                entry.inventory_source_thread_id.as_deref(),
+                "inventory source thread",
+            )?;
             validate_uuid_version(&entry.root_turn_id, 7, "root turn")?;
             if let Some(parent) = &entry.parent_turn_id {
                 validate_uuid_version(parent, 7, "parent turn")?;

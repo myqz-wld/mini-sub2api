@@ -114,7 +114,11 @@ fn translate_request_object(
     for rule in wire_rules(CarrierDirection::Request, container) {
         match rule.shape {
             CarrierShape::Scalar => {
-                translate_field(editor, object, rule, item_type.as_deref())?;
+                if container == CarrierContainer::ItemPassthroughMetadata {
+                    translate_optional_origin(editor, object)?;
+                } else {
+                    translate_field(editor, object, rule, item_type.as_deref())?;
+                }
             }
             CarrierShape::Conversation => {
                 translate_conversation(editor, object, rule, item_type.as_deref())?;
@@ -160,6 +164,16 @@ fn translate_request_object(
                     )?;
                 }
             }
+            CarrierShape::ItemPassthroughMetadataObject => {
+                if let Some(metadata) = object.get_mut(rule.name).and_then(Value::as_object_mut) {
+                    translate_request_object(
+                        editor,
+                        metadata,
+                        CarrierContainer::ItemPassthroughMetadata,
+                        generated_upstream_item_ids,
+                    )?;
+                }
+            }
             CarrierShape::SafetyCheckArray => {
                 if let Some(checks) = object.get_mut(rule.name).and_then(Value::as_array_mut) {
                     for check in checks.iter_mut().filter_map(Value::as_object_mut) {
@@ -177,6 +191,41 @@ fn translate_request_object(
                 rule.name
             ),
         }
+    }
+    Ok(())
+}
+
+fn translate_optional_origin(
+    editor: &mut RequestStateEditor<'_>,
+    metadata: &mut Map<String, Value>,
+) -> Result<()> {
+    let Some(raw) = metadata.get("cell_id") else {
+        return Ok(());
+    };
+    let mapped = if let Some(raw) = raw
+        .as_str()
+        .filter(|raw| crate::request_state_types::validate_wire_id(raw).is_ok())
+    {
+        match editor.existing_wire_from_downstream(WireIdDomain::Call, raw)? {
+            Some(mapped) => Some(mapped),
+            None if editor
+                .existing_wire_from_upstream(WireIdDomain::Call, raw)?
+                .is_some() =>
+            {
+                Some(raw.to_string())
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    if let Some(mapped) = mapped {
+        metadata.insert("cell_id".into(), mapped.into());
+    } else {
+        // Optional provenance cannot allocate a call, establish an owner, or make
+        // a complete claim when its originating execution is unavailable.
+        metadata.remove("cell_id");
+        metadata.remove("tool_calls_complete");
     }
     Ok(())
 }

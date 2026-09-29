@@ -47,6 +47,82 @@ async fn http_flex_category_is_bounded_private_and_subscription_only() {
 }
 
 #[tokio::test]
+async fn native_http_categories_require_exact_status_and_bounded_body() {
+    assert_eq!(
+        http_category(
+            StatusCode::BAD_REQUEST,
+            br#"{"error":{"code":"invalid_prompt","type":42}}"#
+        )
+        .unwrap()
+        .code(),
+        "invalid_prompt"
+    );
+    for (status, body) in [
+        (400, json!({"error":{"code":"server_is_overloaded"}})),
+        (500, json!({"error":{"code":"slow_down"}})),
+        (
+            401,
+            json!({"error":{"code":"misalignment_policy_violation"}}),
+        ),
+        (403, json!({"error":{"code":"cyber_policy"}})),
+        (403, json!({"error":{"code":"bio_policy"}})),
+        (400, json!({"error":{"type":"usage_limit_reached"}})),
+        (503, json!({"error":{"code":"unknown-synthetic"}})),
+        (429, json!({"error":{"type":"unknown-synthetic"}})),
+        (
+            429,
+            json!({"error":{"code":"insufficient_quota","detail":"x".repeat(65536)}}),
+        ),
+    ] {
+        assert!(
+            http_category(
+                StatusCode::from_u16(status).unwrap(),
+                body.to_string().as_bytes()
+            )
+            .is_none()
+        );
+    }
+    // A valid category prefix cannot bypass the complete bounded JSON read or
+    // hold a rejected request open indefinitely through a chunked response.
+    for stalled in [false, true] {
+        let upstream = spawn_loopback(Router::new().route(
+            "/",
+            get(move || async move {
+                let bytes = if stalled {
+                    " ".into()
+                } else {
+                    format!(
+                        "{{\"error\":{{\"code\":\"server_is_overloaded\"}},\"padding\":\"{}\"}}",
+                        "x".repeat(65536)
+                    )
+                };
+                let prefix =
+                    futures_util::stream::once(async { Ok::<_, std::convert::Infallible>(bytes) });
+                let body = if stalled {
+                    Body::from_stream(prefix.chain(futures_util::stream::pending()))
+                } else {
+                    Body::from_stream(prefix)
+                };
+                (StatusCode::SERVICE_UNAVAILABLE, body)
+            }),
+        ))
+        .await;
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(&upstream.base_url)
+            .send()
+            .await
+            .unwrap();
+        let category = tokio::time::timeout(Duration::from_secs(2), classify_http(response))
+            .await
+            .unwrap();
+        assert!(matches!(category, CoreFailure::UpstreamResponseFailed));
+    }
+}
+
+#[tokio::test]
 async fn non_streaming_flex_event_finishes_without_waiting_for_eof() {
     let upstream = spawn_loopback(Router::new().route("/", get(|| async {
         let chunks = futures_util::stream::once(async {

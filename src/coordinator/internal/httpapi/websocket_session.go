@@ -35,6 +35,7 @@ const (
 	deadlineFirstFrame websocketDeadlineEvent = iota
 	deadlineTurnStarted
 	deadlineTurnFinished
+	deadlineFailureTail
 )
 
 type websocketPumpResult struct {
@@ -60,23 +61,27 @@ type websocketOperation struct {
 	terminalPending   bool
 	terminalReady     chan struct{}
 	providerRequestID *string
+	responseID        string
 }
 
 type websocketSession struct {
-	handler           *Handler
-	route             storage.Route
-	publicSocket      *websocket.Conn
-	coreSocket        *websocket.Conn
-	timeouts          websocketTimeouts
-	ctx               context.Context
-	cancel            context.CancelFunc
-	deadlines         chan websocketDeadlineEvent
-	stopping          atomic.Bool
-	exitCause         atomic.Int32
-	stopOnce          sync.Once
-	mu                sync.Mutex
-	active            *websocketOperation
-	providerRequestID *string
+	handler                *Handler
+	route                  storage.Route
+	publicSocket           *websocket.Conn
+	coreSocket             *websocket.Conn
+	timeouts               websocketTimeouts
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	deadlines              chan websocketDeadlineEvent
+	stopping               atomic.Bool
+	exitCause              atomic.Int32
+	stopOnce               sync.Once
+	mu                     sync.Mutex
+	active                 *websocketOperation
+	failed                 *websocketFailedOperation
+	generation             uint64
+	failedResponseObserved bool
+	providerRequestID      *string
 }
 
 var errOverlappingResponse = errors.New("a response is already active")
@@ -109,6 +114,10 @@ func (s *websocketSession) run() {
 	timer := time.NewTimer(s.timeouts.firstFrame)
 	defer timer.Stop()
 	timerChannel := timer.C
+	tailTimer := time.NewTimer(time.Hour)
+	stopWebSocketTimer(tailTimer)
+	defer tailTimer.Stop()
+	var tailChannel <-chan time.Time
 	for {
 		select {
 		case event := <-s.deadlines:
@@ -118,9 +127,22 @@ func (s *websocketSession) run() {
 				timerChannel = nil
 			case deadlineTurnFinished:
 				stopWebSocketTimer(timer)
-				timer.Reset(s.timeouts.interTurn)
-				timerChannel = timer.C
+				timerChannel = nil
+				if !s.hasActiveOperation() {
+					timer.Reset(s.timeouts.interTurn)
+					timerChannel = timer.C
+				}
+			case deadlineFailureTail:
+				stopWebSocketTimer(tailTimer)
+				tailChannel = nil
+				if deadline, ok := s.failureTailDeadline(); ok {
+					tailTimer.Reset(time.Until(deadline))
+					tailChannel = tailTimer.C
+				}
 			}
+		case <-tailChannel:
+			tailChannel = nil
+			s.expireFailureTail()
 		case result := <-results:
 			status := s.causalStatus(result.terminalStatus)
 			if s.stopping.Load() {
@@ -208,41 +230,6 @@ func (s *websocketSession) clientPump() websocketPumpResult {
 	}
 }
 
-func (s *websocketSession) corePump() websocketPumpResult {
-	for {
-		messageType, payload, err := s.coreSocket.Read(s.ctx)
-		if err != nil {
-			return s.upstreamPumpResult(err)
-		}
-		if messageType != websocket.MessageText {
-			return s.upstreamPumpResult(nil)
-		}
-		if providerRequestID, control, valid := parseProviderRequestIDControl(payload); control {
-			if !valid {
-				return s.upstreamPumpResult(nil)
-			}
-			s.observeProviderRequestID(providerRequestID)
-			continue
-		}
-		s.observeCoreResponse()
-		event, ok := usage.ParseWebSocketEvent(payload)
-		if !ok {
-			return s.upstreamPumpResult(nil)
-		}
-		terminalStatus, terminal := websocketTerminalStatus(event.Type)
-		s.observeServerEvent(event, terminal)
-		writeContext, cancel := context.WithTimeout(s.ctx, s.timeouts.write)
-		err = s.publicSocket.Write(writeContext, websocket.MessageText, payload)
-		cancel()
-		if err != nil {
-			return s.pumpResult(storage.RequestDisconnected)
-		}
-		if terminal && s.completeActive(terminalStatus) {
-			s.notifyDeadline(deadlineTurnFinished)
-		}
-	}
-}
-
 func (s *websocketSession) beginOperation(kind string) error {
 	for {
 		s.mu.Lock()
@@ -275,6 +262,8 @@ func (s *websocketSession) beginOperation(kind string) error {
 			providerRequestID: cloneString(s.providerRequestID),
 		}
 		s.active = operation
+		s.generation++
+		s.failedResponseObserved = false
 		err = s.handler.store.StartWebSocketOperation(s.ctx, s.route, requestID, kind)
 		if err != nil {
 			s.active = nil
@@ -309,6 +298,9 @@ func (s *websocketSession) observeServerEvent(event usage.WebSocketEvent, termin
 		value := *event.Usage
 		s.active.usage = &value
 	}
+	if event.ResponseID != "" && s.active.responseID == "" {
+		s.active.responseID = event.ResponseID
+	}
 	if terminal {
 		s.active.terminalPending = true
 	}
@@ -339,6 +331,9 @@ func (s *websocketSession) completeActive(status string) bool {
 func (s *websocketSession) finishActive(status string) {
 	if operation := s.takeActive(); operation != nil {
 		s.finishOperation(operation, status)
+	}
+	if failed := s.takeFailedOperation(); failed != nil {
+		s.finishOperation(failed, storage.RequestUpstreamErr)
 	}
 }
 
@@ -418,6 +413,10 @@ func (s *websocketSession) currentDeliveryFailure() protocolv1.FailureMetadata {
 		DeliveryState: protocolv1.DeliveryNotDelivered,
 	}
 	if s.active == nil {
+		if s.failedResponseObserved {
+			metadata.RetryAdvice = protocolv1.RetryNever
+			metadata.DeliveryState = protocolv1.DeliveryDelivered
+		}
 		return metadata
 	}
 	if s.active.ttfb != nil {

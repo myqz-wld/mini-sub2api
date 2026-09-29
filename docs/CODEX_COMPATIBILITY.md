@@ -13,9 +13,10 @@ CLI are compared with the previous 0.156.0 anchor. API-key bodies and valid WebS
 | Numeric custom reasoning effort | Serialize valid unsigned 64-bit effort strings as JSON numbers; accept already numeric native requests. Keep the selected string in turn metadata. Overflow, negative and fractional strings stay custom strings. |
 | Model catalog | Add gpt-6-sol and gpt-6-luna with medium effort, low verbosity and Lite layout; Sol requires the model's review metadata. Remove gpt-5.4 defaults so it follows native fallback. Retire gpt-5.6-sol's ultrafast tier. |
 | Literal instruction fixtures | Regenerate exact release snapshots for ten models and one fallback. codex-auto-review now shares the gpt-5.6 template. These remain test-only; caller instructions remain authoritative. |
-| Native typed failures | Preserve HTTP 429 `flex_unavailable` and HTTP 400 `invalid_prompt`, reading at most 64 KiB within one second. Deferred WS handshake failures emit the bounded native category before close; wrapped `status_code` becomes `status`. Flex SSE/JSON finishes without waiting for a failed footer. Provider error text stays private. |
+| Native typed failures | Preserve invalid-prompt, flex, overload/slowdown, policy and quota/usage categories for their native HTTP statuses, reading at most 64 KiB within one second. Deferred WS handshake failures emit the bounded native category before close; numeric WS statuses survive the coordinator. Flex SSE/JSON finishes without waiting for a failed footer. Provider error text stays private. |
+| Typed catalog schemas and wire order | Preserve native type-free enums, description-only nodes and unused definitions without reapplying raw MCP import lowering. Search actions order query before queries. Guardian reviewer HTTP/WS uses the native late header merge. |
 | MCP attribution | Validate supplied body-only JSON, map first-turn IDs through existing scoped aliases and enforce 16 KiB after projection. Unknown provenance receives the native optional-error fallback; absent provenance is not synthesized. |
-| Executed-tool observations | Apply the 8 KiB argument, 2 MiB full-prompt and 15 MiB final-message budgets in native shedding order. Preserve logical WS history and resource evidence; persist hashed negative completeness evidence across HTTP/WS, reconnects and restarts. Malformed optional inventories are removed safely. |
+| Executed-tool observations | Apply the 8 KiB argument, 2 MiB full-prompt and 15 MiB final-message budgets in native shedding order. Map Code Mode origin cell IDs with exec calls; runtime handles remain opaque. Persist negative completeness evidence across HTTP/WS, detached history imports, optional item-ID omission and restart. Malformed optional inventories are removed safely. |
 | Version and comparison anchor | Send 0.158.0 identity and require the exact tagged source and official CLI/Code Mode host in native capture tests. |
 
 The Rust toolchain, pinned transport dependencies and OpenSSL release source are unchanged.
@@ -37,17 +38,25 @@ The gateway conservatively rebuilds near-threshold explicit WS prompts; unavaila
 remain caller-owned. Loss of source ownership or the bounded revocation table makes completeness
 unknown instead of restoring `true`. See [observation/state policy](BEHAVIOR.md#state-and-limits).
 
+The follow-up audit fixes also retain one matching WS failed footer for one second after a
+statusless non-flex error. It may supply native category and usage after the lane is released,
+without publishing failed history or changing a later operation. Direct-output revocation and
+conservative legacy-ledger migration are gateway consistency policies beyond the native cell hook.
+
 ## Validation on 2026-09-28
 
 | Final check | Result |
 |---|---|
-| Standard validation | 547 Core tests and seven protocol tests; Go race tests, vet, clippy and formatting passed. One existing manual performance benchmark remains ignored. |
-| Expanded native loopback script | 1,298 cases in 91 groups passed in one final invocation, including strict header/JSON captures, compaction and reasoning visibility. |
+| Post-audit standard validation | 558 Core tests and seven protocol tests; full Go race tests, vet, clippy and formatting passed. One existing manual performance benchmark remains ignored. |
+| Post-audit native loopback | 1,300 cases across 92 groups verified. The full matrix passed 1,298 cases and exposed two fixtures with unbound synthetic cell origins; after binding them to their source call, all four budget cases passed a focused rerun. Strict header/JSON captures, compaction and reasoning visibility passed. |
 | Actual OpenCode loopback | 20 cases passed, including tool turns and restart continuation. |
 | Native budget oracle | 144 exact algorithm/counter comparisons passed; prompt fixture regeneration matched the release. |
 | Real Subscription business scenarios | 56 passed: bare API, Codex and OpenCode, single/multiple turns, five-turn memory, tools/reconnects, plus Sol/Luna coverage. |
 | Real numeric capability probe | The tested gpt-6-sol backend rejected integer effort `8192`. Official 0.158.0 direct also rejected integer reasoning effort; gateway egress retained JSON number 8192 and bare HTTP returned 400. This is a verified negative case, not a successful numeric generation. |
 | Release build | macOS arm64 build, installed-metadata checks and personal-build-path scans passed. |
+
+The post-audit repair pass used loopback only. OpenCode, budget-oracle and real-provider rows
+describe the preceding release validation; they are not fresh live validation of these repairs.
 
 Live requests used access-only copies of the existing Subscription login; the original login
 remained unchanged. Raw traffic stayed in memory. Real captures establish application-level

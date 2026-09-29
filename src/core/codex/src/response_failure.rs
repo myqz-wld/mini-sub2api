@@ -1,5 +1,6 @@
 //! Recognize the pinned native terminal category without exposing upstream error text.
 use crate::error::CoreFailure;
+use crate::error::NativeErrorCategory;
 use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,7 +24,9 @@ mod tests;
 
 #[derive(Deserialize)]
 struct ErrorCode {
-    code: String,
+    code: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -45,8 +48,8 @@ pub(crate) fn is_flex_sse(data: &str) -> bool {
         return false;
     };
     let code = match event.kind.as_str() {
-        "error" => event.error.map(|error| error.code).or(event.code),
-        "response.failed" => event.response.map(|response| response.error.code),
+        "error" => event.error.and_then(|error| error.code).or(event.code),
+        "response.failed" => event.response.and_then(|response| response.error.code),
         _ => None,
     };
     code.as_deref() == Some("flex_unavailable")
@@ -57,25 +60,56 @@ pub(crate) fn http_category(status: http::StatusCode, bytes: &[u8]) -> Option<Co
         return None;
     }
     let body = serde_json::from_slice::<FailureBody>(bytes).ok()?;
-    match (status, body.error.code.as_str()) {
+    let code = body.error.code.as_deref().unwrap_or_default();
+    match (status, code) {
         (http::StatusCode::TOO_MANY_REQUESTS, "flex_unavailable") => {
             Some(CoreFailure::FlexUnavailable)
         }
         (http::StatusCode::BAD_REQUEST, "invalid_prompt") => {
             Some(CoreFailure::UpstreamInvalidPrompt)
         }
-        _ => None,
+        _ => {
+            use NativeErrorCategory as Native;
+            let category = match (
+                status.as_u16(),
+                code,
+                body.error.kind.as_ref().and_then(Value::as_str),
+            ) {
+                (503, "server_is_overloaded", _) => Native::ServerOverloaded,
+                (503, "slow_down", _) => Native::SlowDown,
+                (400 | 403, "misalignment_policy_violation", _) => Native::MisalignmentPolicy,
+                (400, "cyber_policy", _) => Native::CyberPolicy,
+                (400, "bio_policy", _) => Native::BioPolicy,
+                (429, _, Some("usage_limit_reached")) => Native::UsageLimitReached,
+                (429, _, Some("usage_not_included")) => Native::UsageNotIncluded,
+                (429, _, Some("insufficient_quota"))
+                | (
+                    429,
+                    "insufficient_quota"
+                    | "credit_balance_exhausted"
+                    | "organization_spend_limit_exceeded"
+                    | "project_spend_limit_exceeded"
+                    | "organization_usage_limit_exceeded",
+                    _,
+                ) => Native::QuotaExceeded,
+                _ => return None,
+            };
+            Some(CoreFailure::NativeResponse(category, status))
+        }
     }
 }
 
-// A bounded, separately timed read only for the new native 400/429 categories. Other
+// A bounded, separately timed read only for native categorized rejection statuses. Other
 // failures keep the established content-free response and never read their body.
 pub(super) async fn classify_http(upstream: reqwest::Response) -> CoreFailure {
     const MAXIMUM: usize = 64 * 1024;
     let status = upstream.status();
     if !matches!(
         status,
-        http::StatusCode::TOO_MANY_REQUESTS | http::StatusCode::BAD_REQUEST
+        http::StatusCode::TOO_MANY_REQUESTS
+            | http::StatusCode::BAD_REQUEST
+            | http::StatusCode::FORBIDDEN
+            | http::StatusCode::SERVICE_UNAVAILABLE
     ) || upstream
         .content_length()
         .is_some_and(|n| n > MAXIMUM as u64)

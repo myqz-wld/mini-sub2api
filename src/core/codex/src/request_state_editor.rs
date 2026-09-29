@@ -57,6 +57,7 @@ pub(crate) struct ThreadAssignment {
 pub(crate) struct TurnAssignment {
     pub(crate) id: String,
     pub(crate) thread_id: String,
+    pub(crate) inventory_source_thread_id: Option<String>,
     pub(crate) root_turn_id: String,
     pub(crate) parent_turn_id: Option<String>,
     pub(crate) started_at_unix_ms: i64,
@@ -92,6 +93,13 @@ impl<'a> RequestStateEditor<'a> {
         let scope_key = keys.scope_key();
         validate_lookup_key(&scope_key)?;
         let mut changed = state.owners.insert(owner_account_ref.to_string());
+        if state.tool_inventory_revision == 0 && !state.tool_inventory_revocations.is_empty() {
+            // Old one-anchor hashes cannot recover omitted call anchors or copied-turn
+            // provenance. Retain them and fail closed instead of reviving completeness.
+            state.tool_inventory_uncertain = true;
+            state.tool_inventory_revision = 1;
+            changed = true;
+        }
         anyhow::ensure!(
             state.owners.len() <= MAX_OWNERS,
             "too many request state owners"
@@ -311,6 +319,7 @@ impl<'a> RequestStateEditor<'a> {
                     root_turn_id: root_turn_id.unwrap_or(&id).to_string(),
                     id,
                     thread_id: thread_id.to_string(),
+                    inventory_source_thread_id: None,
                     parent_turn_id: parent_turn_id.map(str::to_string),
                     started_at_unix_ms: now,
                     last_seen_day: day,
@@ -328,6 +337,7 @@ impl<'a> RequestStateEditor<'a> {
                 TurnAssignment {
                     id: entry.id.clone(),
                     thread_id: entry.thread_id.clone(),
+                    inventory_source_thread_id: entry.inventory_source_thread_id.clone(),
                     root_turn_id: entry.root_turn_id.clone(),
                     parent_turn_id: entry.parent_turn_id.clone(),
                     started_at_unix_ms: entry.started_at_unix_ms,
@@ -365,6 +375,7 @@ impl<'a> RequestStateEditor<'a> {
                 TurnAssignment {
                     id: entry.id.clone(),
                     thread_id: entry.thread_id.clone(),
+                    inventory_source_thread_id: entry.inventory_source_thread_id.clone(),
                     root_turn_id: entry.root_turn_id.clone(),
                     parent_turn_id: entry.parent_turn_id.clone(),
                     started_at_unix_ms: entry.started_at_unix_ms,

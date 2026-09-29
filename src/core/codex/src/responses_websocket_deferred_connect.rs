@@ -126,14 +126,14 @@ pub(super) async fn connect(
 }
 
 pub(super) async fn send_protocol_failure(internal: &mut WebSocket, error: &CoreFailure) -> bool {
-    if !matches!(
-        error,
-        CoreFailure::FlexUnavailable | CoreFailure::UpstreamInvalidPrompt
-    ) {
+    if !error.is_native_response() {
         return true;
     }
-    let event = serde_json::json!({"type":"error","status":error.status().as_u16(),
+    let mut event = serde_json::json!({"type":"error","status":error.status().as_u16(),
         "error":{"code":error.code(),"message":error.public_message()}});
+    if let Some(kind) = error.native_error_type() {
+        event["error"]["type"] = kind.into();
+    }
     internal
         .send(Message::Text(event.to_string().into()))
         .await

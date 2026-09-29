@@ -17,7 +17,6 @@ use crate::vault::Vault;
 use crate::websocket_connector::{WebSocketConnection as UpstreamWebSocket, WebSocketHandshake};
 use crate::websocket_delivery::{
     WebSocketDeliveryTracker, failure_close, internal_close, is_response_create,
-    is_terminal_response_event,
 };
 use axum::body::Body;
 use axum::extract::ws::{
@@ -40,6 +39,8 @@ use tokio_tungstenite::tungstenite::protocol::CloseFrame as UpstreamCloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode as UpstreamCloseCode;
 use tracing::Instrument;
 
+#[path = "responses_websocket_inbound.rs"]
+mod inbound;
 #[path = "responses_websocket_initial.rs"]
 mod initial;
 #[path = "responses_websocket_relay_helpers.rs"]
@@ -377,38 +378,31 @@ pub(crate) async fn relay(
         };
         let server_continuation = Arc::clone(&continuation);
         let upstream_to_client = async {
-            while let Some(message) = upstream_read.next().await {
+            let mut inbound = inbound::Inbound::default();
+            while let Some(message) = inbound.next(&mut upstream_read).await {
                 let (outbound, terminal_event) = match message {
                     Ok(UpstreamMessage::Text(text)) => {
-                        let upstream_text = text.to_string();
-                        let observed = observe_server_text(&server_continuation, &upstream_text);
                         vault.request_state().contexts.enforce_baseline_budget();
-                        if observed.disposition == EventDisposition::ConsumeHiddenSetup {
-                            continue;
-                        }
-                        delivery.mark_response_observed();
-                        let text = match response_state.as_ref() {
-                            Some(state) => match state
-                                .translate_text_with_compaction(
-                                    upstream_text.clone(),
-                                    crate::inference_limits::get().output_bytes,
-                                    observed.completed_compaction.as_ref(),
-                                )
-                                .await
-                            {
-                                Ok(text) => text,
-                                Err(_) => return RelayExit::Failure(delivery.failure()),
-                            },
-                            None => upstream_text.clone(),
+                        let (text, terminal) = match inbound
+                            .translate(
+                                text.to_string(),
+                                response_state.as_ref(),
+                                &server_continuation,
+                                &delivery,
+                            )
+                            .await
+                        {
+                            Ok(Some(event)) => event,
+                            Ok(None) => continue,
+                            Err(_) => return RelayExit::Failure(delivery.failure()),
                         };
-                        let terminal = is_terminal_response_event(&upstream_text);
                         (InternalMessage::Text(text.into()), terminal)
                     }
                     Ok(UpstreamMessage::Binary(_)) | Ok(UpstreamMessage::Frame(_)) => {
                         return RelayExit::Failure(delivery.failure());
                     }
-                    Ok(UpstreamMessage::Ping(payload)) => (InternalMessage::Ping(payload), false),
-                    Ok(UpstreamMessage::Pong(payload)) => (InternalMessage::Pong(payload), false),
+                    Ok(UpstreamMessage::Ping(payload)) => (InternalMessage::Ping(payload), None),
+                    Ok(UpstreamMessage::Pong(payload)) => (InternalMessage::Pong(payload), None),
                     Ok(UpstreamMessage::Close(frame)) => {
                         let failure = delivery.failure();
                         if failure.delivery_state
@@ -421,7 +415,7 @@ pub(crate) async fn relay(
                                 code: u16::from(frame.code),
                                 reason: frame.reason.to_string().into(),
                             })),
-                            false,
+                            None,
                         )
                     }
                     Err(_) => return RelayExit::Failure(delivery.failure()),
@@ -430,8 +424,8 @@ pub(crate) async fn relay(
                 if internal_write.send(outbound).await.is_err() {
                     return RelayExit::Complete;
                 }
-                if terminal_event {
-                    delivery.mark_terminal();
+                if let Some(generation) = terminal_event {
+                    delivery.mark_terminal(generation);
                 }
                 if terminal {
                     return RelayExit::Complete;

@@ -61,3 +61,69 @@ fn lite_prefix_id_uses_official_schema_bytes_and_omits_local_output_schema() {
         format!("at_{}", Uuid::new_v5(&namespace, expected.as_bytes()))
     );
 }
+
+#[test]
+fn native_typed_parameters_preserve_type_free_nodes_and_definitions() {
+    // The typed catalog producer accepts primitive null; the raw MCP importer
+    // rejects it after lowering. Do not apply that importer-only check twice.
+    assert!(valid_tool_parameters(&json!({"type":"null"})));
+    assert!(!valid_tool_parameters(&json!({"type":"null","const":null})));
+    let parameters = json!({"type":"object","properties":{
+        "budget":{"enum":[128,256]}, "context":{"description":"opaque values"},
+        "optional":{"type":null,"description":"nullable declaration"}
+    }, "$defs":{"Unused":{"type":"string"}}, "additionalProperties":false});
+    for tools in [
+        canonicalize_tools(vec![
+            json!({"type":"function","name":"wait","parameters":parameters}),
+        ]),
+        group_tools(vec![
+            json!({"type":"function","name":"wait","parameters":parameters}),
+        ]),
+    ] {
+        let tool = if tools[0]["type"] == "namespace" {
+            &tools[0]["tools"][0]
+        } else {
+            &tools[0]
+        };
+        let schema = &tool["parameters"];
+        assert_eq!(schema["properties"]["budget"], json!({"enum":[128,256]}));
+        assert_eq!(
+            schema["properties"]["context"],
+            parameters["properties"]["context"]
+        );
+        assert!(schema["properties"]["optional"].get("type").is_none());
+        assert_eq!(schema["$defs"], parameters["$defs"]);
+    }
+    // Raw import keywords still use the existing native MCP lowering policy.
+    let raw = canonicalize_tools(vec![json!({"type":"function","name":"raw",
+        "parameters":{"type":"object","properties":{"mode":{"const":"synthetic"}}}})]);
+    assert_eq!(
+        raw[0]["parameters"]["properties"]["mode"],
+        json!({"type":"string","enum":["synthetic"]})
+    );
+}
+
+#[test]
+fn native_search_action_preserves_order_and_omits_unknown_or_null_members() {
+    for (action, expected) in [
+        (
+            json!({"queries":["synthetic"],"query":"synthetic","sources":[],"type":"search"}),
+            r#"{"type":"search","query":"synthetic","queries":["synthetic"]}"#,
+        ),
+        (
+            json!({"type":"search","query":null,"queries":["synthetic"]}),
+            r#"{"type":"search","queries":["synthetic"]}"#,
+        ),
+        (
+            json!({"type":"open_page","url":null}),
+            r#"{"type":"open_page"}"#,
+        ),
+    ] {
+        let mut items = vec![json!({"type":"web_search_call","action":action})];
+        assign_missing_item_ids(&mut items);
+        assert_eq!(
+            serde_json::to_string(&items[0]["action"]).unwrap(),
+            expected
+        );
+    }
+}

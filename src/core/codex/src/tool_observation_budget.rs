@@ -17,6 +17,7 @@ pub(crate) const MESSAGE_BYTES: usize = 15 * 1024 * 1024;
 pub(crate) struct Origin {
     pub(crate) cell: Option<String>,
     pub(crate) item: Option<String>,
+    pub(crate) call: Option<String>,
     pub(crate) turn: Option<String>,
 }
 
@@ -24,7 +25,8 @@ pub(crate) fn origin(item: &Value) -> Origin {
     let text = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_owned);
     Origin {
         cell: text(item.get(META).and_then(|m| m.get("cell_id"))),
-        item: text(item.get("id")).or_else(|| text(item.get("call_id"))),
+        item: text(item.get("id")),
+        call: text(item.get("call_id")),
         turn: text(item.get(META).and_then(|m| m.get("turn_id"))),
     }
 }

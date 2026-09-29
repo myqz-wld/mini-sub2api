@@ -44,6 +44,58 @@ fn response_context(
     .with_operation(prepared.operation)
 }
 
+#[tokio::test]
+async fn frozen_failure_keeps_its_owner_when_the_socket_context_advances() {
+    let (_temp, store) = store();
+    let body = request(json!([input("start")]));
+    let first = prepare(&store, body.clone()).await.unwrap();
+    let context = response_context(&store, first);
+    let first_id = context
+        .translate_value(failed_events()[0].clone())
+        .await
+        .unwrap()["response"]["id"]
+        .clone();
+    let (frozen, tail) = context.frozen_failure().unwrap();
+    let tail = tail.unwrap();
+    frozen
+        .translate_sse_value(failed_events()[2].clone(), Some(&tail))
+        .await
+        .unwrap();
+    let next = prepare(&store, body).await.unwrap();
+    context.update_operation(next.operation).unwrap();
+    context
+        .update_identity(next.resolved_identity.as_ref())
+        .unwrap();
+    let footer = frozen
+        .translate_sse_value(
+            json!({"type":"response.failed",
+        "response":{"id":"resp_failure","output":[],"usage":{"total_tokens":17}}}),
+            Some(&tail),
+        )
+        .await
+        .unwrap();
+    assert_eq!(footer["response"]["id"], first_id);
+    {
+        let inner = store.contexts.inner.lock().unwrap();
+        assert_eq!(inner.operations.len(), 1);
+        assert_eq!(inner.reservations.len(), 1);
+    }
+    drop(tail);
+    drop(frozen);
+    assert!(store.contexts.inner.lock().unwrap().reservations.is_empty());
+    context
+        .translate_value(json!({"type":"response.created","response":{"id":"resp_next"}}))
+        .await
+        .unwrap();
+    context
+        .translate_value(
+            json!({"type":"response.completed","response":{"id":"resp_next","output":[]}}),
+        )
+        .await
+        .unwrap();
+    assert!(store.contexts.inner.lock().unwrap().operations.is_empty());
+}
+
 fn data_event(frame: http_body::Frame<Bytes>) -> Value {
     let bytes = frame
         .into_data()

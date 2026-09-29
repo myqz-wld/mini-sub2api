@@ -176,7 +176,9 @@ func (o *Observer) acceptJSON(data []byte) {
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return
 	}
-	o.observeTerminal(envelope.Type, envelope.Status)
+	var status string
+	_ = json.Unmarshal(envelope.Status, &status)
+	o.observeTerminal(envelope.Type, status)
 	if usage, ok := usageFromEnvelope(&envelope); ok {
 		o.usage = &usage
 	}
@@ -216,9 +218,9 @@ func eventData(event []byte) []byte {
 }
 
 type responseEnvelope struct {
-	Type     string         `json:"type"`
-	Status   string         `json:"status"`
-	Usage    *responseUsage `json:"usage"`
+	Type     string          `json:"type"`
+	Status   json.RawMessage `json:"status"`
+	Usage    *responseUsage  `json:"usage"`
 	Response *struct {
 		Usage *responseUsage `json:"usage"`
 	} `json:"response"`

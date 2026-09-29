@@ -147,8 +147,9 @@ every supplied input item to that exact response, including repetitions.
 | Public HTTP output | Retain caller stream preference: translated SSE when true, otherwise the final response object as bounded JSON. API-key traffic stays byte-transparent. |
 
 Ordinary/reviewer requests construct `tool_choice:auto`, encrypted reasoning include, and fixed
-output-schema names; classifiers construct `none`, empty include and no text. Tool schemas lower
-schema-position const to enum and retain the native subset. Output schemas remain free ordered JSON
+output-schema names; classifiers construct `none`, empty include and no text. Typed tool schemas
+retain type-free enums and optional fields; raw import schemas lower schema-position const to enum
+and retain the native subset. Output schemas remain free ordered JSON
 with arbitrary-precision numbers. Fixed feature policy stores configuration_update history but
 omits those items from final sends. Named function outputs may omit call_id; explicit null and
 unresolved/cross-scope references still fail closed. See [diagnostics](../../../docs/OPERATIONS.md#ignored-field-diagnostics).
@@ -300,6 +301,11 @@ Subscription upgrades internally first, then connects upstream from the first no
 - Gateway failures after upgrade use `4500` with exactly `retryAdvice/phase/deliveryState` JSON.
   Standard protocol/policy/lifecycle/fingerprint close codes remain. Deferred Subscription rejection
   cannot become the original public HTTP rejection; API-key keeps pre-upgrade bounded HTTP rejection.
+- Application `error` frames may contain native numeric `status` or `status_code`; usage observation
+  cannot reject them because optional response/status fields differ. A statusless non-flex error
+  releases its lane while retaining one failed operation for one second. Its matching failed footer
+  may contribute usage once without changing a later operation. Failed history is never reusable;
+  expiry does not erase observed delivery. API-key application frames remain transparent.
 
 Compaction v2 uses ordinary Responses fields, including `compaction_trigger` and
 `request_kind=compaction`; it adds no route. Retry markers use projected thread plus stable operation
@@ -336,6 +342,16 @@ Before any upstream response bytes are sent, core errors use the JSON shape in `
 - `upstream_connect_failed`
 - `upstream_delivery_unknown`
 - `upstream_response_failed`
+- `invalid_prompt`
+- `flex_unavailable`
+- `server_is_overloaded`
+- `slow_down`
+- `misalignment_policy_violation`
+- `cyber_policy`
+- `bio_policy`
+- `usage_limit_reached`
+- `usage_not_included`
+- `insufficient_quota`
 - `upstream_handshake_rejected`
 - `upstream_auth_failed`
 - `internal_error`
@@ -344,6 +360,10 @@ Every error also carries `retryAdvice`, `phase`, and `deliveryState`. The coordi
 known codes, the matching request id, valid enum values, and a coherent retry/delivery pair before
 mapping it to a stable OpenAI-shaped public error. It never exposes account existence, filesystem
 paths, credentials, auth endpoint bodies, or internal process details.
+Recognized native HTTP rejection categories retain status and use this same normalization path.
+Quota/usage categories also use their fixed native public `error.type`; other errors use
+`mini_sub2api_error`. Error-body inspection is bounded to 64 KiB and one second. Deferred WS
+rejections emit the fixed native status/category before their structured failure close.
 
 ## Retry contract
 
