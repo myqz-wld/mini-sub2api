@@ -8,6 +8,9 @@ mod lite_tests;
 #[path = "subscription_checkpoint_tests.rs"]
 mod checkpoint_tests;
 
+#[path = "subscription_compaction_rebuild_tests.rs"]
+mod rebuild_tests;
+
 fn compacted(text: &str) -> Value {
     json!({"type":"compaction","id":"cmp_checkpoint","encrypted_content":text})
 }

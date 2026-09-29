@@ -62,6 +62,7 @@ Counts describe overlapping matrices, not additive independent cases.
 | Cache/completion | Publication order, item/footer proof, failure/expiry/pressure, interning and tool consumption |
 | WS/compaction | Reuse/reconnect, first routing token, prewarm, uncertain sends, V2 item-done and window commit |
 | Compaction continuation: 36 cases | Explicit/in-band windows, two HTTP deltas, full WS recovery, Lite setup and missing-window errors |
+| Compaction message rebuild: 8 native cases | Actual 0.158.0 media removal/text truncation with retained message IDs; HTTP/WS ordinary/Lite replacement and later continuation |
 | Anonymous checkpoints: 36 four-call cases | Configuration/context changes, stable session/thread/window, new turn and exact checkpoint across credentials/transports/formats |
 | Tools | Actual native nested host callbacks; bare/OpenCode direct tools; schema order/duplicates and deterministic prefixes |
 

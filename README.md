@@ -1,46 +1,34 @@
 # mini-sub2api
 
-Go coordinator + Rust Codex adapter for `/v1/responses` over HTTP JSON/SSE and WebSocket.
-Each distribution Key binds one credential; request status, latency and usage are recorded per Key.
+A small Responses API gateway for Codex subscriptions and API keys, built with Go and Rust.
+Supports HTTP/SSE, WebSocket, credential-bound access keys and usage tracking.
+Subscription compatibility targets Codex **0.158.0**.
 
-| Upstream | Behavior for every caller |
-|---|---|
-| API key | Pass bodies/valid WS frames and caller `X-Codex-Routing-Hint` through; retain gateway auth, admission and response-header policy. |
-| Codex Subscription | Emulate Codex 0.158.0 for native Codex, bare API and third-party Responses clients. |
+## Quick start
 
-No account pool, automatic switching, Chat Completions or admin HTTP API.
-
-## Build
-
-Go 1.26.4 and Rust 1.95.0 are pinned through mise. Rust matches Codex 0.158.0:
+Install the project runtimes with [mise](https://mise.jdx.dev/), then build and start:
 
 ```bash
 mise install
 bash scripts/build.sh
-build/bin/mini-sub2api --version
-build/bin/mini-sub2api --check-installed
-```
 
-Ship both binaries and build-info.json from build/bin together. Installed checks never fetch Git remotes.
-Release coordinator builds omit Go debug symbol tables to reduce package and installed size;
-runtime stack traces and version metadata remain available. Development builds retain debug symbols.
-Linux x86_64/aarch64 GNU and musl builds statically link checksum-verified OpenSSL 3.6.4,
-matching the Codex 0.158.0 Linux release library. Build/test scripts enforce Cargo.lock and cache
-native sources under build/. Linux needs a target C compiler, Make, Perl, curl, sha256sum and flock;
-prepare the cache before offline testing. See [Linux TLS builds](docs/CODEX_COMPATIBILITY.md#linux-tls-builds).
-
-## Start
-
-```bash
 export MINI_SUB2API_STATE_DIR=./state
 build/bin/mini-sub2api credential login codex --name personal
-# Alternative: credential add-api-key codex --name openai-api --secret-stdin
 build/bin/mini-sub2api credential list
 build/bin/mini-sub2api key create --credential cred_EXAMPLE --name laptop
 build/bin/mini-sub2api serve
 ```
 
-The downstream ms2a_ key is shown once. The default listener is 127.0.0.1:8787:
+Replace `cred_EXAMPLE` with the credential ID from `credential list`.
+Save the generated `ms2a_` key; it is shown only once.
+
+The default listener is `127.0.0.1:8787`. Remote access requires
+[TLS configuration](docs/OPERATIONS.md#deployment).
+
+## Connect a client
+
+Use `http://127.0.0.1:8787/v1` as the base URL and your `ms2a_` key for authentication.
+For the Codex CLI, follow the [client setup](docs/OPERATIONS.md#codex-client).
 
 ```bash
 curl --no-buffer http://127.0.0.1:8787/v1/responses \
@@ -48,118 +36,21 @@ curl --no-buffer http://127.0.0.1:8787/v1/responses \
   -d '{"model":"YOUR_CODEX_MODEL","input":"Say hello","stream":true}'
 ```
 
-## Codex client
-
-Add to `$CODEX_HOME/config.toml` (default `$HOME/.codex/config.toml`):
-
-```toml
-[model_providers.mini-sub2api]
-name = "mini-sub2api"
-base_url = "http://127.0.0.1:8787/v1"
-env_key = "MINI_SUB2API_API_KEY"
-wire_api = "responses"
-supports_websockets = true
-request_max_retries = 0
-stream_max_retries = 0
-
-[profiles.mini-sub2api]
-model_provider = "mini-sub2api"
-```
-
-```bash
-MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
-```
-
-Set `supports_websockets=false` for HTTP only. Other Responses clients use the same base URL/Key.
-OpenCode custom providers and bare clients can associate full histories without a session ID.
-
-## Main rules
-
-- HTTP stays HTTP; WS stays WS. HTTP continuation requires complete local history, which expires
-  after three idle hours or earlier capacity eviction. Full input can rebuild it.
-- Anonymous full history can import old turn identities after expiry or restart once message/tool
-  dependencies are self-contained; original session ownership and scoped aliases remain intact.
-- History lookup tolerates omitted assistant-message metadata; supplied conflicts remain
-  significant and matching stays within the current Key.
-- Subscription preserves caller instructions and tool order, inserts no default base, and requests
-  encrypted reasoning for ordinary/reviewer requests; `include` controls public visibility. The async
-  classifier uses its own identity, cache and transport rules. Encrypted tool outputs are preserved.
-  Workspace, Skills and tools belong to the client; nonempty whitespace instructions remain verbatim.
-- Subscription ignores fields outside native request/tool/history types and emits bounded,
-  content-free `codex_ignored_field` diagnostics before sending. See [log analysis and retention](docs/OPERATIONS.md#ignored-field-diagnostics).
-- Custom CA bundles use `CODEX_CA_CERTIFICATE`, then `SSL_CERT_FILE`; empty values are unset.
-  HTTP uses native TLS by default and rustls for an override; WS appends the selected roots.
-  Ordinary and OpenSSL trusted/AUX certificate bundles are supported.
-- Valid caller turn-start timestamps survive normalization; omitted values reuse the recorded turn
-  time or receive a server-clock fallback. These timestamps do not control retention.
-- Native 0.158.0 captures check JSON field order/presence and Header order/casing; see the
-  [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
-  Official classifier captures also compare complete HTTP/WS requests after successful parent
-  tool turns, including source/cache identity and persistent HTTP pooling.
-- Bare and actual OpenCode captures also check ordered protocol objects and complete upstream
-  header order/casing against independently captured 0.158.0 baselines. Late identity insertion
-  and automatic WS continuation preserve native field positions.
-- Codex 0.158.0 adds numeric reasoning effort and gpt-6-sol/luna profiles. Supplied MCP attribution
-  is bounded and scoped; optional tool observations follow native prompt and outgoing-message
-  budgets with persistent completeness revocation. See [release changes](docs/CODEX_COMPATIBILITY.md#changes-from-01560).
-- Native typed tool schemas retain type-free enums and optional schema fields; raw MCP-style
-  schemas still use import lowering. Code Mode cell origins follow call-ID mappings, and inventory
-  loss remains revoked after historical-turn import, restart or optional output-ID omission.
-- HTTP response headers, WS handshake headers and Subscription response metadata preserve
-  upstream `x-codex-safety-buffering-enabled` and `x-codex-safety-buffering-faster-model` values.
-  Subscription response metadata headers use the public HTTP header policy. Protocol errors
-  preserve stream correlation, reviewed codes and generic messages, including flat errors with
-  `error: null`; supported numeric retry delays survive. Private SSE
-  IDs/comments/extensions are removed. Model text, tool content and API-key bodies remain opaque.
-- HTTPS and WSS share allowlisted infrastructure routing cookies, including `__oailb`, with
-  secure/domain/path/expiry checks. Account and login cookies are never stored in that shared jar.
-- Authorized [real upstream tests](docs/CODEX_COMPATIBILITY.md#real-upstream-continuation-evidence)
-  cover multi-turn memory, tool outputs and WS reconnects; long opaque routing tokens have a
-  separate bounded budget and no longer hit the logical-ID length limit.
-- Success requires consistent terminal/output evidence. Failed or partial output cannot become
-  reusable history; uncertain sends are not automatically replayed.
-- WS accepts native numeric error status fields. After a non-flex, statusless error, one matching
-  failed footer can supply usage within one second without owning a newer request. Native terminal
-  HTTP/deferred-WS error categories survive bounded, private normalization.
-- Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state
-  still uses the persistent transaction. Files changed within the last two seconds require full
-  validation before cache reuse. See [cache bounds](docs/MEMORY.md#response-identity-work).
-- WS response processing reuses one parsed event across validation and translation. Changed
-  identity ledgers encode their final revision once before the same atomic, synced write.
-- HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
-  and heartbeats cannot extend it. A standalone error waits for its failed footer within the idle
-  budget, except native terminal `flex_unavailable`, which finishes immediately. Completed streams close after a bounded tail; stalled client
-  writes time out after 120 seconds. [Diagnostic logs](docs/OPERATIONS.md#diagnosing-long-requests)
-  correlate request stages, model/effort, typed failures and minute-spaced progress without payloads.
-
-Plain HTTP binds only loopback; other listeners need TLS. Run one service per state directory.
-Vault/identity files are private but unencrypted; request/response bodies are not persisted.
-
-| Guide | Contents |
-|---|---|
-| [Behavior](docs/BEHAVIOR.md) | Matching, compaction, instructions, limits and failure semantics |
-| [Codex compatibility](docs/CODEX_COMPATIBILITY.md) | 0.158.0 wire changes and actual CLI capture evidence |
-| [Operations](docs/OPERATIONS.md) | Authentication, request diagnosis, administration and deployment |
-| [Memory](docs/MEMORY.md) | Small-host sizing and OOM diagnosis; context budgets are not RSS caps |
-| [Protocol](src/protocol/v1/README.md) | Private coordinator/Core wire contract |
-| [Architecture](docs/ARCHITECTURE.md) | Runtime ownership, state lifetimes and admission |
-
-## Validate
+## Development
 
 ```bash
 bash scripts/test.sh
-bash scripts/test-native-parity.sh
-mise exec -- python3 scripts/prepare-opencode-tests.py
-bash scripts/test-scaffold-parity.sh
 ```
 
-[Capture methods and matrix](src/coordinator/integration/NATIVE_PARITY.md) distinguish native clients,
-bare fixtures and real-provider evidence. Normal suites are loopback-only; real calls require separate authorization.
-Source lives in `src/coordinator`, `src/core/codex` and `src/protocol/v1`; output stays in `build/`.
-Keep retained reference sources, comparison tools and validation records under the local `ref/`
-directory. `.ref/` holds temporary work only; archive useful results and remove scratch files when
-the task finishes. Its pre-commit reminder remains advisory. Remove obsolete releases and completed
-task outputs from `build/`; Cargo caches can be regenerated when needed.
-Local instructions, deployment overrides, `.ref/` and `ref/` are excluded from distribution.
+Build output stays in `build/`. See the [capture tests](src/coordinator/integration/NATIVE_PARITY.md)
+for native Codex and third-party client validation.
+
+## Documentation
+
+- [Operations](docs/OPERATIONS.md): credentials, administration and deployment
+- [Behavior](docs/BEHAVIOR.md): request handling, history and limits
+- [Codex compatibility](docs/CODEX_COMPATIBILITY.md): version alignment and validation
+- [Memory](docs/MEMORY.md): sizing and diagnostics
+- [Architecture](docs/ARCHITECTURE.md) · [Internal protocol](src/protocol/v1/README.md)
 
 Personal learning/research software; not an official OpenAI product or intended for commercial/production use.

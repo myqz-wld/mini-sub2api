@@ -59,6 +59,12 @@ Compare normalized caller input and retained public-ID output before upstream id
   history. Restore that field after full-context and source-thread/fork checks; removing an entire
   item or other content does not qualify. Exact storage and provider-output checks remain separate.
 
+Codex 0.158.0 can rebuild retained user messages during compaction while keeping their IDs.
+A complete caller replacement supplies the new content, including removed media or truncated text.
+Core accepts that replacement and uses its contents for later response-reference reconstruction.
+WS prefix reuse compares message content; retained IDs alone cannot establish an unchanged prefix.
+External references and provider completion consistency retain their existing strict checks.
+
 Without an eligible anonymous prefix, an exact last compaction item—including ID/ciphertext—may
 locate a unique completed checkpoint in the same Key's anonymous pool. Normalize internal metadata,
 restore session/thread/window, validate lineage/dependencies, and use the caller's current replacement

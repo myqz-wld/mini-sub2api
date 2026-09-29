@@ -14,6 +14,36 @@ build/bin/mini-sub2api credential import-codex --name personal --auth-file "${CO
 
 Core serializes refresh. Vault files are private, but not encrypted at rest.
 
+To use an API-key credential instead of Subscription login:
+
+```bash
+build/bin/mini-sub2api credential add-api-key codex --name openai-api --secret-stdin
+```
+
+## Codex client
+
+Add to `$CODEX_HOME/config.toml` (default `$HOME/.codex/config.toml`):
+
+```toml
+[model_providers.mini-sub2api]
+name = "mini-sub2api"
+base_url = "http://127.0.0.1:8787/v1"
+env_key = "MINI_SUB2API_API_KEY"
+wire_api = "responses"
+supports_websockets = true
+request_max_retries = 0
+stream_max_retries = 0
+
+[profiles.mini-sub2api]
+model_provider = "mini-sub2api"
+```
+
+```bash
+MINI_SUB2API_API_KEY='ms2a_EXAMPLE' codex -p mini-sub2api
+```
+
+Set `supports_websockets=false` for HTTP only. Other Responses clients use the same base URL/Key.
+
 ## Administration
 
 ```bash
@@ -119,6 +149,10 @@ Ship both binaries and build-info.json together. Plain HTTP binds only loopback;
 ```bash
 build/bin/mini-sub2api serve --listen 192.0.2.20:8787 --tls-cert ./server.crt --tls-key ./server.key
 ```
+
+Inspect an installation with `--version` and `--check-installed`; installed checks never fetch Git
+remotes. Platform prerequisites and static OpenSSL builds are covered by
+[Linux TLS builds](CODEX_COMPATIBILITY.md#linux-tls-builds).
 
 An optional TLS proxy forwards to loopback and preserves streaming/WS upgrades. Use one service
 per state directory; stop it before copying/restoring state. Shutdown joins Core/WS work and usage writes.
