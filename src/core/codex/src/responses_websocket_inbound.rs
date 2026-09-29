@@ -80,16 +80,12 @@ impl Inbound {
             let unbound_footer =
                 failed.response_id.is_none() && same_operation && kind == "response.failed";
             if matches_id || unbound_footer || (same_operation && kind == "error") {
+                let footer = kind == "response.failed";
                 let translated = if let Some((context, tail)) = &failed.state {
-                    encode(
-                        context
-                            .translate_sse_value(value.clone(), Some(tail))
-                            .await?,
-                    )?
+                    encode(context.translate_sse_value(value, Some(tail)).await?)?
                 } else {
                     text
                 };
-                let footer = kind == "response.failed";
                 let terminal = (footer && same_operation).then_some(failed.generation);
                 if footer {
                     self.failed = None;
@@ -109,7 +105,7 @@ impl Inbound {
             );
         }
 
-        let observed = observe_server_text(continuation, &text);
+        let observed = observe_server_event(continuation, &value);
         if observed.disposition == EventDisposition::ConsumeHiddenSetup {
             return Ok(None);
         }
@@ -130,24 +126,21 @@ impl Inbound {
                     .is_some_and(|status| (100..=599).contains(&status))
             });
         let translated = if wait_for_footer {
+            let failed_response_id = self
+                .response_id
+                .take()
+                .or_else(|| response_id.map(str::to_string));
             let frozen = state
                 .map(ResponseStateContext::frozen_failure)
                 .transpose()?
                 .and_then(|(context, tail)| tail.map(|tail| (context, tail)));
             let translated = if let Some((context, tail)) = &frozen {
-                encode(
-                    context
-                        .translate_sse_value(value.clone(), Some(tail))
-                        .await?,
-                )?
+                encode(context.translate_sse_value(value, Some(tail)).await?)?
             } else {
                 text
             };
             self.failed = Some(FailedResponse {
-                response_id: self
-                    .response_id
-                    .take()
-                    .or_else(|| response_id.map(str::to_string)),
+                response_id: failed_response_id,
                 operation_id: current_operation,
                 generation,
                 state: frozen,
@@ -158,8 +151,8 @@ impl Inbound {
             let translated = match state {
                 Some(state) => {
                     state
-                        .translate_text_with_compaction(
-                            text,
+                        .translate_event_with_compaction(
+                            value,
                             crate::inference_limits::get().output_bytes,
                             observed.completed_compaction.as_ref(),
                         )
@@ -187,3 +180,7 @@ fn encode(value: Value) -> anyhow::Result<String> {
     );
     Ok(text)
 }
+
+#[cfg(test)]
+#[path = "responses_websocket_performance_tests.rs"]
+mod performance_tests;

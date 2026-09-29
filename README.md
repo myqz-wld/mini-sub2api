@@ -22,6 +22,8 @@ build/bin/mini-sub2api --check-installed
 ```
 
 Ship both binaries and build-info.json from build/bin together. Installed checks never fetch Git remotes.
+Release coordinator builds omit Go debug symbol tables to reduce package and installed size;
+runtime stack traces and version metadata remain available. Development builds retain debug symbols.
 Linux x86_64/aarch64 GNU and musl builds statically link checksum-verified OpenSSL 3.6.4,
 matching the Codex 0.158.0 Linux release library. Build/test scripts enforce Cargo.lock and cache
 native sources under build/. Linux needs a target C compiler, Make, Perl, curl, sha256sum and flock;
@@ -122,6 +124,8 @@ OpenCode custom providers and bare clients can associate full histories without 
 - Subscription text/reasoning deltas reuse bounded, validated ID mappings; new or changed state
   still uses the persistent transaction. Files changed within the last two seconds require full
   validation before cache reuse. See [cache bounds](docs/MEMORY.md#response-identity-work).
+- WS response processing reuses one parsed event across validation and translation. Changed
+  identity ledgers encode their final revision once before the same atomic, synced write.
 - HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
   and heartbeats cannot extend it. A standalone error waits for its failed footer within the idle
   budget, except native terminal `flex_unavailable`, which finishes immediately. Completed streams close after a bounded tail; stalled client

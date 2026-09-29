@@ -64,9 +64,14 @@ where
     let output = operation(&mut editor)?;
     let mut summary = editor.finish();
     contexts.protect_aliases(&state, &mut summary.protected)?;
-    let mut changed = summary.changed | state.prune(day, &summary.protected)?;
+    let changed = summary.changed | state.prune(day, &summary.protected)?;
     if !created && !changed {
         return Ok(output);
+    }
+    // Include the final revision in the first encoding. Normal mutations need
+    // one complete ledger serialization, with the same lock/validation/fsync.
+    if !created {
+        state.revision = next_revision(state.revision)?;
     }
     let mut bytes = serde_json::to_vec(&state).context("encoding request state")?;
     while bytes.len() as u64 > MAX_REQUEST_STATE_BYTES {
@@ -74,20 +79,9 @@ where
             state.evict_one(&summary.protected),
             "request state cannot fit within the size limit"
         );
-        changed = true;
         bytes = serde_json::to_vec(&state).context("encoding pruned request state")?;
     }
-    if created || changed {
-        if !created {
-            state.revision = next_revision(state.revision)?;
-            bytes = serde_json::to_vec(&state).context("encoding revised request state")?;
-        }
-        state.validate()?;
-        anyhow::ensure!(
-            bytes.len() as u64 <= MAX_REQUEST_STATE_BYTES,
-            "request state is too large"
-        );
-        write_bytes_atomically(accounts_dir, &path, &bytes)?;
-    }
+    state.validate()?;
+    write_bytes_atomically(accounts_dir, &path, &bytes)?;
     Ok(output)
 }

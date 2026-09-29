@@ -18,32 +18,11 @@ pub(super) fn public_create_in_flight(continuation: &StdMutex<ResponsesWebSocket
     )
 }
 
-pub(super) fn observe_server_text(
+pub(super) fn observe_server_event(
     continuation: &StdMutex<ResponsesWebSocketState>,
-    text: &str,
+    event: &Value,
 ) -> ObservedServerEvent {
-    let mut continuation = continuation_guard(continuation);
-    match serde_json::from_str::<Value>(text) {
-        Ok(event) => continuation.observe_server_event_with_compaction(&event),
-        Err(_) if public_phase_in_flight(continuation.public_phase()) => {
-            continuation.fail_public_create();
-            ObservedServerEvent {
-                disposition: EventDisposition::ForwardPublic,
-                completed_compaction: None,
-            }
-        }
-        Err(_) => ObservedServerEvent {
-            disposition: EventDisposition::Unassociated,
-            completed_compaction: None,
-        },
-    }
-}
-
-fn public_phase_in_flight(phase: OperationPhase) -> bool {
-    matches!(
-        phase,
-        OperationPhase::Attempted | OperationPhase::ResponseObserved
-    )
+    continuation_guard(continuation).observe_server_event_with_compaction(event)
 }
 
 pub(super) fn continuation_guard(

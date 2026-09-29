@@ -130,3 +130,54 @@ async fn benchmark_large_identity_state_deltas() {
         );
     }
 }
+
+#[tokio::test]
+#[ignore = "manual resource benchmark; run in release mode"]
+async fn benchmark_large_identity_state_writes() {
+    let (_temporary, store, bytes) = large_state();
+    let path = store.state_path_for_test(NAMESPACE);
+    let initial: PersistedRequestState =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    for round in 0..3 {
+        let started = Instant::now();
+        for index in 0..8 {
+            let id = format!("item_benchmark_write_{}", round * 8 + index);
+            store
+                .edit(NAMESPACE, OWNER, SCOPE, move |editor| {
+                    editor.wire_from_upstream(WireIdDomain::Item, &id)
+                })
+                .await
+                .unwrap();
+        }
+        println!(
+            "identity_write_benchmark state_bytes={bytes} round={round} updates=8 elapsed_ms={:.3}",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let persisted: PersistedRequestState =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    persisted.validate().unwrap();
+    assert_eq!(persisted.revision, initial.revision + 24);
+    drop(store);
+    let restarted = RequestStateStore::new(path.parent().unwrap().into());
+    for index in 0..24 {
+        restarted
+            .edit(NAMESPACE, OWNER, SCOPE, move |editor| {
+                assert!(
+                    editor
+                        .existing_wire_from_upstream(
+                            WireIdDomain::Item,
+                            &format!("item_benchmark_write_{index}")
+                        )?
+                        .is_some()
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        serde_json::to_vec(&persisted).unwrap()
+    );
+}

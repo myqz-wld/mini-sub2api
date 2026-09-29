@@ -90,6 +90,30 @@ detect repeated full-ledger reads. Results measure local ID translation, not ups
 mise exec -- cargo test --release -p mini-sub2api-core-codex benchmark_large_identity_state_deltas -- --ignored --nocapture --test-threads=1
 ```
 
+## CPU and storage cost
+
+WS response processing parses an event once and reuses its value for continuation and identity
+translation. API-key frames retain their original bytes. Changed identity ledgers encode the final
+revision once; file locks, full validation, atomic replacement and file/directory sync remain in
+place. Cache misses and two-second timestamp protection keep their existing failure semantics.
+
+Synthetic release benchmarks on the development host measured three batches per case. For 64
+roughly 576 KiB frames, median processing time decreased from 15.17 to 6.66 ms for API-key and
+32.28 to 23.47 ms for Subscription. Eight updates to a 13.3 MB ledger decreased from 594.08 to
+544.19 ms. Warm small-delta cache hits remained approximately 0.03–0.10 ms/event. These isolated
+local measurements do not predict end-to-end provider latency or a proportional billing reduction.
+Ledger file format, disk-write count, retention and usage accounting remain unchanged.
+
+Run the synthetic delta, write/reload and WS processing benchmarks with:
+
+```bash
+CARGO_NET_OFFLINE=true mise exec -- bash scripts/cargo.sh test --release -p mini-sub2api-core-codex benchmark_ -- --ignored --nocapture --test-threads=1
+```
+
+The release coordinator omits DWARF/debug symbol tables; ordinary development builds remain
+suitable for source debugging. This reduces deployed artifact size without changing request handling,
+runtime stack traces or the installed-version contract. Rust symbols are retained.
+
 ## Separate boot failures
 
 - Xray: inspect `systemctl status xray.service --no-pager -l` and

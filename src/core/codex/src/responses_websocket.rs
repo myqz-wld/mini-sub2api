@@ -49,7 +49,7 @@ use relay_context::RelayExit;
 use relay_helpers::allowed_close_code;
 use relay_helpers::continuation_guard;
 pub(crate) use relay_helpers::fingerprint_is_current;
-use relay_helpers::observe_server_text;
+use relay_helpers::observe_server_event;
 use relay_helpers::public_create_in_flight;
 use relay_helpers::upstream_close;
 

@@ -227,13 +227,12 @@ impl ResponseStateContext {
         Ok(translated)
     }
 
-    pub(crate) async fn translate_text_with_compaction(
+    pub(crate) async fn translate_event_with_compaction(
         &self,
-        text: String,
+        value: Value,
         maximum: usize,
         pending_compaction: Option<&PendingCompaction>,
     ) -> Result<String> {
-        let value = serde_json::from_str::<Value>(&text)?;
         let completed = value.get("type").and_then(Value::as_str) == Some("response.completed");
         let pending = completed
             .then_some(pending_compaction.or(self.default_compaction.as_ref()))

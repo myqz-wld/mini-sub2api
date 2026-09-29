@@ -16,7 +16,7 @@ mise exec -- go run ./src/coordinator/cmd/generate-build-info \
 
 if find src/coordinator -name '*.go' -print -quit 2>/dev/null | grep -q .; then
   mise exec -- go build -trimpath \
-    -ldflags "-X main.version=$version -X main.buildCommit=$full_commit" \
+    -ldflags "-s -w -X main.version=$version -X main.buildCommit=$full_commit" \
     -o build/bin/mini-sub2api ./src/coordinator/cmd/mini-sub2api
 fi
 
