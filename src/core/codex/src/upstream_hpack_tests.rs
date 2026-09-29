@@ -57,7 +57,7 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
             token: "synthetic-only".into(),
             account_id: "synthetic".into(),
         },
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         bytes::Bytes::from_static(b"{}"),
     )
     .unwrap();
@@ -67,7 +67,7 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
         .unwrap()
         .unwrap();
     assert_eq!(response.status(), 200);
-    // Static HPACK name index 23 with a four-bit zero prefix, as in native 0.156.0.
+    // Static HPACK name index 23 with a four-bit zero prefix, as in native 0.158.0.
     assert_eq!(peer.await.unwrap(), vec![0x0f, 0x08]);
 }
 

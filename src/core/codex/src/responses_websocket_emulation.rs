@@ -327,6 +327,7 @@ pub(crate) fn plan_public_text_with_synthesized_ids(
     plan_public_text_with_state(continuation, value, synthesized_item_ids, None, maximum)
 }
 
+#[cfg(test)]
 pub(crate) fn plan_public_text_with_state(
     continuation: &mut ResponsesWebSocketState,
     value: &Value,
@@ -334,11 +335,34 @@ pub(crate) fn plan_public_text_with_state(
     pending_compaction: Option<PendingCompaction>,
     maximum: usize,
 ) -> Result<String, ()> {
+    plan_public_text_with_observations(
+        continuation,
+        value,
+        synthesized_item_ids,
+        pending_compaction,
+        maximum,
+    )
+    .and_then(|(text, frame)| match frame {
+        Some(mut frame) => {
+            crate::tool_observation_budget::message(&mut frame);
+            encode_frame_bounded(&frame, maximum)
+        }
+        None => Ok(text),
+    })
+}
+
+pub(crate) fn plan_public_text_with_observations(
+    continuation: &mut ResponsesWebSocketState,
+    value: &Value,
+    synthesized_item_ids: &[String],
+    pending_compaction: Option<PendingCompaction>,
+    maximum: usize,
+) -> Result<(String, Option<Value>), ()> {
     let retry_compaction = pending_compaction.clone();
     let plan =
         continuation.plan_public_create_with_state(value, synthesized_item_ids, pending_compaction);
     debug_assert_ne!(plan.mode, PublicCreateMode::Passthrough);
-    let encoded = encode_frame_bounded(&plan.frame, maximum);
+    let encoded = plan_observation_frame(plan.frame, maximum);
     if encoded.is_ok() || plan.mode != PublicCreateMode::Incremental {
         return encoded;
     }
@@ -346,7 +370,23 @@ pub(crate) fn plan_public_text_with_state(
     let fallback =
         continuation.plan_public_create_with_state(value, synthesized_item_ids, retry_compaction);
     debug_assert_eq!(fallback.mode, PublicCreateMode::Full);
-    encode_frame_bounded(&fallback.frame, maximum)
+    plan_observation_frame(fallback.frame, maximum)
+}
+
+fn plan_observation_frame(frame: Value, maximum: usize) -> Result<(String, Option<Value>), ()> {
+    if !crate::tool_observation_budget::has_observations(&frame) {
+        return encode_frame_bounded(&frame, maximum).map(|text| (text, None));
+    }
+    if crate::json_size::encoded_len(&frame).map_err(|_| ())? > maximum {
+        // Preview only to select the existing hard-limit/full-fallback path. Final shedding
+        // uses the original frame, after the latest completeness check in the state transaction.
+        let mut preview = frame.clone();
+        crate::tool_observation_budget::message(&mut preview);
+        if crate::json_size::encoded_len(&preview).map_err(|_| ())? > maximum {
+            return Err(());
+        }
+    }
+    Ok((String::new(), Some(frame)))
 }
 
 pub(crate) fn encode_frame_bounded(value: &Value, maximum: usize) -> Result<String, ()> {

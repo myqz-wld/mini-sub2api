@@ -10,7 +10,7 @@ switching, Chat Completions or conversation-management API.
 | Upstream | Every caller |
 |---|---|
 | API key | Bodies/valid WS frames remain byte-transparent; gateway auth, admission, usage and safe headers still apply. Caller `X-Codex-Routing-Hint` survives; omission stays absent. |
-| Subscription | Codex 0.156.0 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
+| Subscription | Codex 0.158.0 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
 
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
@@ -94,7 +94,7 @@ present; absent memory turns remain absent. Core provides no memory-writing serv
 
 No path inserts model-default bases or renders caller placeholders. Ordinary continuation does not
 restore an omitted base. Preserve developer content/order/duplicates; Subscription maps
-system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.156.0/README.md)
+system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.158.0/README.md)
 are offline test fixtures only.
 
 Lite UUIDv5 uses OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
@@ -120,10 +120,10 @@ Prewarm/memory omit this field. Retention uses independent server activity clock
 Native exec/wait exposure and host availability differ. Bare API/OpenCode keep direct tools; Core
 provides no JavaScript bridge or claim of complete default-native code-mode equivalence.
 
-Codex 0.156.0 `configuration_update` input items retain their reasoning effort and history position
+Codex 0.158.0 `configuration_update` input items retain their reasoning effort and history position
 in stored history, without item IDs or turn stamps. The fixed native feature policy disables effort
-updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags and opaque executed-tool result metadata
-survive normalization. Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
+updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags survive normalization; optional tool observations follow the budgets below.
+Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
 service-tier/routing hints, and their parent response IDs require an existing mapping in the same Key.
 Ordinary Subscription callers receive the backend Guardian credit metadata flag. Classifiers use
 the source thread's scoped `guardian-v2:` cache key, separate request thread/turn and validated
@@ -141,7 +141,9 @@ business objects and free output schemas keep their content/order. JSON numbers 
 precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
 strictness is false for basic Guardian. Invalid optional container/value types are logged and
 ignored before defaults; unknown nonempty string efforts and opaque business values remain valid.
-`ultra` resolves by the model catalog and `persistent` becomes `disabled`;
+Unsigned 64-bit effort strings serialize as JSON numbers; numeric native values are accepted,
+while turn metadata retains the selected string. `ultra` resolves by the strict model catalog
+(unknown and retired models use `medium`) and `persistent` becomes `disabled`;
 local metadata may retain the selected alias. Unsupported/default tiers and `summary:none` are
 omitted; `flex` remains available. Lite removes image detail, including in structured tool outputs.
 Function/custom tool outputs retain encrypted content; ordinary message and agent-message content
@@ -150,6 +152,23 @@ empty and text-only lists), preserves complete mixed lists, and preserves explic
 struct order plus sorted extras; outer client metadata keeps its separate HashMap ordering policy.
 Legacy item_reference carriers still require scoped ownership, then are logged and omitted from
 native sends; callers should supply complete items when replaying content. Named function outputs can omit call_id; explicit null and missing references still fail validation.
+
+Supplied `client_metadata.mcp_attribution` remains a body-only JSON string. Known first-turn IDs
+use existing same-Key aliases; unknown IDs or invalid sources become `source_invalid`. The
+serialized carrier is bounded at 16 KiB, including after mapping. The gateway collects no MCP
+provenance and does not synthesize an absent carrier.
+
+Optional executed-tool observations follow the native 8 KiB argument and 2 MiB complete-prompt
+budgets. The final HTTP body or selected WS frame gets a 15 MiB soft message limit, shedding
+generic metadata before resource evidence/inventory. Ordinary content is never truncated to
+meet that soft limit. WS message shedding leaves logical reuse snapshots intact; an available
+explicit-reference prefix is rebuilt when its combined prompt needs reduction. Unseen remote
+prefixes remain caller-owned. Inventory loss revokes later completeness claims, including
+wait-only frames and after restart. Malformed optional inventories are removed conservatively.
+Only hashed negative evidence is persisted, scoped by Key/source thread; exhausting the
+4,096-entry budget or an unresolved lost origin switches that account's completeness to unknown. No `true`
+claim is synthesized. Old state files load unchanged; binaries predating these state fields
+cannot reopen a ledger containing them, so rollback requires a compatible reader.
 The pinned CustomToolCallOutput type still requires call_id. Anonymous reasoning lookup ignores
 status, agent, empty content and non-model metadata while checking IDs and ciphertext; provider
 item-done/terminal consistency remains strict.

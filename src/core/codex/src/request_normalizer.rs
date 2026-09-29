@@ -69,7 +69,7 @@ struct InvalidStatefulProjection {
     source: anyhow::Error,
 }
 
-/// Applies the Codex 0.156.0 request overlay selected by `upstream_profile`.
+/// Applies the Codex 0.158.0 request overlay selected by `upstream_profile`.
 ///
 /// The caller object is cloned in full before the supported request-field allowlist and targeted
 /// normalization are applied. `ApiKeyPassthrough` is deliberately rejected: callers must retain its
@@ -186,6 +186,11 @@ pub(crate) async fn prepare_identity_request(
                         &projection.identity,
                     )?;
                     finalize_wire_order(&mut object, transport);
+                    crate::request_state_editor::tool_observations::prepare(
+                        editor,
+                        &mut object,
+                        &projection.identity.thread_id,
+                    );
                     let admission = admission
                         .map(|(mut plan, format)| {
                             plan.capture_input_metadata(&object);
@@ -195,7 +200,15 @@ pub(crate) async fn prepare_identity_request(
                         })
                         .transpose()?;
                     crate::native_request_policy::filter_send_only(&mut object, transport);
-                    let encoded = serde_json::to_vec(&Value::Object(object))?;
+                    let mut value = Value::Object(object);
+                    if transport == EmulationTransport::Http {
+                        crate::request_state_editor::tool_observations::finalize(
+                            editor,
+                            &mut value,
+                            &projection.identity.thread_id,
+                        );
+                    }
+                    let encoded = serde_json::to_vec(&value)?;
                     anyhow::ensure!(
                         encoded.len() <= max_bytes_for_edit,
                         "projected request is too large"
@@ -424,8 +437,12 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 mod tests;
 
 #[cfg(test)]
-#[path = "request_normalizer_1560_tests.rs"]
-mod release1560_tests;
+#[path = "request_normalizer_1580_tests.rs"]
+mod release1580_tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_numeric_tests.rs"]
+mod numeric_tests;
 
 #[cfg(test)]
 #[path = "request_normalizer_message_tests.rs"]

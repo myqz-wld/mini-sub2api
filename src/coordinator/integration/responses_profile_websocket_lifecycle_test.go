@@ -13,11 +13,11 @@ import (
 func TestResponsesProfileWebSocketOrdinarySecondTurnUsesDelta(t *testing.T) {
 	fixture := newResponsesProfileWebSocketFixture(t)
 	first := map[string]any{
-		"type": "response.create", "model": "gpt-5.4",
+		"type": "response.create", "model": "gpt-5.5",
 		"input": []any{responsesProfileMessage("ordinary-first")},
 	}
 	second := map[string]any{
-		"type": "response.create", "model": "gpt-5.4", "input": []any{
+		"type": "response.create", "model": "gpt-5.5", "input": []any{
 			responsesProfileMessage("ordinary-first"),
 			map[string]any{"type": "message", "id": "msg_profile_assistant", "role": "assistant", "content": []any{}},
 			responsesProfileMessage("ordinary-second"),
@@ -87,7 +87,7 @@ func TestResponsesProfileWebSocketDeferredSetupHonorsCancellationAndOverlap(t *t
 				},
 			)
 			connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.subscriptionKey, nil)
-			frame := responsesProfileRequest("gpt-5.4", []any{responsesProfileMessage("deferred")})
+			frame := responsesProfileRequest("gpt-5.5", []any{responsesProfileMessage("deferred")})
 			delete(frame, "conversation")
 			frame["type"] = "response.create"
 			encoded := mustRequestJSON(t, frame)
@@ -139,7 +139,7 @@ func TestResponsesProfileWebSocketDeferredPendingQueueIsBounded(t *testing.T) {
 	connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.subscriptionKey, nil)
 	defer connection.CloseNow()
 	first := mustRequestJSON(t, map[string]any{
-		"type": "response.create", "model": "gpt-5.4", "input": []any{},
+		"type": "response.create", "model": "gpt-5.5", "input": []any{},
 	})
 	writeE2EWebSocketText(t, connection, string(first))
 	select {

@@ -53,11 +53,11 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 		subscription        bool
 		expectHiddenPrewarm bool
 	}{
-		{name: "bare_api_key_normal", secret: fixture.apiKey, model: "gpt-5.4"},
+		{name: "bare_api_key_normal", secret: fixture.apiKey, model: "gpt-5.5"},
 		{
 			name: "codex_api_key_normal", secret: fixture.apiKey,
 			headers: codexScenarioHeaders("profile-ws-api", "profile-ws/0.149.0"),
-			model:   "gpt-5.4",
+			model:   "gpt-5.5",
 		},
 		{
 			name: "bare_subscription_lite", secret: fixture.subscriptionKey, model: "gpt-5.6-sol",
@@ -147,7 +147,7 @@ func TestResponsesProfileWebSocketMatrixTwoTurnsAndToolFallback(t *testing.T) {
 
 func TestResponsesProfileWebSocketExplicitStatePreventsSyntheticPrewarm(t *testing.T) {
 	fixture := newResponsesProfileWebSocketFixture(t)
-	frame := responsesProfileRequest("gpt-5.4", []any{responsesProfileMessage("explicit-state")})
+	frame := responsesProfileRequest("gpt-5.5", []any{responsesProfileMessage("explicit-state")})
 	frame["type"] = "response.create"
 	frame["generate"] = false
 	frame["stream_id"] = "caller-stream"

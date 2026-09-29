@@ -20,6 +20,8 @@ pub(crate) fn provider_code(value: &Value) -> &'static str {
         Some("rate_limit_exceeded") => "rate_limit_exceeded",
         Some("server_error") => "server_error",
         Some("invalid_request_error") => "invalid_request_error",
+        Some("invalid_prompt") => "invalid_prompt",
+        Some("flex_unavailable") => "flex_unavailable",
         Some("context_length_exceeded") => "context_length_exceeded",
         Some("max_output_tokens") => "max_output_tokens",
         Some("content_filter") => "content_filter",

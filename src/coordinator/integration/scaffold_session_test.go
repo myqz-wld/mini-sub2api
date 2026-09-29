@@ -11,7 +11,7 @@ import (
 // This exercises the real built-in OpenAI header hook, separately from custom-provider history.
 // Authentication remains a synthetic API key and every endpoint is an isolated loopback mock.
 func TestOpenCodeBuiltInSessionHeader(t *testing.T) {
-	for _, model := range []string{"gpt-5.4", "gpt-6-astra"} {
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		for _, subscription := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/subscription=%t", model, subscription), func(t *testing.T) {
 				capture := newScaffoldCapture(t)

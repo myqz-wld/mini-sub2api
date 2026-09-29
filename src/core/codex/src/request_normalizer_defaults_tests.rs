@@ -18,7 +18,7 @@ fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
         .expect("memory request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -60,7 +60,7 @@ fn gpt_5_2_projects_optional_null_controls() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -110,7 +110,7 @@ fn unknown_model_uses_codex_fallback_reasoning_without_verbosity() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -127,7 +127,7 @@ fn unknown_model_uses_codex_fallback_reasoning_without_verbosity() {
 #[test]
 fn derived_and_namespaced_models_use_catalog_profile_shape() {
     for (model, expected_verbosity, expected_lite) in [
-        ("gpt-5.4-mini-preview", "low", false),
+        ("gpt-5.5-preview", "low", false),
         ("vendor/gpt-5.6-sol-snapshot", "low", true),
     ] {
         let body = Bytes::from(
@@ -139,7 +139,7 @@ fn derived_and_namespaced_models_use_catalog_profile_shape() {
             .expect("request"),
         );
         let prepared = prepare_codex_overlay_for_test(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body,
@@ -183,7 +183,7 @@ fn reused_lite_websocket_frame_keeps_incremental_input_without_prefix() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::WebSocket,
         &HeaderMap::new(),
         body,

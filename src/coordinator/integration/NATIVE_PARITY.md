@@ -11,14 +11,14 @@ mise exec -- python3 scripts/prepare-opencode-tests.py
 bash scripts/test-scaffold-parity.sh
 ```
 
-Pinned clients: Codex **0.156.0** (`fe74a774532af67b5a4a3dec03ce9469e17f89af`) and OpenCode
+Pinned clients: Codex **0.158.0** (`064c6b8c737f5b41d171fdda80bd9ef10ad06eb3`) and OpenCode
 **1.18.29** (`16747470f976aca3d362ad730bcd3fe82ecc2c9a`). Missing/wrong prerequisites fail.
 Clients are verified on macOS arm64. Standard suites use loopback mocks and never fall back to providers.
-Code Mode execution requires the matching 0.156.0 `codex-code-mode-host` companion in the CLI's
+Code Mode execution requires the matching 0.158.0 `codex-code-mode-host` companion in the CLI's
 installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NATIVE_CODEX_BINARY`;
 `MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout, defaulting to
-`ref/sources/codex-v0.156.0`. Retain the CLI and its companion together under
-`ref/tools/codex-v0.156.0`; `.ref/` is reserved for temporary work.
+`ref/sources/codex-v0.158.0`. Retain the CLI and its companion together under
+`ref/tools/codex-v0.158.0`; `.ref/` is reserved for temporary work.
 
 ## Method
 
@@ -51,10 +51,10 @@ Counts describe overlapping matrices, not additive independent cases.
 | Configuration: 48 four-call cases | Stable association under changed/current/omitted settings; eligible WS suffix, Lite IDs and API-key bytes |
 | Reasoning: 96 four-call cases | Include visibility, full/reference histories, JSON/SSE/WS/reconnect, caller markers, hidden-state restoration and tool/user turns |
 | Caller bases: 144 two-call cases | Missing/invalid/explicit bases, both credentials and HTTP/WS ordinary/Lite; no defaults, stable prefix ownership |
-| Actual OpenCode: 18 cases | Custom-provider text/read/denied-file and built-in OpenAI plugin; continuity, tool turns, API-key bytes and ordered Subscription wire/header contracts |
+| Actual OpenCode: 20 cases | Custom-provider text/read/denied-file, built-in OpenAI plugin and Core restart; continuity, tool turns, API-key bytes and ordered Subscription wire/header contracts |
 | Bare ordered wire: 12 cases | HTTP/WS × ordinary/Lite × minimal/explicit/null controls; independent actual CLI baselines, source-derived protocol order, complete header signatures |
-| Models/context | All 9 catalog models; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
-| 0.156.0 controls | Actual CLI HTTP/WS effort changes with the capability enabled; analytics/model/effort metadata, scoped cache affinity, Guardian references and tool-result evidence |
+| Models/context | All 10 catalog models plus the retired gpt-5.4 fallback; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
+| 0.158.0 controls | Actual numeric effort across direct/API-key/Subscription HTTP/WS; MCP first-turn mapping/bounds, observation prompt/message budgets and persistent completeness revocation. Experimental effort-history updates remain disabled by gateway policy. |
 | Built-in wire shape: 28 requests | Actual CLI app-server; HTTP fallback/WS × ordinary/Lite × two isolated processes; complete header order/presence/casing and recursive JSON shape, including tool loops and the next turn |
 | Identity/privacy | Key/device/shared-account isolation, forks/owners, explicit conflicts, restart/corruption and required references |
 | HTTP boundaries: 64 cases | EOF/delta/DONE-only/all terminals, 9 MiB output, JSON/SSE, no replay, exact API-key bytes and usage/status |
@@ -72,7 +72,13 @@ Negative controls preserve explicit IDs, substantive content/decoration, Key iso
 
 ## Evidence and limits
 
-The 0.156.0 continuation follow-up passed 26 real Subscription cases: 12 native direct/gateway/
+Final 0.158.0 validation on 2026-09-28 passed 1,298 native/bare loopback cases in one expanded
+script invocation, 20 actual OpenCode cases and 56 real Subscription business scenarios.
+An additional direct-native/gateway/raw-API capability probe confirmed the tested gpt-6-sol
+backend rejects integer effort 8192 on both native and gateway paths; emitted numeric JSON was
+verified. It is recorded as a negative capability case. See [current results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-09-28).
+
+The earlier 0.156.0 continuation follow-up passed 26 real Subscription cases: 12 native direct/gateway/
 captured-gateway conversations, 8 ordinary five-turn memory cases, 4 tool/schema cases and 2 tool
 reconnect cases. All use gpt-5.5/Astra. Four captured-gateway cases additionally compare 18 paired
 real-provider requests with the recursive ordered/scalar and complete header-shape assertions.
@@ -85,7 +91,7 @@ are recoverable from Git history; detailed local review records remain excluded 
 Run the suites above for current results; the timeout investigation is summarized in
 [Operations](../../../docs/OPERATIONS.md#diagnosing-long-requests).
 
-Older 14-case OpenCode evidence proves delivery only; current 18-case coverage checks continuity.
+Older 14-case OpenCode evidence proves delivery only; current 20-case coverage checks continuity.
 Current OpenCode/ordinary ordered checks use `caller_wire_contract_test.go` and independently run
 the pinned CLI through `caller_wire_capture_test.go`. Thus the OpenCode suite also requires that
 CLI and source checkout. Live OpenCode and bare-memory checks now capture Core egress through the
@@ -112,11 +118,8 @@ unchanged and never prints payloads or tokens. It does not renew credentials. Na
 use neutral temporary paths; default test launchers remain loopback-only with no provider fallback.
 
 ```bash
-MINI_SUB2API_LIVE_SUBSCRIPTION=1 \
-MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.156.0/codex" \
-  mise exec -- go test -tags=nativeparity,liveparity -race -count=1 -timeout=15m \
-  ./src/coordinator/integration \
-  -run '^TestLiveSubscription(Conversation|MemoryBare|ToolAndSchema|ToolReconnect)$' -v
+MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.158.0/codex" \
+  bash scripts/test-live-parity.sh --allow-real-subscription
 ```
 
 The authenticated capture relay targets only the fixed official backend; it keeps raw frames and

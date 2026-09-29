@@ -88,7 +88,7 @@ func startLiveNativeDirect(t *testing.T, options nativeOptions) *nativeClient {
 	if err != nil || strings.TrimSpace(string(version)) != nativeVersion {
 		t.Fatal("live native binary version mismatch")
 	}
-	if options.model != "gpt-5.5" && options.model != "gpt-6-astra" {
+	if options.model != "gpt-5.5" && options.model != "gpt-6-astra" && options.model != "gpt-6-sol" && options.model != "gpt-6-luna" {
 		t.Fatal("live model outside bounded matrix")
 	}
 	isolated, home := liveSyntheticDirectory(t), liveSyntheticDirectory(t)
@@ -111,7 +111,7 @@ code_mode = false
 code_mode_host = false
 `, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"))
 	if !options.ws {
-		// 0.156.0 selects WS by provider capability. Its old feature toggles are removed.
+		// 0.158.0 selects WS by provider capability. Its old feature toggles are removed.
 		config = strings.Replace(config, `model_provider = "openai"`, `model_provider = "live_http"`, 1)
 		config += `
 [model_providers.live_http]
@@ -120,7 +120,7 @@ base_url = "https://chatgpt.com/backend-api/codex"
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
-http_headers = { version = "0.156.0" }
+http_headers = { version = "0.158.0" }
 request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 90000

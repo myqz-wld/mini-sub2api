@@ -6,13 +6,13 @@ Each distribution Key binds one credential; request status, latency and usage ar
 | Upstream | Behavior for every caller |
 |---|---|
 | API key | Pass bodies/valid WS frames and caller `X-Codex-Routing-Hint` through; retain gateway auth, admission and response-header policy. |
-| Codex Subscription | Emulate Codex 0.156.0 for native Codex, bare API and third-party Responses clients. |
+| Codex Subscription | Emulate Codex 0.158.0 for native Codex, bare API and third-party Responses clients. |
 
 No account pool, automatic switching, Chat Completions or admin HTTP API.
 
 ## Build
 
-Go 1.26.4 and Rust 1.95.0 are pinned through mise. Rust matches Codex 0.156.0:
+Go 1.26.4 and Rust 1.95.0 are pinned through mise. Rust matches Codex 0.158.0:
 
 ```bash
 mise install
@@ -23,7 +23,7 @@ build/bin/mini-sub2api --check-installed
 
 Ship both binaries and build-info.json from build/bin together. Installed checks never fetch Git remotes.
 Linux x86_64/aarch64 GNU and musl builds statically link checksum-verified OpenSSL 3.6.4,
-matching the Codex 0.156.0 Linux release library. Build/test scripts enforce Cargo.lock and cache
+matching the Codex 0.158.0 Linux release library. Build/test scripts enforce Cargo.lock and cache
 native sources under build/. Linux needs a target C compiler, Make, Perl, curl, sha256sum and flock;
 prepare the cache before offline testing. See [Linux TLS builds](docs/CODEX_COMPATIBILITY.md#linux-tls-builds).
 
@@ -90,13 +90,16 @@ OpenCode custom providers and bare clients can associate full histories without 
   Ordinary and OpenSSL trusted/AUX certificate bundles are supported.
 - Valid caller turn-start timestamps survive normalization; omitted values reuse the recorded turn
   time or receive a server-clock fallback. These timestamps do not control retention.
-- Native 0.156.0 captures check JSON field order/presence and Header order/casing; see the
+- Native 0.158.0 captures check JSON field order/presence and Header order/casing; see the
   [measured compatibility limits](docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
   Official classifier captures also compare complete HTTP/WS requests after successful parent
   tool turns, including source/cache identity and persistent HTTP pooling.
 - Bare and actual OpenCode captures also check ordered protocol objects and complete upstream
-  header order/casing against independently captured 0.156.0 baselines. Late identity insertion
+  header order/casing against independently captured 0.158.0 baselines. Late identity insertion
   and automatic WS continuation preserve native field positions.
+- Codex 0.158.0 adds numeric reasoning effort and gpt-6-sol/luna profiles. Supplied MCP attribution
+  is bounded and scoped; optional tool observations follow native prompt and outgoing-message
+  budgets with persistent completeness revocation. See [release changes](docs/CODEX_COMPATIBILITY.md#changes-from-01560).
 - HTTP response headers, WS handshake headers and Subscription response metadata preserve
   upstream `x-codex-safety-buffering-enabled` and `x-codex-safety-buffering-faster-model` values.
   Subscription response metadata headers use the public HTTP header policy. Protocol errors
@@ -115,7 +118,7 @@ OpenCode custom providers and bare clients can associate full histories without 
   validation before cache reuse. See [cache bounds](docs/MEMORY.md#response-identity-work).
 - HTTP SSE allows 300 seconds for the first output and between subsequent outputs; status events
   and heartbeats cannot extend it. A standalone error waits for its failed footer within the idle
-  budget. Completed streams close after a bounded tail; stalled client
+  budget, except native terminal `flex_unavailable`, which finishes immediately. Completed streams close after a bounded tail; stalled client
   writes time out after 120 seconds. [Diagnostic logs](docs/OPERATIONS.md#diagnosing-long-requests)
   correlate request stages, model/effort, typed failures and minute-spaced progress without payloads.
 
@@ -125,7 +128,7 @@ Vault/identity files are private but unencrypted; request/response bodies are no
 | Guide | Contents |
 |---|---|
 | [Behavior](docs/BEHAVIOR.md) | Matching, compaction, instructions, limits and failure semantics |
-| [Codex compatibility](docs/CODEX_COMPATIBILITY.md) | 0.156.0 wire changes and actual CLI capture evidence |
+| [Codex compatibility](docs/CODEX_COMPATIBILITY.md) | 0.158.0 wire changes and actual CLI capture evidence |
 | [Operations](docs/OPERATIONS.md) | Authentication, request diagnosis, administration and deployment |
 | [Memory](docs/MEMORY.md) | Small-host sizing and OOM diagnosis; context budgets are not RSS caps |
 | [Protocol](src/protocol/v1/README.md) | Private coordinator/Core wire contract |

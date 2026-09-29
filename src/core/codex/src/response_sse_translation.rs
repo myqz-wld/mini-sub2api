@@ -153,6 +153,7 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     let value: serde_json::Value = serde_json::from_str(&data).map_err(|error| {
         state.reader.observe_error(&error, "sse_json");
     })?;
+    let flex_terminal = crate::response_failure::is_flex_event(&value);
     state.reader.terminal(&value);
     state.reader.processing("output_lifecycle");
     if state.terminal_seen && crate::response_output::OutputLifecycle::is_output_event(&value) {
@@ -210,6 +211,13 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
         return Err(());
     }
     state.terminal_seen |= terminal;
+    if flex_terminal {
+        // Native 0.158.0 ends this category immediately, even without a failed footer.
+        state.reader.close();
+        state.finished = true;
+        state.failed_footer_pending = false;
+        state.failure_tail = None;
+    }
     if failed_footer {
         state.failed_footer_pending = false;
         state.failure_tail = None;

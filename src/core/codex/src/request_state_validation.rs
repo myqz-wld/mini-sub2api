@@ -12,6 +12,13 @@ impl PersistedRequestState {
             "invalid request state revision"
         );
         validate_uuid_version(&self.installation_id, 4, "installation")?;
+        anyhow::ensure!(
+            self.tool_inventory_revocations.len() <= MAX_TOOL_INVENTORY_REVOCATIONS,
+            "too many tool inventory revocations"
+        );
+        for key in &self.tool_inventory_revocations {
+            validate_lookup_key(key)?;
+        }
         anyhow::ensure!(!self.owners.is_empty(), "request state has no owners");
         anyhow::ensure!(
             self.owners.len() <= MAX_OWNERS,

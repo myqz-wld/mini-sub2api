@@ -133,8 +133,32 @@ func TestCompactionResponseUnavailableWindows(t *testing.T) {
 				checkpoint := client.send(first)
 				before := len(capture.snapshot())
 				status, code := compactionHTTPError(t, gateway, compactionDelta(first, checkpoint["id"], "next"))
+				if kind == "unknown-input" {
+					// Admission drops unsupported variants before dependency/window analysis.
+					// They cannot create an unresolved dependency in the known V2 replacement.
+					wires := capture.snapshot()
+					if status != 200 || len(wires) != before+1 {
+						t.Fatal("ignored input variant blocked a proven compaction window")
+					}
+					for _, wire := range wires {
+						for _, raw := range wire.value["input"].([]any) {
+							if raw.(map[string]any)["type"] == "future_context" {
+								t.Fatal("unsupported compaction input crossed admission")
+							}
+						}
+					}
+					last := wires[len(wires)-1]
+					full := last.value["input"].([]any)
+					if last.value["previous_response_id"] != nil || len(full) != 3 || full[0].(map[string]any)["role"] != "user" || full[1].(map[string]any)["type"] != "compaction" || full[2].(map[string]any)["role"] != "user" {
+						t.Fatal("proven V2 window lost its retained user, checkpoint or continuation")
+					}
+					if full[1].(map[string]any)["encrypted_content"] != "synthetic_compacted_state" {
+						t.Fatal("proven compaction ciphertext changed")
+					}
+					return
+				}
 				if status != 503 || code != "state_unavailable" || len(capture.snapshot()) != before {
-					t.Fatal("unknown compaction window allowed HTTP inference")
+					t.Fatalf("unknown compaction window: status=%d code=%s inference_delta=%d", status, code, len(capture.snapshot())-before)
 				}
 			})
 		}

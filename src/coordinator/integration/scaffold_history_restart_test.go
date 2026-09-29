@@ -5,7 +5,7 @@ package integration
 import "testing"
 
 func TestOpenCodeAnonymousFullHistoryAfterCoreRestart(t *testing.T) {
-	for _, model := range []string{"gpt-5.4", "gpt-6-astra"} {
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		t.Run(model, func(t *testing.T) {
 			capture := newScaffoldCaptureWithTurnMetadata(t, true)
 			gateway := newNativeGateway(t, capture.server.URL, true)

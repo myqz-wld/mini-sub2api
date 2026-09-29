@@ -52,6 +52,34 @@ fn data_event(frame: http_body::Frame<Bytes>) -> Value {
     serde_json::from_str(text.trim().strip_prefix("data: ").unwrap()).unwrap()
 }
 
+#[tokio::test(start_paused = true)]
+async fn flex_failure_ends_immediately_and_releases_the_turn_lane() {
+    for nested in [true, false] {
+        let (_temp, store) = store();
+        let body = request(json!([input("start")]));
+        let prepared = prepare(&store, body.clone()).await.unwrap();
+        let context = response_context(&store, prepared);
+        let event = if nested {
+            json!({"type":"error","error":{"code":"flex_unavailable","message":"private-synthetic"}})
+        } else {
+            json!({"type":"error","error":null,"code":"flex_unavailable","message":"private-synthetic"})
+        };
+        let stream = upstream(&[event], 7).chain(futures_util::stream::pending());
+        let frames = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            translated_sse_frames(Box::pin(stream), context, 4096).collect::<Vec<_>>(),
+        )
+        .await
+        .expect("Flex errors must not wait for a failed footer");
+        assert_eq!(frames.len(), 1);
+        let event = data_event(frames.into_iter().next().unwrap().unwrap());
+        let error = if nested { &event["error"] } else { &event };
+        assert_eq!(error["code"], "flex_unavailable");
+        assert!(!event.to_string().contains("private-synthetic"));
+        assert!(prepare(&store, body).await.is_ok());
+    }
+}
+
 #[tokio::test]
 async fn sse_error_preserves_the_failed_footer_across_chunk_boundaries() {
     for chunk_size in [1, 7, usize::MAX] {

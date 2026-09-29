@@ -112,7 +112,7 @@ func TestNativeScenarioIdentityEphemeralForkUnavailable(t *testing.T) {
 								continue
 							}
 							encoded, _ := json.Marshal(item)
-							missingHistory = missingHistory || bytes.Contains(encoded, []byte("collab spawn failed: no thread with id: "+root))
+							missingHistory = missingHistory || bytes.Contains(encoded, []byte("no rollout found for thread id "+root))
 						}
 					}
 					if !missingHistory {

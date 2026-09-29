@@ -160,7 +160,7 @@ func assertSubscriptionCapture(
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("Originator") != "codex-tui" ||
-		capture.Headers.Get("Version") != "0.156.0" {
+		capture.Headers.Get("Version") != "0.158.0" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
 	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
@@ -184,9 +184,9 @@ func assertSubscriptionCapture(
 
 func assertRuntimeCodexUserAgent(t *testing.T, value string) {
 	t.Helper()
-	if !strings.HasPrefix(value, "codex-tui/0.156.0 (") ||
+	if !strings.HasPrefix(value, "codex-tui/0.158.0 (") ||
 		!strings.Contains(value, "; ") || !strings.Contains(value, ") ") ||
-		!strings.HasSuffix(value, " (codex-tui; 0.156.0)") {
+		!strings.HasSuffix(value, " (codex-tui; 0.158.0)") {
 		t.Fatalf("runtime Codex User-Agent = %q", value)
 	}
 }

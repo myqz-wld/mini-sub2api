@@ -61,7 +61,10 @@ pub(crate) fn failure_before_websocket_delivery(error: &CoreFailure) -> FailureM
             FailurePhase::Credential,
             DeliveryState::NotDelivered,
         ),
-        CoreFailure::UpstreamHandshakeRejected | CoreFailure::UpstreamResponseFailed => failure(
+        CoreFailure::UpstreamHandshakeRejected
+        | CoreFailure::UpstreamResponseFailed
+        | CoreFailure::FlexUnavailable
+        | CoreFailure::UpstreamInvalidPrompt => failure(
             RetryAdvice::Never,
             FailurePhase::UpstreamResponse,
             DeliveryState::NotDelivered,

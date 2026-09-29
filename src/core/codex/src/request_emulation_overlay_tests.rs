@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped() {
-    let caller = serde_json::json!({"model":"gpt-5.4","instructions":"caller instructions","input":[],
+    let caller = serde_json::json!({"model":"gpt-5.5","instructions":"caller instructions","input":[],
         "tools":[],"tool_choice":"required","include":["file_search_call.results"],
         "max_tool_calls":3,"top_logprobs":2,"background":true,"prompt":{"id":"test"},
         "conversation":"conv_test","context_management":[],"moderation":{},"prompt_cache_options":{},
@@ -45,7 +45,7 @@ fn explicit_previous_response_id_survives_http_and_websocket_for_both_profiles()
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         let caller = serde_json::json!({
             "type": "response.create",
-            "model": "gpt-5.4",
+            "model": "gpt-5.5",
             "previous_response_id": "resp_explicit",
             "input": []
         });
@@ -96,7 +96,7 @@ fn codex_defaults_preserve_controls_except_fixed_transport_and_required_include(
     );
 
     let defaults = prepare_subscription(
-        serde_json::json!({"model":"gpt-5.4","input":[]}),
+        serde_json::json!({"model":"gpt-5.5","input":[]}),
         EmulationTransport::Http,
     );
     assert_eq!(defaults["store"], false);
@@ -123,7 +123,7 @@ fn image_detail_defaults_are_profile_aware_and_explicit_values_are_authoritative
         ]}
     ]);
     let normal = prepare_subscription(
-        serde_json::json!({"model":"gpt-5.4","input":input.clone()}),
+        serde_json::json!({"model":"gpt-5.5","input":input.clone()}),
         EmulationTransport::Http,
     );
     assert_image_detail(&normal, "normal-missing", Some(&serde_json::json!("high")));
@@ -195,7 +195,7 @@ fn lite_relocation_preserves_controls_and_filters_structured_tools() {
 fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque() {
     let normalized = prepare_subscription(
         serde_json::json!({
-            "model":"gpt-5.4",
+            "model":"gpt-5.5",
             "input":[
                 {"type":"function_call","name":"lookup","call_id":"call_1",
                     "arguments":{"arbitrary":{"nested":true}},"unsupported_item":true},
@@ -286,7 +286,7 @@ fn structured_objects_strip_unknown_members_but_free_form_values_remain_opaque()
 
 #[test]
 fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
-    let body = Bytes::from_static(br#"{"model":"gpt-5.4","input":[]}"#);
+    let body = Bytes::from_static(br#"{"model":"gpt-5.5","input":[]}"#);
     assert!(
         prepare_codex_overlay_for_test(
             UpstreamProfile::ApiKeyPassthrough,
@@ -298,7 +298,7 @@ fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
         .is_err()
     );
     {
-        let profile = UpstreamProfile::CodexSubscription1560;
+        let profile = UpstreamProfile::CodexSubscription1580;
         assert!(
             prepare_codex_overlay_for_test(
                 profile,
@@ -317,7 +317,7 @@ fn system_message_roles_are_rewritten_only_for_subscription() {
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         let caller = serde_json::json!({
             "type": "response.create",
-            "model": "gpt-5.4",
+            "model": "gpt-5.5",
             "input": [
                 {"role":"system","content":"system rules"},
                 {"type":"message","role":"developer","content":"developer rules"},
@@ -359,7 +359,7 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         let caller = serde_json::json!({
             "type":"response.create",
-            "model":"gpt-5.4",
+            "model":"gpt-5.5",
             "input":[],
             "max_output_tokens":2048,
             "max_tool_calls":3,
@@ -375,7 +375,7 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
 }
 
 fn prepare_subscription(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(UpstreamProfile::CodexSubscription1560, caller, transport)
+    prepare(UpstreamProfile::CodexSubscription1580, caller, transport)
 }
 
 fn prepare(profile: UpstreamProfile, caller: Value, transport: EmulationTransport) -> Value {

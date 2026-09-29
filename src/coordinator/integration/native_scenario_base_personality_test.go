@@ -88,7 +88,7 @@ func scenarioBasePersonalityFragments(t *testing.T, wire nativeWire, expectedTex
 
 func TestNativeScenarioBasePersonalityModes(t *testing.T) {
 	for _, route := range []string{"direct", "api-key", "subscription"} {
-		for _, model := range []string{"gpt-5.4", "gpt-5.6-sol", "gpt-5.5"} {
+		for _, model := range []string{"gpt-6-sol", "gpt-5.6-sol", "gpt-5.5"} {
 			for _, personality := range []string{"pragmatic", "friendly", "none", "feature-off"} {
 				t.Run(route+"/"+model+"/"+personality, func(t *testing.T) {
 					catalog := scenarioBaseCatalog(t, model)
@@ -101,8 +101,8 @@ func TestNativeScenarioBasePersonalityModes(t *testing.T) {
 					}
 					in, out := scenarioBaseRun(t, route, options, func(client *nativeClient, thread string) { client.turn(thread, "synthetic personality mode") })
 					for i := range in {
-						assertScenarioBaseValue(t, in[i], model == "gpt-5.6-sol", expected)
-						assertScenarioBaseValue(t, out[i], model == "gpt-5.6-sol", expected)
+						assertScenarioBaseValue(t, in[i], model != "gpt-5.5", expected)
+						assertScenarioBaseValue(t, out[i], model != "gpt-5.5", expected)
 						if scenarioBasePersonalityFragments(t, in[i], "") != 0 {
 							t.Fatal("initial personality incorrectly emitted a fallback fragment")
 						}
@@ -118,7 +118,7 @@ func TestNativeScenarioBasePersonalityUpdates(t *testing.T) {
 		for _, ws := range []bool{false, true} {
 			for _, profile := range []string{"template", "custom", "lite-no-variables"} {
 				t.Run(fmt.Sprintf("%s/ws=%t/%s", route, ws, profile), func(t *testing.T) {
-					options := nativeOptions{model: "gpt-5.4", ws: ws, threadParams: map[string]any{"personality": "pragmatic"}}
+					options := nativeOptions{model: "gpt-5.5", ws: ws, threadParams: map[string]any{"personality": "pragmatic"}}
 					if profile == "custom" {
 						options.base = "literal {{ personality }} custom base"
 					}

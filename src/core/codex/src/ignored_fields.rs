@@ -54,7 +54,7 @@ pub(crate) fn scope<T>(
     for ((path, field, reason), count) in counts.fields {
         tracing::info!(
             event = "codex_ignored_field",
-            profile = "subscription_1560",
+            profile = "subscription_1580",
             transport,
             role,
             model,
@@ -68,7 +68,7 @@ pub(crate) fn scope<T>(
     if counts.overflow != 0 {
         tracing::info!(
             event = "codex_ignored_fields_overflow",
-            profile = "subscription_1560",
+            profile = "subscription_1580",
             transport,
             role,
             model,

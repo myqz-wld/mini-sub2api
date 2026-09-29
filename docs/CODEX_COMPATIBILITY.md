@@ -1,10 +1,59 @@
-# Codex 0.156.0 compatibility
+# Codex 0.158.0 compatibility
 
 [Behavior](BEHAVIOR.md) · [Capture suite](../src/coordinator/integration/NATIVE_PARITY.md)
 
-The Subscription emulator targets [Codex 0.156.0](https://github.com/openai/codex/releases/tag/rust-v0.156.0),
-source commit `fe74a774532af67b5a4a3dec03ce9469e17f89af`. The release source and official macOS arm64
-CLI were compared with 0.153.4. API-key bodies and valid WebSocket frames remain transparent.
+The Subscription emulator targets [Codex 0.158.0](https://github.com/openai/codex/releases/tag/rust-v0.158.0),
+source commit `064c6b8c737f5b41d171fdda80bd9ef10ad06eb3`. The release source and official macOS arm64
+CLI are compared with the previous 0.156.0 anchor. API-key bodies and valid WebSocket frames remain transparent.
+
+## Changes from 0.156.0
+
+| Native change | Gateway adaptation |
+|---|---|
+| Numeric custom reasoning effort | Serialize valid unsigned 64-bit effort strings as JSON numbers; accept already numeric native requests. Keep the selected string in turn metadata. Overflow, negative and fractional strings stay custom strings. |
+| Model catalog | Add gpt-6-sol and gpt-6-luna with medium effort, low verbosity and Lite layout; Sol requires the model's review metadata. Remove gpt-5.4 defaults so it follows native fallback. Retire gpt-5.6-sol's ultrafast tier. |
+| Literal instruction fixtures | Regenerate exact release snapshots for ten models and one fallback. codex-auto-review now shares the gpt-5.6 template. These remain test-only; caller instructions remain authoritative. |
+| Native typed failures | Preserve HTTP 429 `flex_unavailable` and HTTP 400 `invalid_prompt`, reading at most 64 KiB within one second. Deferred WS handshake failures emit the bounded native category before close; wrapped `status_code` becomes `status`. Flex SSE/JSON finishes without waiting for a failed footer. Provider error text stays private. |
+| MCP attribution | Validate supplied body-only JSON, map first-turn IDs through existing scoped aliases and enforce 16 KiB after projection. Unknown provenance receives the native optional-error fallback; absent provenance is not synthesized. |
+| Executed-tool observations | Apply the 8 KiB argument, 2 MiB full-prompt and 15 MiB final-message budgets in native shedding order. Preserve logical WS history and resource evidence; persist hashed negative completeness evidence across HTTP/WS, reconnects and restarts. Malformed optional inventories are removed safely. |
+| Version and comparison anchor | Send 0.158.0 identity and require the exact tagged source and official CLI/Code Mode host in native capture tests. |
+
+The Rust toolchain, pinned transport dependencies and OpenSSL release source are unchanged.
+The ordinary request and WebSocket create schemas, compression settings and Lite marker retain
+those established in 0.156.0. Catalog capability changes are exercised with the actual CLI;
+client tool execution, approval workflows and image-generation endpoints remain client-owned.
+
+Three independent source audits covered schema/catalog, transport/errors and metadata/history.
+They verified inspected old/new files against exact tag blobs, then the lead implemented and tested
+the findings. The final metadata audit closed five integration gaps around full-prefix accounting,
+unresolved origins, concurrent emission preparation, final HTTP projection and malformed input.
+This is targeted release adaptation, not a claim that every upstream client subsystem is reproduced.
+
+An independent typed oracle compares 144 prompt/message cases against the release's unchanged
+budget implementation. It checks exact JSON counters and complete outputs, including resource
+preservation, fair shares, truncation markers and UTF-8 boundaries. State and capture regressions
+separately cover malformed observations, reload/Key isolation and prepared-before-revocation frames.
+The gateway conservatively rebuilds near-threshold explicit WS prompts; unavailable remote prefixes
+remain caller-owned. Loss of source ownership or the bounded revocation table makes completeness
+unknown instead of restoring `true`. See [observation/state policy](BEHAVIOR.md#state-and-limits).
+
+## Validation on 2026-09-28
+
+| Final check | Result |
+|---|---|
+| Standard validation | 547 Core tests and seven protocol tests; Go race tests, vet, clippy and formatting passed. One existing manual performance benchmark remains ignored. |
+| Expanded native loopback script | 1,298 cases in 91 groups passed in one final invocation, including strict header/JSON captures, compaction and reasoning visibility. |
+| Actual OpenCode loopback | 20 cases passed, including tool turns and restart continuation. |
+| Native budget oracle | 144 exact algorithm/counter comparisons passed; prompt fixture regeneration matched the release. |
+| Real Subscription business scenarios | 56 passed: bare API, Codex and OpenCode, single/multiple turns, five-turn memory, tools/reconnects, plus Sol/Luna coverage. |
+| Real numeric capability probe | The tested gpt-6-sol backend rejected integer effort `8192`. Official 0.158.0 direct also rejected integer reasoning effort; gateway egress retained JSON number 8192 and bare HTTP returned 400. This is a verified negative case, not a successful numeric generation. |
+| Release build | macOS arm64 build, installed-metadata checks and personal-build-path scans passed. |
+
+Live requests used access-only copies of the existing Subscription login; the original login
+remained unchanged. Raw traffic stayed in memory. Real captures establish application-level
+request behavior; the authenticated relay uses Go TLS/HTTP/1.1 and does not establish Linux TLS
+or HTTP/2 fingerprint equivalence. Real API-key credentials were not used. Numeric serialization
+matches the release, while numeric-budget availability remains backend/model dependent.
 
 ## Behavioral ownership and assessment
 
@@ -18,7 +67,7 @@ gateway decision is a Codex requirement or a separately selected user policy.
 | User-selected isolation | Scoped reversible session/thread/turn/item/response IDs; account-level installation convergence in device mode. | Separates callers and preserves correlation. UUID formats follow native conventions, but the aliasing and convergence policy is gateway-specific. |
 | User-selected continuation | Keep the caller's transport; resolve eligible anonymous histories and referenced continuations; rebuild HTTP full context; expire local history after three business-idle hours. | Supports ordinary clients. These ownership, matching and retention rules extend native client behavior. |
 | User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests, filter public visibility by include; classifier requests keep their native empty include. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
-| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and 0.156.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
+| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and 0.158.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
 | Gateway implementation defaults | Pin a Codex TUI identity using the Core runtime; synthesize missing root-agent/timing/analytics metadata and model catalog flags; choose backend Guardian metadata for bare non-reviewer requests. | Supplies a consistent emulated session. Individual fallback values are not all explicit user choices or evidence of the caller's real execution environment. |
 | Gateway implementation mechanisms | Infer omitted turns; suppress additional gateway prewarm/incrementality for callers with Originator; choose bounded storage, admission, retry and timeout mechanisms. | Prevents duplicated client automation and bounds resource use. Exact budgets/mechanisms are implementation choices, distinct from native wire behavior. |
 
@@ -76,12 +125,12 @@ authorize unrelated explicit-session lineage. See [eligibility rules](BEHAVIOR.m
 Regression captures cover ordinary/Lite HTTP JSON, SSE and WS across Core restart, followed by
 another full turn. Unit cases cover expiry, source preservation, repeated/reference continuation,
 restart, target ancestry, incomplete dependencies, retained/running sources, transaction rollback
-and Key/account isolation. Actual OpenCode 1.18.29 custom-provider captures on gpt-5.4/Astra also
+and Key/account isolation. Actual OpenCode 1.18.29 custom-provider captures on gpt-5.5/Astra also
 resume complete history after Core restart. In these two cases OpenCode omitted item turn metadata
 even when the synthetic upstream returned it; the specific old-turn failure must not be attributed
 to ordinary OpenCode behavior without request evidence. These checks use loopback endpoints only.
 
-## Changes from 0.153.4
+## Earlier 0.156.0 alignment
 
 | Native change | Gateway behavior |
 |---|---|
@@ -103,13 +152,13 @@ streamed and local compaction remain covered.
 ## Linux TLS builds
 
 The project pins Rust 1.95.0 through `mise.toml`, matching the upstream
-`codex-rs/rust-toolchain.toml` and official 0.156.0 release workflow. This removes
+`codex-rs/rust-toolchain.toml` and official 0.158.0 release workflow. This removes
 the compiler-version difference; it does not claim a measured wire improvement.
 The gateway retains its existing Cargo release profile, so this is not full
 build-environment identity with the upstream CLI.
 
 Linux HTTP uses the native-TLS backend. The compatibility target is the **official Linux release**
-of Codex 0.156.0, whose musl build supplies OpenSSL 3.6.4 outside Cargo. Its unchanged Cargo.lock
+of Codex 0.158.0, whose musl build supplies OpenSSL 3.6.4 outside Cargo. Its unchanged Cargo.lock
 still contains OpenSSL 3.6.3; comparing lockfiles alone previously missed the actual release library.
 The [official changelog](https://learn.chatgpt.com/docs/changelog) records the musl update.
 The exact configuration and SHA-256 come from `.github/scripts/install-musl-openssl.sh` at the
@@ -191,7 +240,7 @@ The same assertion now runs in the native message and transport-lifecycle compar
 | Function/schema serialization | Omit local `function.output_schema`, including namespace children. Place `minItems` after `items` and before composition/object fields, matching native schema serialization and Lite UUIDv5 input bytes. Response text schemas and schema property names remain intact. |
 | Lite setup | Native `additional_tools` has no message metadata; its base message omits empty metadata with classification disabled. Generated setup follows that shape; proven native prefixes retain supplied fields without invented `turn_id`/`create_time`. Business-item metadata remains intact. |
 | No-tool ordinary requests | Emit `tools: []` when the caller omits tools, matching the native non-Lite builder. Lite still omits top-level tools. Explicit caller `null` follows the existing caller-control policy. |
-| Built-in provider | OpenAI adds `Version: 0.156.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
+| Built-in provider | OpenAI adds `Version: 0.158.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
 | HTTP/WS headers | Compare the complete ordered name list and original casing, with no optional-header exclusion in the built-in capture. Check stable values separately from scoped identity/credential/nonce values. |
 
 The dedicated built-in fixture runs the official CLI in `app-server` mode through a loopback backend

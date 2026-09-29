@@ -13,7 +13,7 @@ import (
 )
 
 func TestOpenCodeResponsesCapture(t *testing.T) {
-	for _, model := range []string{"gpt-5.4", "gpt-6-astra"} {
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		for _, route := range []string{"direct", "api-key", "subscription"} {
 			t.Run(fmt.Sprintf("%s/%s", model, route), func(t *testing.T) {
 				capture := newScaffoldCapture(t)
@@ -125,7 +125,7 @@ func assertScaffoldContinuation(t *testing.T, wires []nativeWire, toolFollowup b
 // Compare its business fields using the declared ordinary conversion rules, without erasing text.
 func assertScaffoldMessageParity(t *testing.T, packet nativePacket, wire nativeWire) {
 	t.Helper()
-	if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.156.0" {
+	if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.158.0" {
 		t.Fatal("scaffold Subscription upstream client identity changed")
 	}
 	metadata, _ := wire.value["client_metadata"].(map[string]any)

@@ -67,7 +67,7 @@ pub(crate) fn selected_session(
     let declared = optional_id(flat.and_then(|m| m.get("session_id")))?.or(optional_id(
         body.as_ref().and_then(|m| m.get("session_id")),
     )?);
-    // Codex 0.156.0 uses session-id for cache affinity on root forks. The body's
+    // Codex 0.158.0 uses session-id for cache affinity on root forks. The body's
     // explicit session remains the owner when the header carries prompt_cache_key.
     if let Some(session) = direct {
         if object.get("prompt_cache_key").and_then(Value::as_str) == Some(session.as_str())

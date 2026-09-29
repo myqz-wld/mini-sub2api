@@ -45,12 +45,14 @@ pub(crate) async fn build_http_response(
     let filtered_headers = filtered_provider_headers(upstream.headers(), gateway_request_id)
         .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     if profile.uses_identity_state() && !upstream.status().is_success() {
+        let status = upstream.status();
+        let failure = crate::response_failure::classify_http(upstream).await;
         return normalized_upstream_failure(
-            upstream.status(),
+            status,
             ttfb_ms,
             filtered_headers,
             gateway_request_id,
-            &CoreFailure::UpstreamResponseFailed,
+            &failure,
         );
     }
     if profile.emulates_codex() && !downstream_expects_sse && upstream.status().is_success() {
@@ -205,6 +207,12 @@ async fn build_non_streaming_response(
         .await
         .map_err(|_| CoreFailure::UpstreamResponseFailed)?
     {
+        if let Some(data) = crate::response_sse_reader::data_payload(
+            std::str::from_utf8(&event).unwrap_or_default(),
+        ) && crate::response_failure::is_flex_sse(&data)
+        {
+            return Err(CoreFailure::FlexUnavailable);
+        }
         stream.processing("aggregate_buffer_limit");
         append_bounded(
             &mut bytes,

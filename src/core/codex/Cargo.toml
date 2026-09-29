@@ -48,7 +48,7 @@ webbrowser = "1"
 zlib-rs = { version = "=0.5.5", default-features = false }
 zstd = "=0.13.3"
 
-# Match Codex 0.156.0's Linux bindings; scripts/cargo.sh pins static OpenSSL 3.6.4.
+# Match Codex 0.158.0's Linux bindings; scripts/cargo.sh pins static OpenSSL 3.6.4.
 # Other platforms keep their native TLS backend without an extra OpenSSL dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = "=0.10.75"

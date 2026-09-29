@@ -4,7 +4,7 @@ fn project(mut caller: Value, transport: EmulationTransport) -> (Value, Value) {
     caller["input"] = "Translate this synthetic sentence.".into();
     caller["instructions"] = "Only translate the supplied text.".into();
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&caller).unwrap()),

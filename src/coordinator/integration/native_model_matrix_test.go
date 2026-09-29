@@ -44,9 +44,13 @@ func TestNativeAllCatalogModelDefaults(t *testing.T) {
 			Slug string `json:"slug"`
 		} `json:"models"`
 	}
-	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 9 {
+	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 10 {
 		t.Fatal("pinned catalog shape")
 	}
+	// A removed catalog slug must use native fallback settings, not stale 0.156.0 defaults.
+	catalog.Models = append(catalog.Models, struct {
+		Slug string `json:"slug"`
+	}{Slug: "gpt-5.4"})
 	for _, model := range catalog.Models {
 		t.Run(model.Slug, func(t *testing.T) {
 			direct := newNativeCapture(t)
@@ -79,7 +83,7 @@ func TestNativeAllCatalogModelDefaults(t *testing.T) {
 				}
 			}
 			// Settings may include extra native runtime defaults; compare the model-owned fields.
-			for _, field := range []string{"reasoning", "text"} {
+			for _, field := range []string{"reasoning", "text", "parallel_tool_calls", "service_tier"} {
 				a, _ := json.Marshal(actual[0].value[field])
 				b, _ := json.Marshal(emitted[0].value[field])
 				if string(a) != string(b) {
@@ -149,7 +153,7 @@ func TestNativeLitePrefixContentAndThreadDimensions(t *testing.T) {
 					t.Fatal("native thread did not namespace prefix ID")
 				}
 			}
-			// v0.156.0 requires a persisted source rollout for fork/resume. Assert this
+			// v0.158.0 requires a persisted source rollout for fork/resume. Assert this
 			// boundary explicitly; native ephemeral tests never create transcript fixtures.
 			client.callExpect("thread/fork", map[string]any{"threadId": thread, "ephemeral": true}, -32600)
 			options.base = "基础 {{literal}}\n"

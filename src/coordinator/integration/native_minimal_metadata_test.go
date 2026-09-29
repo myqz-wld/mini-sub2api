@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -23,7 +24,7 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 		} `json:"models"`
 	}
 	raw, err := os.ReadFile(filepath.Join(nativeSource(t), "codex-rs/models-manager/models.json"))
-	if err != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Models) != 9 {
+	if err != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Models) != 10 {
 		t.Fatal("pinned native metadata catalog unavailable")
 	}
 	for _, model := range catalog.Models {
@@ -73,7 +74,9 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 					}
 					value := ordinaryResolvedFirst(t, wires).value
 					text, _ := value["text"].(map[string]any)
-					if !reflect.DeepEqual(text["format"], format) {
+					nativeFormat := maps.Clone(format)
+					nativeFormat["name"] = "codex_output_schema"
+					if !reflect.DeepEqual(text["format"], nativeFormat) {
 						t.Fatal("ordinary structured output format changed")
 					}
 					input, _ := value["input"].([]any)

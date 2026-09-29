@@ -24,9 +24,9 @@ async fn current_settings_do_not_split_verified_anonymous_history() {
         ("text", json!({"verbosity":"low"})),
     ] {
         let (_temp, store) = store();
-        let first = prepare(&store, request(json!([input("first")])))
-            .await
-            .unwrap();
+        let mut initial = request(json!([input("first")]));
+        initial["model"] = "gpt-5.5".into();
+        let first = prepare(&store, initial).await.unwrap();
         let identity = first.resolved_identity.as_ref().unwrap().clone();
         let response = publish(&store, first, "resp_configuration", json!([assistant()])).await;
         let mut next = request(json!([
@@ -34,6 +34,7 @@ async fn current_settings_do_not_split_verified_anonymous_history() {
             response["output"][0],
             input("next")
         ]));
+        next["model"] = "gpt-5.5".into();
         next[field] = value.clone();
         assert!(
             plan(&store, &next, KEY).unwrap().baseline.is_some(),
@@ -67,7 +68,7 @@ async fn current_settings_do_not_split_verified_anonymous_history() {
 
 #[tokio::test]
 async fn model_and_setup_changes_keep_current_format_without_inheriting_old_bases() {
-    for (old_model, model) in [("gpt-5.4", "gpt-5.6-sol"), ("gpt-5.6-sol", "gpt-5.4")] {
+    for (old_model, model) in [("gpt-5.5", "gpt-5.6-sol"), ("gpt-5.6-sol", "gpt-5.5")] {
         for base in [
             None,
             Some(Value::Null),
@@ -171,7 +172,7 @@ async fn equivalent_histories_with_different_settings_keep_independent_execution
     publish(&store, second, "resp_config_two", call("fc_two")).await;
     let item = caller_copy(one["output"][0].clone());
     let body =
-        json!({"model":"gpt-5.4","instructions":"third base","input":[input("first"), item]});
+        json!({"model":"gpt-5.5","instructions":"third base","input":[input("first"), item]});
     let matched = plan(&store, &body, KEY).unwrap();
     let source = matched
         .baseline
@@ -316,7 +317,7 @@ async fn configuration_independent_lookup_preserves_id_content_and_anonymous_sco
 #[tokio::test]
 async fn formed_lite_current_settings_are_separate_from_its_actual_input_prefix() {
     let (_temp, store) = store();
-    let mut first = json!({"model":"gpt-5.4","input":[
+    let mut first = json!({"model":"gpt-5.5","input":[
         {"type":"additional_tools","role":"developer","tools":[]},
         {"role":"developer","content":"formed base"}, input("first")]});
     let prepared = prepare(&store, first.clone()).await.unwrap();

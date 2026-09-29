@@ -1,6 +1,32 @@
 use super::*;
 
 #[tokio::test]
+async fn wrapped_error_status_alias_preserves_typed_category_without_diagnostics() {
+    let (_temp, store) = store();
+    let state = ResponseStateContext::new(OWNER, NAMESPACE, KEY, &store, None, None);
+    for status in [
+        json!(400),
+        json!(429),
+        json!("private-synthetic"),
+        json!(999),
+    ] {
+        let event = state
+            .translate_value(json!({"type":"error","status_code":status,
+            "error":{"code":"invalid_prompt","message":"private-synthetic"}}))
+            .await
+            .unwrap();
+        assert!(event.get("status_code").is_none());
+        if status == 400 || status == 429 {
+            assert_eq!(event["status"], status);
+        } else {
+            assert!(event.get("status").is_none());
+        }
+        assert_eq!(event["error"]["code"], "invalid_prompt");
+        assert!(!event.to_string().contains("private-synthetic"));
+    }
+}
+
+#[tokio::test]
 async fn error_stream_correlation_survives_translation_and_nullable_flat_errors() {
     use crate::request_state_types::WireIdDomain;
     let (_temp, store) = store();
@@ -42,7 +68,7 @@ async fn prepare_for_transport(
     transport: EmulationTransport,
 ) -> PreparedEmulatedRequest {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         transport,
         headers,
         Bytes::from(serde_json::to_vec(&body).unwrap()),

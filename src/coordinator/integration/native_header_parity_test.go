@@ -26,7 +26,7 @@ func assertNativeWireParity(t *testing.T, caller, sent nativePacket, wire native
 	// The built-in OpenAI provider sends Version. Most older fixtures use a custom provider
 	// without that default header; the dedicated built-in wire-shape fixture checks the full set.
 	if subscription {
-		if sent.headers.Get("Version") != "0.156.0" {
+		if sent.headers.Get("Version") != "0.158.0" {
 			t.Fatal("pinned Version header")
 		}
 	} else if caller.headers.Get("Version") != sent.headers.Get("Version") {

@@ -194,11 +194,6 @@ func TestNativeScenarioBasePrecedence(t *testing.T) {
 						lite := model == "gpt-5.6-sol"
 						for i := range in {
 							assertScenarioBaseValue(t, in[i], lite, expected)
-							if route == "subscription" && !lite && strings.TrimSpace(expected) == "" {
-								// Blank caller bases carry no gateway-owned prompt text.
-								assertScenarioBaseValue(t, out[i], false, "")
-								continue
-							}
 							assertScenarioBaseValue(t, out[i], lite, expected)
 							if lite && route == "subscription" {
 								a, b := in[i].value["input"].([]any), out[i].value["input"].([]any)

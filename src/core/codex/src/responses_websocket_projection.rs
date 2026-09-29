@@ -79,7 +79,7 @@ pub(crate) fn equivalent_items_for_reuse(left: &[Value], right: &[Value]) -> boo
             .all(|(left, right)| tool_result_metadata(left).eq(tool_result_metadata(right)))
 }
 
-// Match native 0.156.0: late result evidence and its call binding cannot be
+// Match native 0.158.0: late result evidence and its call binding cannot be
 // delivered by appending a delta. Other internal metadata remains volatile.
 fn tool_result_metadata(
     item: &Value,

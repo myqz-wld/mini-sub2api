@@ -24,7 +24,7 @@ async fn attempt(
     body: Value,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_identity_request(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

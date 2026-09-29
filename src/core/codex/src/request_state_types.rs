@@ -12,6 +12,7 @@ pub(crate) use validation::validate_wire_id;
 
 pub(crate) const REQUEST_STATE_VERSION: u32 = 1;
 pub(crate) const INITIAL_REQUEST_STATE_REVISION: u64 = 1;
+pub(crate) const MAX_TOOL_INVENTORY_REVOCATIONS: usize = 4096;
 pub(crate) const MAX_REQUEST_STATE_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_OWNERS: usize = 64;
 pub(crate) const MAX_SCOPES: usize = 1_024;
@@ -40,6 +41,15 @@ pub(crate) struct PersistedRequestState {
     pub(crate) installation_id: String,
     pub(crate) owners: BTreeSet<String>,
     pub(crate) scopes: BTreeMap<String, ScopeState>,
+    // Negative evidence outlives context/alias eviction. Only scoped HMAC keys are stored.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub(crate) tool_inventory_revocations: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) tool_inventory_uncertain: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -162,6 +172,8 @@ impl PersistedRequestState {
             installation_id: Uuid::new_v4().to_string(),
             owners,
             scopes: BTreeMap::new(),
+            tool_inventory_revocations: BTreeSet::new(),
+            tool_inventory_uncertain: false,
         }
     }
 }

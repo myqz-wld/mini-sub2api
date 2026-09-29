@@ -1,4 +1,4 @@
-//! Codex 0.156.0 ModelClient and Guardian policies, separate from public API passthrough.
+//! Codex 0.158.0 ModelClient and Guardian policies, separate from public API passthrough.
 use crate::ignored_fields as log;
 use http::HeaderMap;
 use serde_json::{Map, Value, json};
@@ -180,6 +180,8 @@ pub(crate) fn apply_controls(
             };
             if let Some(resolved) = resolved {
                 reasoning.insert("effort".into(), resolved.into());
+            } else if let Ok(numeric) = effort.parse::<u64>() {
+                reasoning.insert("effort".into(), numeric.into());
             }
         }
         if reasoning
@@ -236,8 +238,8 @@ pub(crate) fn apply_controls(
     }
 }
 
-// Fixed native default: reasoning_effort_override is off; the bundled catalog also does not
-// advertise updates. Local item references also have no native ResponseItem representation.
+// Fixed native feature default: reasoning_effort_override is off even when the catalog
+// advertises updates. Local item references have no native ResponseItem representation.
 // Filter only AFTER admission, metadata capture and required-reference identity validation.
 pub(crate) fn filter_send_only(
     object: &mut Map<String, Value>,

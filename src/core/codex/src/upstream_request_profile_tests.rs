@@ -24,7 +24,7 @@ fn guardian_headers_survive_http_and_websocket_without_crossing_response_privacy
         &headers,
         "http://127.0.0.1:1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         Bytes::from_static(b"{}"),
     )
     .unwrap();
@@ -32,7 +32,7 @@ fn guardian_headers_survive_http_and_websocket_without_crossing_response_privacy
         &headers,
         "http://127.0.0.1:1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         1024,
     )
     .unwrap();
@@ -52,7 +52,7 @@ fn originator_profile_cannot_promote_an_api_key_to_subscription_auth() {
         &HeaderMap::new(),
         "https://example.test/v1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         Bytes::from_static(br#"{"model":"offline"}"#),
     );
 

@@ -22,7 +22,7 @@ const (
 func TestNativeScenarioEnvironmentContext(t *testing.T) {
 	for _, subscription := range []bool{false, true} {
 		for _, ws := range []bool{false, true} {
-			for _, model := range []string{"gpt-5.4", "gpt-5.6-sol"} {
+			for _, model := range []string{"gpt-5.4", "gpt-5.5", "gpt-5.6-sol"} {
 				t.Run(fmt.Sprintf("subscription=%t/ws=%t/%s", subscription, ws, model), func(t *testing.T) {
 					root, cwd := environmentProject(t)
 					upstream := newNativeCapture(t)
@@ -52,7 +52,7 @@ func TestNativeScenarioEnvironmentContext(t *testing.T) {
 					environmentAssertCount(t, first, "user", "<cwd>"+cwd+"</cwd>", 1)
 					environmentAssertGroupedKinds(t, first, "user", "agents_md.instructions", "environments.environment_context")
 					environmentAssertGroupedKinds(t, first, "developer", "generic.developer_instructions", "permissions.instructions", "collaboration_mode.instructions")
-					environmentAssertSkillUsage(t, first, model == "gpt-5.4")
+					environmentAssertSkillUsage(t, first, model == "gpt-5.5")
 					client.turnWith(thread, map[string]any{"input": []any{map[string]any{"type": "text", "text": "synthetic selected skill"}, map[string]any{"type": "skill", "name": "environment-probe", "path": skill}}})
 					packets := environmentCallerValues(t, gateway)
 					last := packets[len(packets)-1]

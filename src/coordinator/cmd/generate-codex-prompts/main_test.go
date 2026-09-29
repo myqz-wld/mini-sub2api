@@ -11,8 +11,8 @@ func TestRenderSnapshotsPreservesLiteralTemplateAndWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rendered) != 7 {
-		t.Fatalf("snapshot count = %d, want 7", len(rendered))
+	if len(rendered) != 8 {
+		t.Fatalf("snapshot count = %d, want 8", len(rendered))
 	}
 	for _, name := range modelFiles {
 		if string(rendered[name]) != "  {{ personality }}\n" {

@@ -97,6 +97,9 @@ pub(crate) async fn prepare_stateful_codex_request(
             }
         }
     }
+    if explicit_delta && !full_send && prompt_requires_rebuild(&plan) {
+        full_send = true;
+    }
     if explicit_delta && full_send {
         let full = plan.full_input(store)?;
         object.insert("input".into(), Value::Array(full));
@@ -244,4 +247,49 @@ pub(crate) async fn prepare_stateful_codex_request(
         return Err(Error::InvalidRequest);
     }
     Ok(prepared)
+}
+
+fn prompt_requires_rebuild(plan: &crate::subscription_prepare::ContextPlan) -> bool {
+    use crate::tool_observation_budget as budget;
+    if !plan
+        .input()
+        .iter()
+        .any(|item| budget::observation_bytes(item) > 0)
+    {
+        return false;
+    }
+    let Some(history) = plan
+        .baseline
+        .as_ref()
+        .and_then(|base| base.history.as_ref())
+    else {
+        // A live remote prefix can outlast the local cache. Its prompt budget stays caller-owned.
+        return false;
+    };
+    let input = history
+        .items()
+        .iter()
+        .map(|item| &item.value)
+        .chain(plan.input())
+        .filter_map(|item| {
+            let metadata = item.get(budget::META)?.as_object()?;
+            // Count only optional observations. Omitting host fields conservatively includes the
+            // wrapper cost; actual normalization applies the exact budget to the rebuilt full input.
+            let mut observation = serde_json::Map::new();
+            for key in ["cell_id", "executed_tool_calls", "tool_calls_complete"] {
+                if let Some(value) = metadata.get(key) {
+                    observation.insert(key.into(), value.clone());
+                }
+            }
+            if observation.is_empty() {
+                return None;
+            }
+            crate::response_item_metadata::canonicalize_executed_tool_calls(&mut observation);
+            Some(serde_json::json!({budget::META:observation}))
+        })
+        .collect::<Vec<_>>();
+    let before = serde_json::json!({"input":input});
+    let mut bounded = before.clone();
+    budget::prompt(&mut bounded);
+    bounded != before
 }

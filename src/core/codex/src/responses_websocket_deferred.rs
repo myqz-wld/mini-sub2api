@@ -15,7 +15,7 @@ use crate::responses_websocket::relay;
 #[path = "responses_websocket_deferred_connect.rs"]
 mod connect_support;
 use crate::responses_websocket_emulation::encode_frame_bounded;
-use crate::responses_websocket_emulation::plan_public_text_with_state;
+use crate::responses_websocket_emulation::plan_public_text_with_observations;
 use crate::responses_websocket_prewarm::HIDDEN_SETUP_TIMEOUT;
 use crate::responses_websocket_prewarm::HiddenSetupOutcome;
 use crate::responses_websocket_prewarm::prewarm_mode;
@@ -202,6 +202,9 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                 return;
             }
             let metadata = failure_before_websocket_delivery(&failure.error);
+            if !connect_support::send_protocol_failure(&mut internal, &failure.error).await {
+                return;
+            }
             let _ = internal.send(failure_close(metadata)).await;
             return;
         }
@@ -277,6 +280,10 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                         return;
                     }
                     let metadata = failure_before_websocket_delivery(&failure.error);
+                    if !connect_support::send_protocol_failure(&mut internal, &failure.error).await
+                    {
+                        return;
+                    }
                     let _ = internal.send(failure_close(metadata)).await;
                     return;
                 }
@@ -338,7 +345,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         }
     }
     debug_assert!(!continuation.public_create_attempted());
-    let text = match plan_public_text_with_state(
+    let (mut text, frame) = match plan_public_text_with_observations(
         &mut continuation,
         &value,
         &synthesized_item_ids,
@@ -351,6 +358,27 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
             return;
         }
     };
+    if let Some(frame) = frame {
+        text = match crate::request_state_editor::tool_observations::finalize_frame(
+            context.state.vault.request_state(),
+            &context.state_namespace,
+            &context.account_ref,
+            &context.pseudonym_scope,
+            &resolved_identity.thread_id,
+            frame,
+            crate::inference_limits::get().request_bytes,
+        )
+        .await
+        {
+            Ok(text) => text,
+            Err(_) => {
+                let _ = internal
+                    .send(failure_close(CoreFailure::StateUnavailable.failure()))
+                    .await;
+                return;
+            }
+        };
+    }
     if let (Some(operation), Some(token)) = (
         &operation,
         turn_state.as_ref().and_then(|v| v.to_str().ok()),

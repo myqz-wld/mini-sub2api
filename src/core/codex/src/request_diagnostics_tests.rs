@@ -142,7 +142,7 @@ fn ignored_field_events_are_bounded_aggregated_and_private_before_send() {
         body[format!("synthetic-secret-key-{i}")] = "synthetic-secret-value".into();
     }
     let prepared = prepare_codex_overlay_for_test(
-        crate::request_profile::UpstreamProfile::CodexSubscription1560,
+        crate::request_profile::UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &http::HeaderMap::new(),
         bytes::Bytes::from(body.to_string()),

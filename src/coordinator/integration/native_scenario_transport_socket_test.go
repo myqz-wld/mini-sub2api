@@ -63,12 +63,15 @@ func TestNativeScenarioTransportSocketBoundary(t *testing.T) {
 					}
 					metadata := transportMetadata(t, wires[0].value)
 					turn, _ := metadata["turn_id"].(string)
+					// The native pump can observe closure before the next send. That path
+					// reconnects directly; a failed send can still select HTTP fallback.
+					reconnectedWS := wires[1].method == http.MethodGet
 					for i, wire := range wires[1:] {
 						current := transportMetadata(t, wire.value)
 						token := current["x-codex-turn-state"]
-						if boundary == "completed-tool-disconnect" {
+						if !reconnectedWS {
 							if wire.method != http.MethodPost || wire.value["previous_response_id"] != nil {
-								t.Fatal("zero-retry native disconnect did not select full HTTP fallback")
+								t.Fatal("native HTTP fallback did not retain full continuation")
 							}
 							token = wire.headers.Get("X-Codex-Turn-State")
 						} else if wire.method != http.MethodGet {
@@ -77,9 +80,9 @@ func TestNativeScenarioTransportSocketBoundary(t *testing.T) {
 						if current["turn_id"] != turn || token != "transport-token-1" {
 							t.Error("same-turn reconnect lost the turn identity or first routing token")
 						}
-						assertTransportItems(t, wire.value, turn, i+1, boundary == "retryable-tool-disconnect" && i == 1)
+						assertTransportItems(t, wire.value, turn, i+1, reconnectedWS && i == 1)
 					}
-					if boundary == "retryable-tool-disconnect" && (wires[2].connection != wires[1].connection || wires[2].value["previous_response_id"] == nil) {
+					if reconnectedWS && (wires[2].connection != wires[1].connection || wires[2].value["previous_response_id"] == nil) {
 						t.Error("reconnected socket failed to reuse its own new baseline")
 					}
 					assertTransportMediation(t, gateway, capture, route)

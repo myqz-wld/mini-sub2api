@@ -123,7 +123,7 @@ func changeAnonymousConfiguration(request map[string]any, format string, step in
 			request["model"] = "gpt-5.6-terra"
 		}
 		if format == "native-lite" {
-			request["model"] = "gpt-5.4"
+			request["model"] = "gpt-5.5"
 		}
 		if format != "native-lite" {
 			request["instructions"] = "  current base {{caller}}  "
@@ -150,7 +150,7 @@ func assertAnonymousCurrentConfiguration(t *testing.T, wire nativeWire, format s
 			model = "gpt-5.6-terra"
 		}
 		if format == "native-lite" {
-			model = "gpt-5.4"
+			model = "gpt-5.5"
 		}
 		reasoning, _ := wire.value["reasoning"].(map[string]any)
 		text, _ := wire.value["text"].(map[string]any)

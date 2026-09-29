@@ -245,7 +245,12 @@ fn generated_turn_metadata(
     if let Some(effort) = object
         .get("reasoning")
         .and_then(|value| value.get("effort"))
-        .and_then(Value::as_str)
+        .and_then(|value| {
+            value
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| value.as_u64().map(|number| number.to_string()))
+        })
     {
         metadata.insert("reasoning_effort".to_string(), effort.into());
     }

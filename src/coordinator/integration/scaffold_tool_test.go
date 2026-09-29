@@ -13,7 +13,7 @@ import (
 )
 
 func TestOpenCodeReadToolCapture(t *testing.T) {
-	for _, model := range []string{"gpt-5.4", "gpt-6-astra"} {
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		for _, route := range []string{"direct", "api-key", "subscription"} {
 			t.Run(fmt.Sprintf("%s/%s", model, route), func(t *testing.T) {
 				capture := newScaffoldCapture(t)
@@ -84,7 +84,7 @@ func TestOpenCodeReadToolCapture(t *testing.T) {
 }
 
 func TestOpenCodeReadPermissionBoundary(t *testing.T) {
-	for _, model := range []string{"gpt-5.4", "gpt-6-astra"} {
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra"} {
 		t.Run(model, func(t *testing.T) {
 			capture := newScaffoldCapture(t)
 			client := startOpenCodeWithRead(t, capture.server.URL, "synthetic-opencode-key", model, true)

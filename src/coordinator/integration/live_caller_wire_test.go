@@ -20,6 +20,18 @@ func newLiveCallerWireGateway(t *testing.T, maximum int32) (nativeGateway, *live
 func assertLiveCallerWire(t *testing.T, gateway nativeGateway, relay *liveWireRelay) {
 	t.Helper()
 	incoming, outgoing := gateway.tap.packets(t), relay.tap.packets(t)
+	// Actual Codex may send its own prewarm. Compare business requests on both sides.
+	var businessIncoming []nativePacket
+	for _, packet := range incoming {
+		var value map[string]any
+		if json.Unmarshal(nativePacketJSON(t, packet), &value) != nil {
+			t.Fatal("live caller ingress JSON invalid")
+		}
+		if value["generate"] != false {
+			businessIncoming = append(businessIncoming, packet)
+		}
+	}
+	incoming = businessIncoming
 	var packets []nativePacket
 	var wires []nativeWire
 	for _, packet := range outgoing {

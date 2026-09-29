@@ -69,7 +69,7 @@ func newFidelityPeer(t *testing.T, ws bool) fidelityPeer {
 }
 
 func fidelityBody(input ...any) map[string]any {
-	return map[string]any{"model": "gpt-5.4", "input": input}
+	return map[string]any{"model": "gpt-5.5", "input": input}
 }
 func fidelityUser() map[string]any {
 	return map[string]any{"role": "user", "content": "synthetic input"}
@@ -129,7 +129,7 @@ func TestFidelityFollowupContentAndTypedControls(t *testing.T) {
 					t.Fatal("reasoning null or mixed content changed")
 				}
 			}
-			for _, bad := range []any{nil, 17, []any{}, true, map[string]any{}} {
+			for _, bad := range []any{nil, -17, []any{}, true, map[string]any{}} {
 				body := fidelityBody(fidelityUser())
 				body["reasoning"] = map[string]any{"effort": bad}
 				body["text"] = bad

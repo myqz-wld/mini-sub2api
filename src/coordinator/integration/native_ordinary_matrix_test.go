@@ -23,6 +23,7 @@ type nativeOrdinaryClient struct {
 	ws      *websocket.Conn
 	stream  bool
 	headers http.Header
+	timeout time.Duration
 }
 
 func ordinaryClient(t *testing.T, gateway nativeGateway, ws, stream bool, headers http.Header) nativeOrdinaryClient {
@@ -57,7 +58,11 @@ func (c nativeOrdinaryClient) send(request map[string]any) map[string]any {
 func (c nativeOrdinaryClient) sendEncoded(body []byte) map[string]any {
 	c.t.Helper()
 	output := make(map[int]any)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	timeout := c.timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if c.ws != nil {
 		if c.ws.Write(ctx, websocket.MessageText, body) != nil {

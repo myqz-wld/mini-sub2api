@@ -63,7 +63,7 @@ func TestSubscriptionReasoningVisibility(t *testing.T) {
 									request["input"] = append(append(request["input"].([]any), output...), suffix...)
 								}
 							}
-							assertReasoningWires(t, capture, gateway, subscription, ws, delivery == "ws-reconnect", reference, marked, format, includes)
+							assertReasoningWires(t, capture, gateway, subscription, ws, delivery == "ws-reconnect", reference, marked, format)
 						})
 					}
 				}
@@ -72,7 +72,7 @@ func TestSubscriptionReasoningVisibility(t *testing.T) {
 	}
 }
 
-func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativeGateway, subscription, ws, reconnect, reference, marked bool, format string, includes []any) {
+func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativeGateway, subscription, ws, reconnect, reference, marked bool, format string) {
 	t.Helper()
 	all := capture.snapshot()
 	wires := businessWires(all)
@@ -91,7 +91,7 @@ func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativ
 			if !hasReasoningInclude(include) {
 				t.Fatal("Subscription omitted encrypted reasoning upstream")
 			}
-			if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.156.0" {
+			if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.158.0" {
 				t.Fatal("reasoning change altered transport fingerprint")
 			}
 		}
@@ -107,15 +107,11 @@ func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativ
 				t.Fatal("API-key reasoning request bytes changed")
 			}
 		} else {
-			var expected []any
-			if original, ok := includes[step].([]any); ok {
-				expected = append([]any{}, original...)
-			}
-			if !hasReasoningInclude(expected) {
-				expected = append(expected, "reasoning.encrypted_content")
-			}
+			// The pinned ordinary/reviewer request has one fixed upstream include. Caller
+			// choices still control public visibility and never alter the reuse configuration.
+			expected := []any{"reasoning.encrypted_content"}
 			if !reflect.DeepEqual(wire.value["include"], expected) {
-				t.Fatal("Subscription include options changed beyond required ciphertext")
+				t.Fatal("Subscription include differs from the pinned ordinary request")
 			}
 			metadata := transportMetadata(t, wire.value)
 			if step == 0 {
@@ -134,11 +130,17 @@ func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativ
 			if step > 0 && ws && !reconnect && reference && !incremental {
 				t.Fatal("explicit WS reasoning reference was unnecessarily expanded")
 			}
-			if step == 1 && ws && !reconnect && !marked && !reference && !incremental {
-				t.Fatal("hidden ciphertext prevented eligible automatic WS incrementality")
+			if step > 0 && step < 3 && ws && !reconnect && !marked && !reference && !incremental {
+				t.Fatalf("hidden ciphertext prevented eligible automatic WS incrementality at step=%d", step)
 			}
 			if (!ws || (marked && !reference)) && incremental {
 				t.Fatal("reasoning history association granted invalid socket reuse")
+			}
+			// The synthetic assistant at step 2 includes nonempty output-only logprobs.
+			// Native ContentItem::OutputText contains only text; replay strips that decoration
+			// and the strict comparison with the captured output legitimately selects full.
+			if step == 3 && ws && !reconnect && !marked && !reference && incremental {
+				t.Fatal("output-only decoration change bypassed the strict WS prefix comparison")
 			}
 			if reconnect && incremental {
 				warmup := false
@@ -148,9 +150,6 @@ func assertReasoningWires(t *testing.T, capture *reasoningCapture, gateway nativ
 				if !warmup || (reference && step > 0) {
 					t.Fatal("reasoning reconnect reused an earlier socket context")
 				}
-			}
-			if step >= 2 && ws && !reconnect && !marked && !reference && incremental {
-				t.Fatal("changed upstream include reused an incompatible automatic baseline")
 			}
 			if !incremental && format != "ordinary" {
 				assertAnonymousConfigurationIDs(t, wire, format)

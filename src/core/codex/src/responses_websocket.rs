@@ -288,9 +288,9 @@ pub(crate) async fn relay(
                                     continuation.mark_rebuilt_reference(prepared.rebuilt_reference);
                                     if profile == UpstreamProfile::ApiKeyPassthrough {
                                         continuation.plan_public_create(value);
-                                        Ok(prepared.text)
+                                        Ok((prepared.text, None))
                                     } else {
-                                        crate::responses_websocket_emulation::plan_public_text_with_state(
+                                        crate::responses_websocket_emulation::plan_public_text_with_observations(
                                             &mut continuation,
                                             value,
                                             &prepared.synthesized_item_ids,
@@ -299,10 +299,24 @@ pub(crate) async fn relay(
                                         )
                                     }
                                 } else {
-                                    Ok(prepared.text)
+                                    Ok((prepared.text, None))
                                 };
                                 match planned {
-                                    Ok(prepared) => {
+                                    Ok((mut prepared, frame)) => {
+                                        if let Some(frame) = frame {
+                                            let (Some(namespace), Some(identity)) =
+                                                (state_namespace.as_deref(), identity.as_ref())
+                                            else {
+                                                return RelayExit::Protocol;
+                                            };
+                                            prepared = match crate::request_state_editor::tool_observations::finalize_frame(
+                                                vault.request_state(), namespace, &account_ref, &pseudonym_scope,
+                                                &identity.thread_id, frame, crate::inference_limits::get().request_bytes,
+                                            ).await {
+                                                Ok(text) => text,
+                                                Err(_) => return RelayExit::StateUnavailable(delivery.failure_for_phase(FailurePhase::Internal)),
+                                            };
+                                        }
                                         if is_create
                                             && let Some(state) = client_response_state.as_ref()
                                             && state.update_identity(identity.as_ref()).is_err()

@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::json;
 
-// Byte order from Codex 0.156.0 tools/src/json_schema/types.rs at fe74a774532a.
+// Byte order from Codex 0.158.0 tools/src/json_schema/types.rs at 064c6b8c737f.
 // Literal expected bytes deliberately do not use the normalizer's ordering table.
 const ARRAY: &str = r#"{"type":"array","items":{"type":"string"},"minItems":1}"#;
 const COMPOSED_ARRAY: &str = r#"{"type":"array","items":{"type":"string"},"minItems":1,"anyOf":[{"type":"array","items":{"type":"string"}}],"oneOf":[{"type":"array","items":{"type":"string"}}],"allOf":[{"type":"array","items":{"type":"string"}}]}"#;

@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const nativeVersion = "codex-cli 0.156.0"
+const nativeVersion = "codex-cli 0.158.0"
 
 type nativeClient struct {
 	t           *testing.T
@@ -73,7 +73,7 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		var err error
 		binary, err = exec.LookPath("codex")
 		if err != nil {
-			t.Fatal("native parity requires Codex v0.156.0")
+			t.Fatal("native parity requires Codex v0.158.0")
 		}
 	}
 	version, err := exec.Command(binary, "--version").Output()
@@ -235,7 +235,7 @@ func startNativeProcess(t *testing.T, options nativeOptions, ctx context.Context
 		}
 	}()
 	t.Cleanup(func() { _ = input.Close(); cancel(); _ = command.Wait(); reader.Wait() })
-	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.156.0"}, "capabilities": map[string]any{"experimentalApi": true}})
+	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.158.0"}, "capabilities": map[string]any{"experimentalApi": true}})
 	client.send(map[string]any{"method": "initialized"})
 	return client
 }

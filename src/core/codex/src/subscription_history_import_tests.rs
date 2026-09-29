@@ -55,7 +55,7 @@ async fn prepare_scope(
     namespace: &str,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

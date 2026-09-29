@@ -2,14 +2,14 @@ use super::*;
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use std::time::{Duration, Instant};
 
-async fn websocket_request(
+pub(super) async fn websocket_request(
     store: &RequestStateStore,
     body: Value,
     socket: &str,
     binding: Option<&ResolvedRequestIdentity>,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::WebSocket,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -104,7 +104,7 @@ async fn bound_header_only_child_keeps_its_branch_but_uses_the_later_frames_wind
                 json!({"turn_id":"later-turn","x-codex-window-id":"child:10"});
         }
         let prepared = prepare_stateful_codex_request(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             EmulationTransport::WebSocket,
             &headers,
             Bytes::from(serde_json::to_vec(&body).unwrap()),

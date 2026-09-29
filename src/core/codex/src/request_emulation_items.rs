@@ -66,7 +66,17 @@ fn canonicalize_nested(object: &mut Map<String, Value>, kind: Option<&str>) {
         .and_then(Value::as_object_mut)
     {
         crate::response_item_metadata::canonicalize_executed_tool_calls(metadata);
-        reorder_preserving(metadata, &["turn_id", "create_time", "executed_tool_calls"]);
+        reorder_preserving(
+            metadata,
+            &[
+                "turn_id",
+                "create_time",
+                "content_item_kinds",
+                "cell_id",
+                "executed_tool_calls",
+                "tool_calls_complete",
+            ],
+        );
     }
 }
 

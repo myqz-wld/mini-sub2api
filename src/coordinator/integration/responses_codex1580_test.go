@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestCodex1560GuardianReferenceAndHeaders(t *testing.T) {
+func TestCodex1580GuardianReferenceAndHeaders(t *testing.T) {
 	fixture := newResponsesProfileHTTPFixture(t)
 	status, response, _ := publicRequest(t, fixture.public, fixture.subscriptionKey, `{"model":"gpt-5.4","input":"synthetic parent"}`)
 	if status != http.StatusOK {

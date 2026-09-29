@@ -4,6 +4,75 @@ use mini_sub2api_protocol_v1::PROVIDER_REQUEST_ID_HEADER;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn deferred_typed_rejection_emits_native_error_before_close_without_replay() {
+    for (status, code) in [
+        (StatusCode::TOO_MANY_REQUESTS, "flex_unavailable"),
+        (StatusCode::BAD_REQUEST, "invalid_prompt"),
+    ] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let upstream = spawn_loopback(Router::new().route("/responses", get(move || {
+            let calls = count.clone();
+            async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                AxumResponse::builder().status(status).header("content-type", "application/json")
+                    .body(Body::from(serde_json::json!({"error":{"code":code,"message":"private-synthetic","detail":"private-synthetic"}}).to_string())).unwrap()
+            }
+        }))).await;
+        let (state, account, _temp) = subscription_state(&upstream.base_url).await;
+        let core = spawn_internal(state).await;
+        let mut socket = internal_handshake(&core.base_url, &account)
+            .header("originator", "codex_exec")
+            .upgrade()
+            .send()
+            .await
+            .unwrap()
+            .into_websocket()
+            .await
+            .unwrap();
+        socket
+            .send(DownstreamMessage::Text(
+                serde_json::json!({"type":"response.create","model":"gpt-5.5","input":"synthetic"})
+                    .to_string(),
+            ))
+            .await
+            .unwrap();
+        let message = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let DownstreamMessage::Text(text) = message else {
+            panic!("typed rejection must precede the close");
+        };
+        let event: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(event["type"], "error");
+        assert_eq!(event["status"], status.as_u16());
+        assert_eq!(event["error"]["code"], code);
+        assert!(!text.contains("private-synthetic"));
+        let close = tokio::time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let DownstreamMessage::Close { reason, .. } = close else {
+            panic!("missing failure close");
+        };
+        let failure: mini_sub2api_protocol_v1::FailureMetadata =
+            serde_json::from_str(&reason).unwrap();
+        assert_eq!(
+            failure.delivery_state,
+            mini_sub2api_protocol_v1::DeliveryState::NotDelivered
+        );
+        assert_eq!(
+            failure.retry_advice,
+            mini_sub2api_protocol_v1::RetryAdvice::Never
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
 async fn bare_upgrade_aliases_request_headers_and_keeps_one_private_diagnostic() {
     let upstream = spawn_loopback(Router::new().route(
         "/responses",

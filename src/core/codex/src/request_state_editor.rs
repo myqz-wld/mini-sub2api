@@ -78,6 +78,9 @@ pub(crate) struct RequestStateEditor<'a> {
     protected: ProtectedStateKeys,
 }
 
+#[path = "tool_observation_state.rs"]
+pub(crate) mod tool_observations;
+
 impl<'a> RequestStateEditor<'a> {
     pub(crate) fn new(
         state: &'a mut PersistedRequestState,

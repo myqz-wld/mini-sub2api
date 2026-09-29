@@ -10,19 +10,29 @@ pub(crate) struct ModelProfile {
     pub(crate) supports_verbosity: bool,
     pub(crate) original_images: bool,
     pub(crate) priority: bool,
-    pub(crate) ultrafast: bool,
     reasoning_effort: Option<&'static str>,
     reasoning_summary: Option<&'static str>,
     verbosity: Option<&'static str>,
 }
 
-const MODEL_PROFILES: [(&str, ModelProfile); 9] = [
+const MODEL_PROFILES: [(&str, ModelProfile); 10] = [
     (
         "gpt-6-astra",
         ModelProfile {
             node_repl_auto_review_required: true,
             ..profile(true, Some("low"), None, Some("low"))
         },
+    ),
+    (
+        "gpt-6-sol",
+        ModelProfile {
+            node_repl_auto_review_required: true,
+            ..profile(true, Some("medium"), None, Some("low"))
+        },
+    ),
+    (
+        "gpt-6-luna",
+        profile(true, Some("medium"), None, Some("low")),
     ),
     (
         "gpt-daybreak-blue-latest",
@@ -42,7 +52,6 @@ const MODEL_PROFILES: [(&str, ModelProfile); 9] = [
         profile(true, Some("medium"), None, Some("low")),
     ),
     ("gpt-5.5", profile(false, Some("medium"), None, Some("low"))),
-    ("gpt-5.4", profile(false, Some("medium"), None, Some("low"))),
     (
         "codex-auto-review",
         profile(true, Some("medium"), None, Some("low")),
@@ -52,20 +61,18 @@ const MODEL_PROFILES: [(&str, ModelProfile); 9] = [
 const FALLBACK_PROFILE: ModelProfile = profile(false, None, Some("auto"), None);
 
 pub(crate) fn model_profile(model: &str) -> ModelProfile {
-    let mut profile = find_model_by_longest_prefix(model)
+    let (label, mut profile) = find_model_by_longest_prefix(model)
         .or_else(|| find_model_by_namespaced_suffix(model))
-        .unwrap_or(FALLBACK_PROFILE);
-    let label = diagnostic_model(model);
+        .unwrap_or(("other", FALLBACK_PROFILE));
     profile.ultra_effort = match label {
-        "gpt-6-astra" | "gpt-5.4" | "gpt-5.5" => "xhigh",
-        "other" => "high",
+        "gpt-6-astra" | "gpt-5.5" => "xhigh",
+        "other" => "medium",
         _ => "max",
     };
     profile.priority = !matches!(
         label,
         "other" | "gpt-daybreak-blue-latest" | "gpt-daybreak-red-latest"
     );
-    profile.ultrafast = label == "gpt-5.6-sol";
     profile
 }
 
@@ -78,15 +85,15 @@ pub(crate) fn diagnostic_model(model: &str) -> &'static str {
         .map_or("other", |(slug, _)| *slug)
 }
 
-fn find_model_by_longest_prefix(model: &str) -> Option<ModelProfile> {
+fn find_model_by_longest_prefix(model: &str) -> Option<(&'static str, ModelProfile)> {
     MODEL_PROFILES
         .iter()
         .filter(|(slug, _)| model.starts_with(slug))
         .max_by_key(|(slug, _)| slug.len())
-        .map(|(_, profile)| *profile)
+        .copied()
 }
 
-fn find_model_by_namespaced_suffix(model: &str) -> Option<ModelProfile> {
+fn find_model_by_namespaced_suffix(model: &str) -> Option<(&'static str, ModelProfile)> {
     let (namespace, suffix) = model.split_once('/')?;
     if suffix.contains('/')
         || namespace.is_empty()
@@ -107,11 +114,10 @@ const fn profile(
 ) -> ModelProfile {
     ModelProfile {
         responses_lite,
-        ultra_effort: "high",
+        ultra_effort: "medium",
         supports_verbosity: verbosity.is_some(),
         original_images: verbosity.is_some(),
         priority: false,
-        ultrafast: false,
         node_repl_auto_review_required: false,
         node_repl_disabled: false,
         reasoning_effort,
@@ -122,9 +128,7 @@ const fn profile(
 
 impl ModelProfile {
     pub(crate) fn supports_tier(self, tier: &str) -> bool {
-        tier == "flex"
-            || (tier == "priority" && self.priority)
-            || (tier == "ultrafast" && self.ultrafast)
+        tier == "flex" || (tier == "priority" && self.priority)
     }
 }
 
@@ -221,9 +225,10 @@ mod tests {
 
     #[test]
     fn model_lookup_uses_longest_prefix_then_single_namespace_suffix() {
-        let derived_mini = model_profile("gpt-5.4-mini-preview");
-        assert_eq!(derived_mini.reasoning_effort, Some("medium"));
-        assert_eq!(derived_mini.verbosity, Some("low"));
+        let removed_model = model_profile("gpt-5.4-mini-preview");
+        assert_eq!(removed_model.reasoning_effort, None);
+        assert_eq!(removed_model.reasoning_summary, Some("auto"));
+        assert_eq!(removed_model.verbosity, None);
 
         let namespaced_lite = model_profile("vendor/gpt-5.6-sol-snapshot");
         assert!(namespaced_lite.responses_lite);

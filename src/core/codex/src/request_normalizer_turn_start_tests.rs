@@ -20,7 +20,7 @@ async fn prepare_transport(
     body: Value,
 ) -> PreparedEmulatedRequest {
     prepare_identity_request(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         transport,
         headers,
         Bytes::from(serde_json::to_vec(&body).unwrap()),

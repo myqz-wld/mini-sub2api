@@ -38,7 +38,7 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             EmulationTransport::Http,
             &headers,
             Bytes::from(body),
@@ -180,7 +180,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
     let tools = serde_json::json!([{"type":"function","name":"lookup"}]);
     let body = Bytes::from(
         serde_json::to_vec(&serde_json::json!({
-            "model": "gpt-5.4",
+            "model": "gpt-5.5",
             "instructions": "Be concise",
             "input": [
                 {"type":"message","role":"system","content":"Follow system rules"},
@@ -196,7 +196,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
         "true".parse().expect("header"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &headers,
         body,
@@ -271,7 +271,7 @@ fn strips_subscription_incompatible_and_codex_unemitted_fields() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -310,7 +310,7 @@ async fn filters_unsupported_fields_from_already_subscription_shaped_json() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body,
@@ -342,7 +342,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true}"#,
     );
     let native_prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &HeaderMap::new(),
         native.clone(),
@@ -389,7 +389,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
     );
     let encoded = Bytes::from_static(b"compressed bytes");
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         &encoded_headers,
         encoded,
@@ -402,7 +402,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
 async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     let turn_metadata = r#"{\"installation_id\":\"11111111-1111-4111-8111-111111111111\",\"session_id\":\"session-test\",\"thread_id\":\"thread-test\",\"agent_name\":\"/root\",\"turn_id\":\"turn-test\",\"window_id\":\"thread-test:0\",\"request_kind\":\"turn\",\"root_turn_id\":\"turn-test\",\"auto_review_enabled\":false,\"node_repl_auto_review_required\":false,\"node_repl_disabled\":false,\"turn_started_at_unix_ms\":1700000000000}"#;
     let body = Bytes::from(format!(
-        r#"{{"model":"gpt-5.4","input":[{{"type":"message","id":"msg_11111111-1111-7111-8111-111111111111","role":"user","content":[{{"type":"input_text","text":"hello"}}],"internal_chat_message_metadata_passthrough":{{"turn_id":"turn-test","create_time":1700000000.0}}}}],"tools":[],"tool_choice":"auto","parallel_tool_calls":true,"reasoning":{{"effort":"medium"}},"store":false,"stream":true,"include":["reasoning.encrypted_content"],"prompt_cache_key":"session-test","text":{{"verbosity":"low"}},"client_metadata":{{"session_id":"session-test","thread_id":"thread-test","turn_id":"turn-test","x-codex-installation-id":"11111111-1111-4111-8111-111111111111","x-codex-turn-metadata":"{turn_metadata}","x-codex-window-id":"thread-test:0","root_turn_id":"turn-test"}}}}"#
+        r#"{{"model":"gpt-5.5","input":[{{"type":"message","id":"msg_11111111-1111-7111-8111-111111111111","role":"user","content":[{{"type":"input_text","text":"hello"}}],"internal_chat_message_metadata_passthrough":{{"turn_id":"turn-test","create_time":1700000000.0}}}}],"tools":[],"tool_choice":"auto","parallel_tool_calls":true,"reasoning":{{"effort":"medium"}},"store":false,"stream":true,"include":["reasoning.encrypted_content"],"prompt_cache_key":"session-test","text":{{"verbosity":"low"}},"client_metadata":{{"session_id":"session-test","thread_id":"thread-test","turn_id":"turn-test","x-codex-installation-id":"11111111-1111-4111-8111-111111111111","x-codex-turn-metadata":"{turn_metadata}","x-codex-window-id":"thread-test:0","root_turn_id":"turn-test"}}}}"#
     ));
     let mut headers = HeaderMap::new();
     for (name, value) in [
@@ -416,7 +416,7 @@ async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             EmulationTransport::Http,
             &headers,
             body.clone(),
@@ -430,7 +430,7 @@ async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     assert_ne!(prepared.body, body);
     let repeated = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             EmulationTransport::Http,
             &headers,
             body,

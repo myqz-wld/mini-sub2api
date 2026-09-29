@@ -12,7 +12,7 @@ import (
 // Built-in OpenAI defaults matter: custom providers omit Version and backend-only metadata.
 // A separate loopback metadata mock answers account discovery; the explicit inference override
 // stays on the tapped gateway. Rejecting WS makes the native client select its HTTP fallback.
-func TestNative1560WireShapeCapture(t *testing.T) {
+func TestNative1580WireShapeCapture(t *testing.T) {
 	t.Setenv("TERM_PROGRAM", "native-parity")
 	t.Setenv("TERM_PROGRAM_VERSION", "1")
 	t.Setenv("TERM", "dumb")
@@ -47,7 +47,7 @@ func TestNative1560WireShapeCapture(t *testing.T) {
 						}
 						left := readNativeJSONShape(t, nativePacketJSON(t, in[i]))
 						metadata := left.fields["client_metadata"]
-						if in[i].headers.Get("Version") != "0.156.0" || metadata.fields["guardian_credits_requested"] == nil {
+						if in[i].headers.Get("Version") != "0.158.0" || metadata.fields["guardian_credits_requested"] == nil {
 							t.Fatal("built-in provider capture lacks its native defaults")
 						}
 						if i == 0 {

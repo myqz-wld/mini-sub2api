@@ -1,4 +1,4 @@
-//! Optional v0.156.0 lifecycle metadata. These fields never locate a session.
+//! Optional v0.158.0 lifecycle metadata. These fields never locate a session.
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;
@@ -18,6 +18,7 @@ pub(crate) struct NativeMetadata {
     classifier: bool,
     classifier_source: Option<String>,
     classifier_has_root: bool,
+    mcp_attribution: Option<crate::request_mcp_attribution::Attribution>,
 }
 
 impl NativeMetadata {
@@ -146,6 +147,7 @@ impl NativeMetadata {
             }
         }
         Ok(Self {
+            mcp_attribution: crate::request_mcp_attribution::read(object),
             classifier,
             classifier_source,
             classifier_has_root,
@@ -205,6 +207,7 @@ impl NativeMetadata {
                 self.classifier_has_root,
             );
         }
+        crate::request_mcp_attribution::project(editor, self.mcp_attribution.as_ref(), metadata);
         let mut turn: Map<String, Value> = serde_json::from_str(
             metadata
                 .get("x-codex-turn-metadata")

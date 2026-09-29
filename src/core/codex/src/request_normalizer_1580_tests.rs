@@ -2,12 +2,12 @@ use super::*;
 use crate::request_state_types::WireIdDomain;
 use serde_json::json;
 
-const ACCOUNT: &str = "acct_release1560";
-const NAMESPACE: &str = "release1560";
+const ACCOUNT: &str = "acct_release1580";
+const NAMESPACE: &str = "release1580";
 const SCOPE: &str = "psn_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 #[tokio::test]
-async fn codex1560_generated_lite_setup_has_no_invented_turn_attribution() {
+async fn codex1580_generated_lite_setup_has_no_invented_turn_attribution() {
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         let harness = CodexStateTestHarness::new();
         let body = json!({"model":"gpt-6-astra","instructions":"synthetic base",
@@ -46,7 +46,7 @@ async fn prepare(
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     harness
         .prepare(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             transport,
             headers,
             Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -63,7 +63,7 @@ fn value(prepared: &PreparedEmulatedRequest) -> Value {
 }
 
 #[tokio::test]
-async fn codex1560_configuration_updates_and_tool_evidence_survive_both_transports() {
+async fn codex1580_configuration_updates_and_tool_evidence_survive_both_transports() {
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         for model in ["gpt-5.4", "gpt-6-astra"] {
             let harness = CodexStateTestHarness::new();
@@ -107,7 +107,7 @@ async fn codex1560_configuration_updates_and_tool_evidence_survive_both_transpor
 }
 
 #[tokio::test]
-async fn codex1560_cache_affinity_is_shared_without_merging_session_ownership() {
+async fn codex1580_cache_affinity_is_shared_without_merging_session_ownership() {
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         let harness = CodexStateTestHarness::new();
         let mut headers = HeaderMap::new();
@@ -160,7 +160,7 @@ async fn codex1560_cache_affinity_is_shared_without_merging_session_ownership() 
 }
 
 #[tokio::test]
-async fn codex1560_guardian_parent_is_a_required_scoped_provider_reference() {
+async fn codex1580_guardian_parent_is_a_required_scoped_provider_reference() {
     let harness = CodexStateTestHarness::new();
     let parent = harness
         .store
@@ -195,7 +195,7 @@ async fn codex1560_guardian_parent_is_a_required_scoped_provider_reference() {
 }
 
 #[tokio::test]
-async fn codex1560_memory_consolidation_preserves_its_turn_without_copying_raw_ids() {
+async fn codex1580_memory_consolidation_preserves_its_turn_without_copying_raw_ids() {
     let harness = CodexStateTestHarness::new();
     let request = json!({"model":"gpt-5.4","input":"synthetic memory",
         "client_metadata":{"x-codex-turn-metadata":json!({"request_kind":"memory",

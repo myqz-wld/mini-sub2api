@@ -11,7 +11,7 @@ async fn final_http_peer_observes_role_and_schema_policy() {
     .await;
     let (state, account, _temp) = subscription_state(&upstream.base_url).await;
     let schema: Value = serde_json::from_str(r#"{"type":"object","properties":{"z":{"const":123456789012345678901234567890},"a":{"type":"string"}}}"#).unwrap();
-    let body = json!({"model":"gpt-5.4","input":[user("synthetic")],"tools":[
+    let body = json!({"model":"gpt-5.5","input":[user("synthetic")],"tools":[
         {"type":"function","name":"lookup","parameters":{"type":"object","properties":{"x":{"const":"fixed"},"enum_value":{"enum":[{"const":"business"}]}}}},
         {"type":"mcp"}],"max_tool_calls":3,"background":true,"prompt":{},"top_logprobs":5,
         "tool_choice":"required","include":["message.output_text.logprobs"],"service_tier":"default",
@@ -57,14 +57,14 @@ async fn item_references_are_ownership_checked_before_omission_at_the_peer() {
     let first = request(
         &state,
         &account,
-        json!({"model":"gpt-5.4","input":[user("first")]}),
+        json!({"model":"gpt-5.5","input":[user("first")]}),
         HeaderMap::new(),
     )
     .await;
     request(
         &state,
         &account,
-        json!({"model":"gpt-5.4","input":[user("first"),first["output"][0],
+        json!({"model":"gpt-5.5","input":[user("first"),first["output"][0],
         {"type":"item_reference","id":first["output"][0]["id"]},user("next")]}),
         HeaderMap::new(),
     )
@@ -83,7 +83,7 @@ async fn item_references_are_ownership_checked_before_omission_at_the_peer() {
         &state,
         &account,
         Bytes::from_static(
-            br#"{"model":"gpt-5.4","input":[{"type":"item_reference","id":"msg_unowned"}]}"#,
+            br#"{"model":"gpt-5.5","input":[{"type":"item_reference","id":"msg_unowned"}]}"#,
         ),
         HeaderMap::new(),
     )
@@ -105,7 +105,7 @@ async fn final_http_peer_keeps_guardian_roles_separate() {
     let parent = request(
         &state,
         &account,
-        json!({"model":"gpt-5.4","input":[user("parent")],
+        json!({"model":"gpt-5.5","input":[user("parent")],
         "client_metadata":{"session_id":"root","thread_id":"root","turn_id":"root-turn"}}),
         HeaderMap::new(),
     )
@@ -153,7 +153,7 @@ async fn malformed_tool_schema_fails_before_delivery_but_opaque_enum_objects_rem
         json!({"type":"string","encrypted":"bad"}),
         json!(7),
     ] {
-        let body = json!({"model":"gpt-5.4","input":[user("synthetic")],"tools":[{"type":"function","name":"test","parameters":schema}]});
+        let body = json!({"model":"gpt-5.5","input":[user("synthetic")],"tools":[{"type":"function","name":"test","parameters":schema}]});
         let result = call_core_with_headers(
             &state,
             &account,

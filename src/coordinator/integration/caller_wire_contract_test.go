@@ -116,17 +116,6 @@ func assertCallerWireContract(t *testing.T, incoming nativePacket, wire nativeWi
 	}
 	required := []string{"model", "input", "tool_choice", "parallel_tool_calls", "reasoning", "store", "stream", "include", "prompt_cache_key", "client_metadata"}
 	assertCallerObject(t, output, order, required, "$")
-	// Nullable caller controls are an intentional API extension. Test presence/type without
-	// coercing null, empty objects and empty arrays to the same representation.
-	for _, key := range []string{"reasoning", "text", "tool_choice", "parallel_tool_calls", "service_tier", "access_programs"} {
-		before := caller.fields[key]
-		if before != nil && before.kind == "null" {
-			after := output.fields[key]
-			if after == nil || after.kind != "null" {
-				t.Errorf("caller null control changed: %s", key)
-			}
-		}
-	}
 	for _, key := range []string{"max_output_tokens", "temperature", "top_p", "wire_unknown_probe", "metadata", "prompt_cache_retention", "safety_identifier", "user", "truncation"} {
 		if output.fields[key] != nil {
 			t.Errorf("unsupported caller field crossed: %s", key)
@@ -143,6 +132,15 @@ func assertCallerWireContract(t *testing.T, incoming nativePacket, wire nativeWi
 	}
 	model, _ := wire.value["model"].(string)
 	baseline := callerWireBaselineFor(t, model, ws)
+	// Optional native controls cannot carry null: compare the omitted/default shape
+	// against an independently captured native request for this model and transport.
+	for _, key := range []string{"reasoning", "text", "tool_choice", "parallel_tool_calls", "service_tier", "access_programs"} {
+		if before := caller.fields[key]; before != nil && before.kind == "null" {
+			if !reflect.DeepEqual(output.fields[key], baseline.shape.fields[key]) {
+				t.Errorf("null control did not receive the captured native default: %s", key)
+			}
+		}
+	}
 	assertCallerHeaderContract(t, baseline, sent)
 	assertCallerRootPresence(t, caller, output, baseline.shape, wire)
 	assertCallerMetadataWire(t, output, baseline.shape)
@@ -212,10 +210,10 @@ func assertCallerRootPresence(t *testing.T, caller, output, baseline *nativeJSON
 			present = false
 			if node := caller.fields[name]; node != nil {
 				value, _ := node.scalar.(string)
-				present = !lite && strings.TrimSpace(value) != ""
+				present = !lite && value != ""
 			}
 		case "tools":
-			present = !lite || (caller.fields[name] != nil && caller.fields[name].kind == "null")
+			present = !lite
 		case "previous_response_id":
 			// Full and incremental are separate legal native schemas. Below, removing a
 			// reference must be accompanied by complete caller input, never a bare suffix.
@@ -224,9 +222,14 @@ func assertCallerRootPresence(t *testing.T, caller, output, baseline *nativeJSON
 			present = caller.fields[name] != nil
 		case "stream_options":
 			options := caller.fields[name]
-			present = options != nil && options.fields["reasoning_summary_delivery"] != nil && options.fields["reasoning_summary_delivery"].scalar == "sequential_cutoff"
+			reasoning := caller.fields["reasoning"]
+			if reasoning == nil || reasoning.kind == "null" {
+				reasoning = baseline.fields["reasoning"]
+			}
+			summaryEnabled := reasoning != nil && reasoning.fields["summary"] != nil && slices.Contains([]any{"auto", "concise", "detailed"}, reasoning.fields["summary"].scalar)
+			present = summaryEnabled && options != nil && options.fields["reasoning_summary_delivery"] != nil && options.fields["reasoning_summary_delivery"].scalar == "sequential_cutoff"
 		default:
-			present = present || caller.fields[name] != nil
+			present = present || (caller.fields[name] != nil && caller.fields[name].kind != "null")
 		}
 		expected = slices.DeleteFunc(expected, func(key string) bool { return key == name })
 		if present {

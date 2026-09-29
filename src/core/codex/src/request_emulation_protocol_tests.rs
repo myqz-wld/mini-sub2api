@@ -8,7 +8,7 @@ fn native_transport_roots_and_routing_hint() {
         "background":true,"stream":false,"model":"gpt-5.4","input":[]});
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         let prepared = prepare_value(
-            UpstreamProfile::CodexSubscription1560,
+            UpstreamProfile::CodexSubscription1580,
             transport,
             caller.clone(),
         );
@@ -26,7 +26,7 @@ fn native_transport_roots_and_routing_hint() {
 #[test]
 fn tool_declarations_are_distinct_from_response_history() {
     let prepared = prepare_value(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         json!({
         "model":"gpt-5.4", "tools":[{"type":"web_search","filters":{"allowed_domains":["example.test"],"unknown":true}},
@@ -55,7 +55,7 @@ fn tool_declarations_are_distinct_from_response_history() {
 #[test]
 fn typed_history_drops_non_model_decoration_and_keeps_null_reasoning_content() {
     let prepared = prepare_value(
-        UpstreamProfile::CodexSubscription1560,
+        UpstreamProfile::CodexSubscription1580,
         EmulationTransport::Http,
         json!({
         "model":"gpt-5.4","input":[

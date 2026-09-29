@@ -28,6 +28,10 @@ pub enum CoreFailure {
     UpstreamDeliveryUnknown,
     #[error("upstream response handling failed")]
     UpstreamResponseFailed,
+    #[error("Flex capacity unavailable")]
+    FlexUnavailable,
+    #[error("upstream rejected the prompt")]
+    UpstreamInvalidPrompt,
     #[error("upstream WebSocket handshake was rejected")]
     UpstreamHandshakeRejected,
     #[error("upstream authentication failed")]
@@ -48,6 +52,8 @@ impl CoreFailure {
             Self::UpstreamConnectFailed => "upstream_connect_failed",
             Self::UpstreamDeliveryUnknown => "upstream_delivery_unknown",
             Self::UpstreamResponseFailed => "upstream_response_failed",
+            Self::FlexUnavailable => "flex_unavailable",
+            Self::UpstreamInvalidPrompt => "invalid_prompt",
             Self::UpstreamHandshakeRejected => "upstream_handshake_rejected",
             Self::UpstreamAuthFailed => "upstream_auth_failed",
             Self::Internal => "internal_error",
@@ -60,6 +66,8 @@ impl CoreFailure {
             Self::UnsupportedProtocol | Self::InvalidRequest => StatusCode::BAD_REQUEST,
             Self::UnknownAccount => StatusCode::NOT_FOUND,
             Self::StateUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::FlexUnavailable => StatusCode::TOO_MANY_REQUESTS,
+            Self::UpstreamInvalidPrompt => StatusCode::BAD_REQUEST,
             Self::CredentialRequiresLogin | Self::UpstreamAuthFailed => StatusCode::UNAUTHORIZED,
             Self::UpstreamConnectFailed
             | Self::UpstreamDeliveryUnknown
@@ -80,6 +88,8 @@ impl CoreFailure {
             Self::UpstreamConnectFailed => "The upstream service is unavailable.",
             Self::UpstreamDeliveryUnknown => "The upstream request may have been delivered.",
             Self::UpstreamResponseFailed => "The upstream response could not be completed.",
+            Self::FlexUnavailable => "Flex capacity is unavailable.",
+            Self::UpstreamInvalidPrompt => "The upstream request is invalid.",
             Self::UpstreamHandshakeRejected => "The upstream WebSocket handshake was rejected.",
             Self::UpstreamAuthFailed => "Upstream authentication failed.",
             Self::Internal => "The core encountered an internal error.",
@@ -118,7 +128,10 @@ impl CoreFailure {
                 FailurePhase::UpstreamRequest,
                 DeliveryState::PossiblyDelivered,
             ),
-            Self::UpstreamAuthFailed | Self::UpstreamResponseFailed => failure(
+            Self::UpstreamAuthFailed
+            | Self::UpstreamResponseFailed
+            | Self::FlexUnavailable
+            | Self::UpstreamInvalidPrompt => failure(
                 RetryAdvice::Never,
                 FailurePhase::UpstreamResponse,
                 DeliveryState::Delivered,
@@ -193,6 +206,8 @@ mod tests {
             CoreFailure::UpstreamConnectFailed,
             CoreFailure::UpstreamDeliveryUnknown,
             CoreFailure::UpstreamResponseFailed,
+            CoreFailure::FlexUnavailable,
+            CoreFailure::UpstreamInvalidPrompt,
             CoreFailure::UpstreamHandshakeRejected,
             CoreFailure::UpstreamAuthFailed,
             CoreFailure::Internal,

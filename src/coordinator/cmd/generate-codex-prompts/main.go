@@ -11,13 +11,14 @@ import (
 	"sort"
 )
 
-const sourceCommit = "fe74a774532af67b5a4a3dec03ce9469e17f89af"
-const promptDirectory = "src/core/codex/prompts/codex-0.156.0"
+const sourceCommit = "064c6b8c737f5b41d171fdda80bd9ef10ad06eb3"
+const promptDirectory = "src/core/codex/prompts/codex-0.158.0"
 
 var modelFiles = map[string]string{
+	"gpt-6-sol": "gpt-6-sol.md", "gpt-6-luna": "gpt-6-luna.md",
 	"gpt-5.6-sol": "gpt-5.6.md", "gpt-5.6-terra": "gpt-5.6.md", "gpt-5.6-luna": "gpt-5.6.md",
-	"gpt-5.5": "gpt-5.5.md", "gpt-5.4": "gpt-5.4.md",
-	"codex-auto-review": "gpt-daybreak-blue.md",
+	"gpt-5.5":           "gpt-5.5.md",
+	"codex-auto-review": "gpt-5.6.md",
 	"gpt-6-astra":       "gpt-6-astra.md", "gpt-daybreak-blue-latest": "gpt-daybreak-blue.md",
 	"gpt-daybreak-red-latest": "gpt-daybreak-red.md",
 }
@@ -32,7 +33,7 @@ type modelMessages struct {
 }
 
 func main() {
-	source := flag.String("codex-source", "", "local Codex Git repository containing the pinned 0.156.0 commit")
+	source := flag.String("codex-source", "", "local Codex Git repository containing the pinned 0.158.0 commit")
 	output := flag.String("output", promptDirectory, "snapshot output directory")
 	check := flag.Bool("check", false, "compare snapshots without writing files")
 	flag.Parse()
@@ -44,7 +45,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("Validated Codex 0.156.0: 9 catalog defaults and 1 fallback in 7 prompt files.")
+	fmt.Println("Validated Codex 0.158.0: 10 catalog defaults and 1 fallback in 8 prompt files.")
 }
 
 func run(source, output string, check bool) error {
@@ -122,7 +123,7 @@ func renderSnapshots(catalog []byte, fallback string) (map[string][]byte, error)
 			return nil, fmt.Errorf("missing instruction template: %s", entry.Slug)
 		}
 		text := *entry.Messages.Template
-		// Codex 0.156.0 consumes the template literally; personalities are already embedded.
+		// Codex 0.158.0 consumes the template literally; personalities are already embedded.
 		if previous, exists := snapshots[name]; exists && string(previous) != text {
 			return nil, fmt.Errorf("shared prompt differs for model: %s", entry.Slug)
 		}

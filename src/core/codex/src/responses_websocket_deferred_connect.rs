@@ -99,8 +99,16 @@ pub(super) async fn connect(
         });
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
+        let error = match &handshake {
+            WebSocketHandshake::Rejected(response) => response
+                .body()
+                .as_deref()
+                .and_then(|body| crate::response_failure::http_category(response.status(), body)),
+            _ => None,
+        }
+        .unwrap_or(CoreFailure::UpstreamHandshakeRejected);
         return Err(DeferredConnectFailure {
-            error: CoreFailure::UpstreamHandshakeRejected,
+            error,
             provider_request_id: provider_request_id(handshake.headers()),
         });
     }
@@ -115,6 +123,21 @@ pub(super) async fn connect(
             provider_request_id: provider_request_id(response.headers()),
         }),
     }
+}
+
+pub(super) async fn send_protocol_failure(internal: &mut WebSocket, error: &CoreFailure) -> bool {
+    if !matches!(
+        error,
+        CoreFailure::FlexUnavailable | CoreFailure::UpstreamInvalidPrompt
+    ) {
+        return true;
+    }
+    let event = serde_json::json!({"type":"error","status":error.status().as_u16(),
+        "error":{"code":error.code(),"message":error.public_message()}});
+    internal
+        .send(Message::Text(event.to_string().into()))
+        .await
+        .is_ok()
 }
 
 pub(super) async fn send_provider_request_id_control(

@@ -34,6 +34,12 @@ fn filter_container(object: &mut Map<String, Value>, request_id: &str) {
         *details = json!({"reason":reason});
     }
     if object.get("type").and_then(Value::as_str) == Some("error") {
+        // Native accepts both spellings, with an explicit status taking precedence.
+        if !object.contains_key("status")
+            && let Some(status) = object.get("status_code").cloned()
+        {
+            object.insert("status".into(), status);
+        }
         // Responses also permits a flat error event. Keep its envelope/correlation fields,
         // but never provider messages, arbitrary error extensions or diagnostic identifiers.
         if object.get("error").is_some_and(Value::is_null) {
@@ -137,6 +143,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
                     | "bio_policy"
                     | "misalignment_policy_violation"
                     | "invalid_prompt"
+                    | "flex_unavailable"
                     | "server_is_overloaded"
                     | "rate_limit_exceeded"
                     | "slow_down"
@@ -159,7 +166,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
             .and_then(Value::as_str)
             .and_then(retry_delay)
     {
-        // Native 0.156.0 extracts this delay from text. Retain only the bounded numeric
+        // Native 0.158.0 extracts this delay from text. Retain only the bounded numeric
         // control, never the surrounding provider message or identifying quota details.
         error["message"] = format!("{FAILURE_MESSAGE} Try again in {delay}.").into();
     }
