@@ -31,6 +31,9 @@ func (s *websocketSession) corePump() websocketPumpResult {
 		}
 		failed, belongsToOldResponse := s.failedServerEvent(event)
 		terminalStatus, terminal := websocketTerminalStatus(event.Type)
+		if event.Interrupted && s.interruptedActive(event.ResponseID) {
+			terminalStatus = storage.RequestCompleted
+		}
 		if !belongsToOldResponse {
 			s.observeCoreResponse()
 			s.observeServerEvent(event, terminal)

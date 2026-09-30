@@ -94,6 +94,16 @@ func writeOpenAIErrorWithFailure(
 	code, message, requestID string,
 	failure protocolv1.FailureMetadata,
 ) {
+	writeOpenAIErrorWithUsageWindow(writer, status, code, message, requestID, failure, nil)
+}
+
+func writeOpenAIErrorWithUsageWindow(
+	writer http.ResponseWriter,
+	status int,
+	code, message, requestID string,
+	failure protocolv1.FailureMetadata,
+	limitWindowMinutes *uint16,
+) {
 	if !failure.Valid() {
 		failure = protocolv1.FailureMetadata{
 			RetryAdvice: protocolv1.RetryNever, Phase: protocolv1.PhaseInternal,
@@ -111,16 +121,18 @@ func writeOpenAIErrorWithFailure(
 	case "usage_limit_reached", "usage_not_included", "insufficient_quota":
 		errorType = code
 	}
-	_ = json.NewEncoder(writer).Encode(map[string]any{
-		"error": map[string]any{
-			"message":       message,
-			"type":          errorType,
-			"code":          code,
-			"retryAdvice":   failure.RetryAdvice,
-			"phase":         failure.Phase,
-			"deliveryState": failure.DeliveryState,
-		},
-	})
+	publicError := map[string]any{
+		"message":       message,
+		"type":          errorType,
+		"code":          code,
+		"retryAdvice":   failure.RetryAdvice,
+		"phase":         failure.Phase,
+		"deliveryState": failure.DeliveryState,
+	}
+	if code == "usage_limit_reached" && limitWindowMinutes != nil {
+		publicError["limit_window_minutes"] = *limitWindowMinutes
+	}
+	_ = json.NewEncoder(writer).Encode(map[string]any{"error": publicError})
 }
 
 func publicFailure(code string) protocolv1.FailureMetadata {

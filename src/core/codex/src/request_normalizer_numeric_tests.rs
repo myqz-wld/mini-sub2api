@@ -31,7 +31,7 @@ fn numeric_effort_uses_u64_wire_values_and_selected_string_metadata() {
                 let request = json!({"model":model,"input":"synthetic numeric probe",
                     "reasoning":{"effort":selected}});
                 let prepared = prepare_codex_overlay_for_test(
-                    UpstreamProfile::CodexSubscription1580,
+                    UpstreamProfile::CodexSubscription1592,
                     transport,
                     &HeaderMap::new(),
                     Bytes::from(request.to_string()),
@@ -58,7 +58,7 @@ fn invalid_numeric_types_fall_back_without_changing_numeric_strings() {
         let request = json!({"model":"gpt-6-sol","input":"synthetic",
             "reasoning":{"effort":effort}});
         let prepared = prepare_codex_overlay_for_test(
-            UpstreamProfile::CodexSubscription1580,
+            UpstreamProfile::CodexSubscription1592,
             EmulationTransport::Http,
             &HeaderMap::new(),
             Bytes::from(request.to_string()),
@@ -104,7 +104,7 @@ fn ultra_and_priority_follow_strict_profile_selection() {
             let request = json!({"model":model,"input":"synthetic",
                 "reasoning":{"effort":"ultra"},"service_tier":"priority"});
             let prepared = prepare_codex_overlay_for_test(
-                UpstreamProfile::CodexSubscription1580,
+                UpstreamProfile::CodexSubscription1592,
                 transport,
                 &HeaderMap::new(),
                 Bytes::from(request.to_string()),

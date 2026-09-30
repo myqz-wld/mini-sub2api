@@ -2,7 +2,7 @@
 
 A small Responses API gateway for Codex subscriptions and API keys, built with Go and Rust.
 Supports HTTP/SSE, WebSocket, credential-bound access keys and usage tracking.
-Subscription compatibility targets Codex **0.158.0**.
+Subscription compatibility targets Codex **0.159.2**, including history prewarm and scoped Lite interruption.
 
 ## Quick start
 

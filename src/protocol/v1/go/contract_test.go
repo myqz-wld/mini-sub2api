@@ -3,6 +3,7 @@ package protocolv1
 import (
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -65,6 +66,54 @@ func TestRetryAdviceRequiresCoherentDeliveryState(t *testing.T) {
 	} {
 		if metadata.Valid() {
 			t.Fatalf("accepted inconsistent metadata: %#v", metadata)
+		}
+	}
+}
+
+func TestUsageWindowErrorFixture(t *testing.T) {
+	data, err := os.ReadFile("../fixtures/usage_window_error.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got ErrorEnvelope
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Error.Code != "usage_limit_reached" || got.Error.LimitWindowMinutes == nil || *got.Error.LimitWindowMinutes != 300 || !got.Error.FailureMetadata.Valid() {
+		t.Fatal("usage-window fixture contract mismatch")
+	}
+	var original, encodedValue any
+	if err := json.Unmarshal(data, &original); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &encodedValue); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(original, encodedValue) {
+		t.Fatal("usage-window fixture did not round trip")
+	}
+	for _, minutes := range []uint16{0, 65535} {
+		got.Error.LimitWindowMinutes = &minutes
+		encoded, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded ErrorEnvelope
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Error.LimitWindowMinutes == nil || *decoded.Error.LimitWindowMinutes != minutes {
+			t.Fatal("usage-window bound changed")
+		}
+	}
+	for _, invalid := range []string{"-1", "65536", "1.5", `"300"`} {
+		var decoded ErrorEnvelope
+		if json.Unmarshal([]byte(`{"error":{"limitWindowMinutes":`+invalid+`}}`), &decoded) == nil {
+			t.Fatal("accepted invalid typed usage window")
 		}
 	}
 }

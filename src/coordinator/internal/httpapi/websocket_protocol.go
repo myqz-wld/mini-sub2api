@@ -17,8 +17,9 @@ import (
 const maxHandshakeRejectionBytes = 64 * 1024
 
 type clientApplicationEvent struct {
-	eventType     string
-	operationKind string
+	eventType           string
+	operationKind       string
+	interruptResponseID string
 }
 
 func parseProviderRequestIDControl(payload []byte) (string, bool, bool) {
@@ -52,6 +53,13 @@ func parseClientApplicationEvent(payload []byte) (clientApplicationEvent, bool) 
 	}
 	event := clientApplicationEvent{eventType: eventType}
 	if eventType != "response.create" {
+		if eventType == "response.interrupt" && len(object) == 3 {
+			var mode, id string
+			if json.Unmarshal(object["mode"], &mode) == nil && mode == "discard_partial_items" &&
+				json.Unmarshal(object["response_id"], &id) == nil && id != "" && len(id) <= 512 {
+				event.interruptResponseID = id
+			}
+		}
 		return event, true
 	}
 	event.operationKind = storage.OperationInference

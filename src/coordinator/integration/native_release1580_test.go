@@ -67,7 +67,7 @@ func TestNative1580ReasoningUpdates(t *testing.T) {
 				if !foundHigh {
 					t.Fatal("actual native CLI did not emit the requested effort update")
 				}
-				t.Logf("actual v0.158.0 captured %d requests; native_high_update=true gateway_feature_off=%t", len(wires), route == "subscription")
+				t.Logf("actual v0.159.2 captured %d requests; native_high_update=true gateway_feature_off=%t", len(wires), route == "subscription")
 			})
 		}
 	}

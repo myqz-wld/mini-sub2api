@@ -11,14 +11,14 @@ mise exec -- python3 scripts/prepare-opencode-tests.py
 bash scripts/test-scaffold-parity.sh
 ```
 
-Pinned clients: Codex **0.158.0** (`064c6b8c737f5b41d171fdda80bd9ef10ad06eb3`) and OpenCode
+Pinned clients: Codex **0.159.2** (`ff6aec96948b70d94983af2641a6b67c94faeff5`) and OpenCode
 **1.18.29** (`16747470f976aca3d362ad730bcd3fe82ecc2c9a`). Missing/wrong prerequisites fail.
 Clients are verified on macOS arm64. Standard suites use loopback mocks and never fall back to providers.
-Code Mode execution requires the matching 0.158.0 `codex-code-mode-host` companion in the CLI's
+Code Mode execution requires the matching 0.159.2 `codex-code-mode-host` companion in the CLI's
 installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NATIVE_CODEX_BINARY`;
 `MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout, defaulting to
-`ref/sources/codex-v0.158.0`. Retain the CLI and its companion together under
-`ref/tools/codex-v0.158.0`; `.ref/` is reserved for temporary work.
+`ref/sources/codex-v0.159.2`. Retain the CLI and its companion together under
+`ref/tools/codex-v0.159.2`; `.ref/` is reserved for temporary work.
 
 ## Method
 
@@ -53,7 +53,8 @@ Counts describe overlapping matrices, not additive independent cases.
 | Caller bases: 144 two-call cases | Missing/invalid/explicit bases, both credentials and HTTP/WS ordinary/Lite; no defaults, stable prefix ownership |
 | Actual OpenCode: 20 cases | Custom-provider text/read/denied-file, built-in OpenAI plugin and Core restart; continuity, tool turns, API-key bytes and ordered Subscription wire/header contracts |
 | Bare ordered wire: 12 cases | HTTP/WS × ordinary/Lite × minimal/explicit/null controls; independent actual CLI baselines, source-derived protocol order, complete header signatures |
-| Models/context | All 10 catalog models plus the retired gpt-5.4 fallback; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
+| 0.159.2 release | gpt-6.1-sol defaults/image/Code Mode and ultra-to-xhigh mapping; history prewarm; actual CLI instant interruption with done/discarded output, continuation and single accounting; bounded usage-window errors; late truncated metadata/reuse and provider opt-in. |
+| Models/context | All 11 catalog models plus the retired gpt-5.4 fallback; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
 | 0.158.0 controls | Actual numeric effort across direct/API-key/Subscription HTTP/WS; MCP first-turn mapping/bounds, observation prompt/message budgets and persistent completeness revocation. Experimental effort-history updates remain disabled by gateway policy. |
 | Built-in wire shape: 28 requests | Actual CLI app-server; HTTP fallback/WS × ordinary/Lite × two isolated processes; complete header order/presence/casing and recursive JSON shape, including tool loops and the next turn |
 | Identity/privacy | Key/device/shared-account isolation, forks/owners, explicit conflicts, restart/corruption and required references |
@@ -62,7 +63,7 @@ Counts describe overlapping matrices, not additive independent cases.
 | Cache/completion | Publication order, item/footer proof, failure/expiry/pressure, interning and tool consumption |
 | WS/compaction | Reuse/reconnect, first routing token, prewarm, uncertain sends, V2 item-done and window commit |
 | Compaction continuation: 36 cases | Explicit/in-band windows, two HTTP deltas, full WS recovery, Lite setup and missing-window errors |
-| Compaction message rebuild: 8 native cases | Actual 0.158.0 media removal/text truncation with retained message IDs; HTTP/WS ordinary/Lite replacement and later continuation |
+| Compaction message rebuild: 8 native cases | Actual pinned CLI media removal/text truncation with retained message IDs; HTTP/WS ordinary/Lite replacement and later continuation |
 | Anonymous checkpoints: 36 four-call cases | Configuration/context changes, stable session/thread/window, new turn and exact checkpoint across credentials/transports/formats |
 | Tools | Actual native nested host callbacks; bare/OpenCode direct tools; schema order/duplicates and deterministic prefixes |
 
@@ -73,11 +74,19 @@ Negative controls preserve explicit IDs, substantive content/decoration, Key iso
 
 ## Evidence and limits
 
+The 2026-09-29 0.159.2 validation verified 1,336 native/bare cases across 96 groups,
+combining the full matrix and targeted corrections, plus all 20 actual OpenCode cases.
+The standard suite passed 580 Core and eight protocol tests, Go race/vet and clippy.
+Release-specific captures include six interrupted turns, six Sol61 controls/image/host
+loops and eight built-in/custom metadata cases. Populated Apps metadata is checked
+synthetically; the native opt-in capture uses empty attribution. No live provider was
+contacted. See [current results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-09-29).
+
 Final 0.158.0 validation on 2026-09-28 passed 1,298 native/bare loopback cases in one expanded
 script invocation, 20 actual OpenCode cases and 56 real Subscription business scenarios.
 An additional direct-native/gateway/raw-API capability probe confirmed the tested gpt-6-sol
 backend rejects integer effort 8192 on both native and gateway paths; emitted numeric JSON was
-verified. It is recorded as a negative capability case. See [current results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-09-28).
+verified. It is recorded as a negative capability case. See [historical results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-09-28).
 
 The earlier 0.156.0 continuation follow-up passed 26 real Subscription cases: 12 native direct/gateway/
 captured-gateway conversations, 8 ordinary five-turn memory cases, 4 tool/schema cases and 2 tool
@@ -119,7 +128,7 @@ unchanged and never prints payloads or tokens. It does not renew credentials. Na
 use neutral temporary paths; default test launchers remain loopback-only with no provider fallback.
 
 ```bash
-MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.158.0/codex" \
+MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.159.2/codex" \
   bash scripts/test-live-parity.sh --allow-real-subscription
 ```
 

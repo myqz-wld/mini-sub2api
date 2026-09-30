@@ -5,6 +5,23 @@ use sha2::{Digest, Sha256};
 mod lifecycle;
 pub(crate) use lifecycle::OutputLifecycle;
 
+pub(crate) fn validate_done(event: &Value) -> anyhow::Result<()> {
+    if event.get("type").and_then(Value::as_str) == Some("response.output_item.done") {
+        anyhow::ensure!(
+            event.get("item").is_some_and(Value::is_object)
+                && !lifecycle::unfinished(&event["item"]),
+            "invalid or unfinished completed item"
+        );
+        anyhow::ensure!(
+            event
+                .get("output_index")
+                .is_none_or(|i| i.as_u64().and_then(|i| usize::try_from(i).ok()).is_some()),
+            "invalid completed item index"
+        );
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) struct CompletionFingerprint {
     digest: [u8; 32],

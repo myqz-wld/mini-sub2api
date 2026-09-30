@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 
 fn state() -> ResponsesWebSocketState {
-    ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1580)
+    ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1592)
 }
 
 #[path = "responses_websocket_partial_output_tests.rs"]
@@ -10,6 +10,9 @@ mod partial_output_tests;
 
 #[path = "responses_websocket_reuse_1580_tests.rs"]
 mod release1580_tests;
+
+#[path = "responses_websocket_interrupt_tests.rs"]
+mod interrupt_tests;
 
 fn item(item_type: &str, id: &str) -> Value {
     json!({"type": item_type, "id": id})
@@ -180,7 +183,7 @@ fn automatic_prewarm_is_limited_to_bare_subscription_callers() {
     let cases = [
         (
             CallerKind::Codex,
-            UpstreamProfile::CodexSubscription1580,
+            UpstreamProfile::CodexSubscription1592,
             PublicCreateMode::Full,
         ),
         (
@@ -321,7 +324,7 @@ fn cumulative_output_budget_disables_reuse_without_retaining_more_items() {
         .expect("encoded item size");
     let mut state = ResponsesWebSocketState::with_output_limits(
         CallerKind::Bare,
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         8,
         item_bytes + 1,
     );

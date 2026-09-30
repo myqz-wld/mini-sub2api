@@ -79,12 +79,7 @@ pub(super) fn project_items(
                 metadata.insert("turn_id".into(), turn.clone().into());
             }
         } else {
-            set_item_turn(
-                item,
-                projected_turn.as_deref(),
-                evidence.is_prewarm(),
-                evidence.is_memory(),
-            );
+            set_item_turn(item, projected_turn.as_deref(), evidence.is_memory());
         }
 
         let is_synthesized = temporary_id
@@ -142,9 +137,6 @@ fn project_item_turn(
     if identity.request_kind == "memory" {
         return Ok(raw.map(str::to_string));
     }
-    if identity.request_kind == "prewarm" {
-        return Ok(Some(String::new()));
-    }
     if raw.is_none() || raw == current_raw {
         return Ok(identity.turn_id.clone());
     }
@@ -187,7 +179,7 @@ pub(super) fn turn_key_for_raw(editor: &mut RequestStateEditor<'_>, raw: &str) -
     Ok(editor.lookup("turn", raw))
 }
 
-fn set_item_turn(item: &mut Map<String, Value>, turn: Option<&str>, prewarm: bool, memory: bool) {
+fn set_item_turn(item: &mut Map<String, Value>, turn: Option<&str>, memory: bool) {
     let metadata = item
         .entry("internal_chat_message_metadata_passthrough".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -200,14 +192,7 @@ fn set_item_turn(item: &mut Map<String, Value>, turn: Option<&str>, prewarm: boo
     } else {
         metadata.insert(
             "turn_id".to_string(),
-            Value::String(
-                if prewarm {
-                    ""
-                } else {
-                    turn.unwrap_or_default()
-                }
-                .to_string(),
-            ),
+            Value::String(turn.unwrap_or_default().to_string()),
         );
     }
 }

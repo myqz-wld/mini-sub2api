@@ -24,7 +24,7 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 		} `json:"models"`
 	}
 	raw, err := os.ReadFile(filepath.Join(nativeSource(t), "codex-rs/models-manager/models.json"))
-	if err != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Models) != 10 {
+	if err != nil || json.Unmarshal(raw, &catalog) != nil || len(catalog.Models) != 11 {
 		t.Fatal("pinned native metadata catalog unavailable")
 	}
 	for _, model := range catalog.Models {

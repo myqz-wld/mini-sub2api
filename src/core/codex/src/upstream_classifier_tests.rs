@@ -38,7 +38,7 @@ async fn classifier_http_peer_observes_uncompressed_source_order() {
         &headers(),
         &url,
         &auth(),
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         Bytes::from_static(b"{}"),
     )
     .unwrap();
@@ -99,7 +99,7 @@ fn classifier_websocket_serialization_preserves_lite_in_its_source_merge_order()
         &headers(),
         "http://127.0.0.1:1/responses",
         &auth(),
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         4096,
     )
     .unwrap();

@@ -10,7 +10,7 @@ case "$target" in
   *) echo "Unsupported pinned OpenSSL target: $target" >&2; exit 2 ;;
 esac
 
-# Codex rust-v0.158.0 .github/scripts/install-musl-openssl.sh (not Cargo.lock).
+# Codex rust-v0.159.2 .github/scripts/install-musl-openssl.sh (not Cargo.lock).
 version=3.6.4
 sha256=9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef
 target_cc="CC_${target//-/_}"

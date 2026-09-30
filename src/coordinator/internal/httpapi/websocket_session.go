@@ -53,15 +53,16 @@ const (
 )
 
 type websocketOperation struct {
-	requestID         string
-	kind              string
-	started           time.Time
-	ttfb              *time.Duration
-	usage             *storage.TokenUsage
-	terminalPending   bool
-	terminalReady     chan struct{}
-	providerRequestID *string
-	responseID        string
+	requestID          string
+	kind               string
+	started            time.Time
+	ttfb               *time.Duration
+	usage              *storage.TokenUsage
+	terminalPending    bool
+	terminalReady      chan struct{}
+	providerRequestID  *string
+	responseID         string
+	interruptRequested bool
 }
 
 type websocketSession struct {
@@ -220,6 +221,9 @@ func (s *websocketSession) clientPump() websocketPumpResult {
 			s.recordExitCause(storage.RequestDisconnected)
 			_ = s.publicSocket.Close(websocket.StatusPolicyViolation, "")
 			return s.pumpResult(storage.RequestDisconnected)
+		}
+		if event.interruptResponseID != "" {
+			s.requestInterrupt(event.interruptResponseID)
 		}
 		writeContext, cancel := context.WithTimeout(s.ctx, s.timeouts.write)
 		err = s.coreSocket.Write(writeContext, websocket.MessageText, payload)

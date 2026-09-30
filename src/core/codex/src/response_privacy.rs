@@ -29,7 +29,12 @@ fn filter_container(object: &mut Map<String, Value>, request_id: &str) {
         let reason = details
             .get("reason")
             .and_then(Value::as_str)
-            .filter(|reason| matches!(*reason, "max_output_tokens" | "content_filter"))
+            .filter(|reason| {
+                matches!(
+                    *reason,
+                    "max_output_tokens" | "content_filter" | "interrupted"
+                )
+            })
             .unwrap_or("unknown");
         *details = json!({"reason":reason});
     }
@@ -166,7 +171,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
             .and_then(Value::as_str)
             .and_then(retry_delay)
     {
-        // Native 0.158.0 extracts this delay from text. Retain only the bounded numeric
+        // Native 0.159.2 extracts this delay from text. Retain only the bounded numeric
         // control, never the surrounding provider message or identifying quota details.
         error["message"] = format!("{FAILURE_MESSAGE} Try again in {delay}.").into();
     }
@@ -186,6 +191,11 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
         )
     }) {
         error["type"] = kind.into();
+        if let Some(minutes) =
+            crate::response_failure::usage_limit_window(Some(kind), field("limit_window_minutes"))
+        {
+            error["limit_window_minutes"] = minutes.into();
+        }
     }
     error
 }

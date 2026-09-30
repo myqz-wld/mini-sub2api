@@ -10,7 +10,7 @@ switching, Chat Completions or conversation-management API.
 | Upstream | Every caller |
 |---|---|
 | API key | Bodies/valid WS frames remain byte-transparent; gateway auth, admission, usage and safe headers still apply. Caller `X-Codex-Routing-Hint` survives; omission stays absent. |
-| Subscription | Codex 0.158.0 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
+| Subscription | Codex 0.159.2 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
 
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
@@ -89,6 +89,11 @@ transfer its token only to the first business turn on that socket/thread. Hidden
 business frame before sending. Native memory-consolidation turn/root-turn IDs are projected when
 present; absent memory turns remain absent. Core provides no memory-writing service.
 
+History-bearing `generate:false` prewarm keeps an empty request turn and preserves each
+historical item's scoped turn. It neither creates an active turn from history nor rewrites
+historical provenance as startup metadata. The next valid same-socket request can reference
+the completed prewarm; reconnect/full-context and unrelated-thread checks still apply.
+
 ## Instructions and Lite
 
 | Caller format | Base and tools |
@@ -100,8 +105,10 @@ present; absent memory turns remain absent. Core provides no memory-writing serv
 
 No path inserts model-default bases or renders caller placeholders. Ordinary continuation does not
 restore an omitted base. Preserve developer content/order/duplicates; Subscription maps
-system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.158.0/README.md)
-are offline test fixtures only.
+system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.159.2/README.md)
+are offline test fixtures only. The eleven-model catalog includes `gpt-6.1-sol` with
+Lite layout, low reasoning effort/verbosity, model-required review metadata, priority support
+and `ultra` mapped to its native multi-agent effort `xhigh`. The separate `gpt-6-sol` keeps its medium default.
 
 Lite UUIDv5 uses OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
 base text (`msg_`). Regenerate only Core-owned/proven native prefixes; retain durable aliases.
@@ -293,7 +300,8 @@ can reuse completed items without duplicate events. Every started item—includi
 snapshots, item-added and deltas—must finish with matching item-done or a complete final item at the
 same index/identity. Missing/truncated footers, unfinished status, conflicting output or unavailable
 bounded completion proof reject success across JSON/SSE/WS/prewarm. Cache pressure alone may still
-permit delivery when separate completion facts fit. Failed/incomplete responses never become baselines.
+permit delivery when separate completion facts fit. Failed/incomplete responses do not become
+baselines except for a validated, caller-requested Lite interruption described below.
 
 Subscription SSE may forward `error` followed by one valid matching `response.failed`, including
 projected IDs, details and usage. The first error releases the lane; bounded validation facts stay
@@ -314,6 +322,8 @@ Subscription HTTP/deferred-WS failures preserve the native invalid-prompt, flex,
 policy and quota/usage categories. Inspection is limited to 64 KiB and one second; arbitrary provider
 messages and extensions stay private. Recognized categories use the public gateway error envelope
 and typed diagnostics. Native quota classifiers also receive their fixed `error.type`.
+For `usage_limit_reached`, optional integer `limit_window_minutes` survives only within
+0..65535; malformed or unrelated values are omitted in HTTP, deferred WS and streamed errors.
 
 V2 compaction requires matching completion and exactly one valid encrypted item-done; a final array
 alone is insufficient. Concurrent same-base commits advance once. With complete source history,
@@ -334,10 +344,24 @@ Attempted/uncertain send or delivered events forbid hidden replay. OAuth recover
 Errors expose `retryAdvice/phase/deliveryState`; missing required state fails before inference.
 Subscription non-2xx bodies become bounded errors; API-key bodies pass through.
 
-WS body controls require active session/thread/socket ownership; without a response ID use the bound
-operation. Injection invalidates history but keeps validated dependencies; unknown control semantics
-also invalidate dependency reuse. Completion cannot restore stale history; full input can rebuild it.
-Payload-free transport controls remain forwardable.
+Subscription WS accepts the native `response.interrupt` control with exactly `type`,
+`response_id` and `mode:"discard_partial_items"`. It must target the current active Lite
+sampling response on the same Key/session/thread/socket. Unknown/stale IDs, repeated controls,
+extra fields, other modes, ordinary requests, prewarm and compaction operations are rejected.
+The gateway does not generate steering or replay an interrupt.
+
+A matching `response.incomplete` with reason `interrupted` can publish continuation history
+only after an authorized interrupt. Retain completed item-done output in index order; each
+started partial item must finish or have a matching `response.output_item.interrupted`.
+Discarded items cannot reappear in later events or the footer. The public terminal remains
+`response.incomplete`; accounting finishes once with the native usage and permits the next
+create. Same-socket deltas and eligible complete-history reconstruction retain their existing
+ownership and capacity checks. Other incomplete reasons remain unusable as baselines.
+
+Native Codex currently gates automatic steering interruption behind
+`features.instant_interrupt=true`; the gateway needs no separate switch. API-key application
+frames remain transparent. Other unsupported Subscription application controls, including
+injection, remain logged/ignored; protocol Ping/Pong remains supported.
 
 Public `X-Mini-Sub2Api-Request-Id` identifies the HTTP request/WS handshake; WS operation IDs remain
 in local usage. `Response.id` is the continuation reference. Provider request-ID headers use aliases;

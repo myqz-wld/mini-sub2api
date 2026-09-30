@@ -46,7 +46,7 @@ async fn prepare(
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     harness
         .prepare(
-            UpstreamProfile::CodexSubscription1580,
+            UpstreamProfile::CodexSubscription1592,
             transport,
             headers,
             Bytes::from(serde_json::to_vec(&body).unwrap()),

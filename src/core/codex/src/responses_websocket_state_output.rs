@@ -29,21 +29,44 @@ impl ResponsesWebSocketState {
             abandon_output(active);
             return;
         };
-        if active.output.len() >= max_output_items {
+        let index = event
+            .get("output_index")
+            .and_then(Value::as_u64)
+            .and_then(|i| usize::try_from(i).ok())
+            .unwrap_or(active.output.len());
+        if index >= max_output_items {
             abandon_output(active);
             return;
         }
-        active.output.push(item.clone());
+        if let Some(previous) = active.output.get(&index) {
+            if !equivalent_items(std::slice::from_ref(previous), std::slice::from_ref(item)) {
+                abandon_output(active);
+            }
+            return;
+        }
+        active.output.insert(index, item.clone());
         active.output_bytes = active.output_bytes.saturating_add(encoded);
     }
 
     pub(super) fn complete_active(&mut self, event: &Value) -> Option<PendingCompaction> {
         let mut active = self.active.take()?;
-        if active
-            .output_lifecycle
-            .validate_completed(&event["response"])
-            .is_err()
-        {
+        let interrupted = active.interruption.completes(event);
+        let validation = if interrupted {
+            active.output_lifecycle.validate_interrupted(
+                &event["response"],
+                active.output.iter().map(|(index, item)| {
+                    (
+                        *index,
+                        crate::response_output::CompletionFingerprint::new(item),
+                    )
+                }),
+            )
+        } else {
+            active
+                .output_lifecycle
+                .validate_completed(&event["response"])
+        };
+        if validation.is_err() {
             self.fail_active(active.kind);
             return None;
         }
@@ -55,6 +78,7 @@ impl ResponsesWebSocketState {
             .and_then(|response| response.get("id"))
             .and_then(Value::as_str)
             .filter(|id| !id.is_empty());
+        let mut collected: Vec<_> = active.output.values().cloned().collect();
 
         if let Some(output) =
             crate::response_output::populated(response.and_then(|response| response.get("output")))
@@ -65,8 +89,8 @@ impl ResponsesWebSocketState {
             {
                 abandon_output(&mut active);
             } else if active.output.is_empty() {
-                active.output.clone_from(output);
-            } else if !equivalent_items(&active.output, output) {
+                collected.clone_from(output);
+            } else if !equivalent_items(&collected, output) {
                 abandon_output(&mut active);
             }
         }
@@ -83,7 +107,7 @@ impl ResponsesWebSocketState {
             (true, Some(request), Some(response_id)) => Some(ReuseBaseline {
                 request,
                 response_id: response_id.to_string(),
-                output: active.output,
+                output: collected,
             }),
             _ => None,
         };

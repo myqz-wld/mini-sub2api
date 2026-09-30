@@ -40,7 +40,7 @@ async fn benchmark_websocket_large_delta_frames() {
         let context = subscription.then_some(&state);
         let continuation = Arc::new(StdMutex::new(ResponsesWebSocketState::new(
             CallerKind::Codex,
-            UpstreamProfile::CodexSubscription1580,
+            UpstreamProfile::CodexSubscription1592,
         )));
         let delivery = WebSocketDeliveryTracker::default();
         let mut inbound = Inbound::default();

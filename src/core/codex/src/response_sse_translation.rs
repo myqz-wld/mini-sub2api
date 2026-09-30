@@ -212,7 +212,7 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     }
     state.terminal_seen |= terminal;
     if flex_terminal {
-        // Native 0.158.0 ends this category immediately, even without a failed footer.
+        // Native 0.159.2 ends this category immediately, even without a failed footer.
         state.reader.close();
         state.finished = true;
         state.failed_footer_pending = false;

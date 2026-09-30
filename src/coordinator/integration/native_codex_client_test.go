@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const nativeVersion = "codex-cli 0.158.0"
+const nativeVersion = "codex-cli 0.159.2"
 
 type nativeClient struct {
 	t           *testing.T
@@ -70,11 +70,18 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 	}
 	binary := os.Getenv("MINI_SUB2API_NATIVE_CODEX_BINARY")
 	if binary == "" {
-		var err error
-		binary, err = exec.LookPath("codex")
-		if err != nil {
-			t.Fatal("native parity requires Codex v0.158.0")
+		binary = filepath.Join(nativeRepository(), "ref", "tools", "codex-v0.159.2", "codex")
+		if _, err := os.Stat(binary); os.IsNotExist(err) {
+			binary = "codex"
 		}
+	}
+	binary, err := exec.LookPath(binary)
+	if err != nil {
+		t.Fatal("native parity requires Codex v0.159.2")
+	}
+	binary, err = filepath.Abs(binary)
+	if err != nil {
+		t.Fatal("native parity binary path")
 	}
 	version, err := exec.Command(binary, "--version").Output()
 	if err != nil || strings.TrimSpace(string(version)) != nativeVersion {
@@ -235,7 +242,7 @@ func startNativeProcess(t *testing.T, options nativeOptions, ctx context.Context
 		}
 	}()
 	t.Cleanup(func() { _ = input.Close(); cancel(); _ = command.Wait(); reader.Wait() })
-	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.158.0"}, "capabilities": map[string]any{"experimentalApi": true}})
+	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.159.2"}, "capabilities": map[string]any{"experimentalApi": true}})
 	client.send(map[string]any{"method": "initialized"})
 	return client
 }

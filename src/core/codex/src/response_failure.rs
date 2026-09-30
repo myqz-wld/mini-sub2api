@@ -22,11 +22,16 @@ pub(crate) fn is_flex_event(value: &Value) -> bool {
 #[path = "response_failure_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "response_usage_window_tests.rs"]
+mod usage_window_tests;
+
 #[derive(Deserialize)]
 struct ErrorCode {
     code: Option<String>,
     #[serde(rename = "type")]
     kind: Option<Value>,
+    limit_window_minutes: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -80,7 +85,12 @@ pub(crate) fn http_category(status: http::StatusCode, bytes: &[u8]) -> Option<Co
                 (400 | 403, "misalignment_policy_violation", _) => Native::MisalignmentPolicy,
                 (400, "cyber_policy", _) => Native::CyberPolicy,
                 (400, "bio_policy", _) => Native::BioPolicy,
-                (429, _, Some("usage_limit_reached")) => Native::UsageLimitReached,
+                (429, _, Some("usage_limit_reached")) => {
+                    Native::UsageLimitReached(usage_limit_window(
+                        Some("usage_limit_reached"),
+                        body.error.limit_window_minutes.as_ref(),
+                    ))
+                }
                 (429, _, Some("usage_not_included")) => Native::UsageNotIncluded,
                 (429, _, Some("insufficient_quota"))
                 | (
@@ -97,6 +107,15 @@ pub(crate) fn http_category(status: http::StatusCode, bytes: &[u8]) -> Option<Co
             Some(CoreFailure::NativeResponse(category, status))
         }
     }
+}
+
+pub(crate) fn usage_limit_window(kind: Option<&str>, value: Option<&Value>) -> Option<u16> {
+    if kind != Some("usage_limit_reached") {
+        return None;
+    }
+    value
+        .and_then(Value::as_u64)
+        .and_then(|minutes| u16::try_from(minutes).ok())
 }
 
 // A bounded, separately timed read only for native categorized rejection statuses. Other

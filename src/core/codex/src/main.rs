@@ -45,6 +45,7 @@ mod response_delta_ids;
 mod response_failure;
 mod response_headers;
 mod response_id_cache;
+mod response_interrupt;
 mod response_item_metadata;
 mod response_output;
 mod response_privacy;

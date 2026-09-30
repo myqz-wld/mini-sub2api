@@ -106,9 +106,10 @@ type ErrorEnvelope struct {
 }
 
 type CoreError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"requestId"`
+	Code               string  `json:"code"`
+	Message            string  `json:"message"`
+	RequestID          string  `json:"requestId"`
+	LimitWindowMinutes *uint16 `json:"limitWindowMinutes,omitempty"`
 	FailureMetadata
 }
 

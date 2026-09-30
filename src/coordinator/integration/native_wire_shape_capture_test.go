@@ -47,7 +47,7 @@ func TestNative1580WireShapeCapture(t *testing.T) {
 						}
 						left := readNativeJSONShape(t, nativePacketJSON(t, in[i]))
 						metadata := left.fields["client_metadata"]
-						if in[i].headers.Get("Version") != "0.158.0" || metadata.fields["guardian_credits_requested"] == nil {
+						if in[i].headers.Get("Version") != "0.159.2" || metadata.fields["guardian_credits_requested"] == nil {
 							t.Fatal("built-in provider capture lacks its native defaults")
 						}
 						if i == 0 {

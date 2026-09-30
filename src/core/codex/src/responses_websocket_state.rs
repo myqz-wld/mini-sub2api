@@ -8,10 +8,14 @@ use crate::responses_websocket_reuse::incremental_input;
 use crate::responses_websocket_reuse::lite_prewarm_prefix;
 use crate::responses_websocket_reuse::request_snapshot;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 #[path = "responses_websocket_state_output.rs"]
 mod output;
 use output::abandon_output;
+
+#[path = "responses_websocket_interrupt.rs"]
+mod interruption;
 
 #[path = "responses_websocket_state_types.rs"]
 mod types;
@@ -26,10 +30,11 @@ struct PlannedOperation {
 struct ActiveOperation {
     kind: OperationKind,
     request: Option<RequestSnapshot>,
-    output: Vec<Value>,
+    output: BTreeMap<usize, Value>,
     output_bytes: usize,
     compaction_output: crate::request_compaction::CompactionOutput,
     output_lifecycle: crate::response_output::OutputLifecycle,
+    interruption: crate::response_interrupt::InterruptState,
     reusable: bool,
     pending_compaction: Option<PendingCompaction>,
 }
@@ -285,8 +290,16 @@ impl ResponsesWebSocketState {
 
         if let Some(active) = self.active.as_mut()
             && active
-                .output_lifecycle
-                .observe(event, self.max_output_items)
+                .interruption
+                .observe(event)
+                .and_then(|()| crate::response_output::validate_done(event))
+                .and_then(|()| {
+                    active.output_lifecycle.observe_with_interrupt(
+                        event,
+                        self.max_output_items,
+                        active.interruption.requested(),
+                    )
+                })
                 .is_err()
         {
             self.fail_active(kind);
@@ -299,6 +312,14 @@ impl ResponsesWebSocketState {
         match event_type {
             "response.output_item.done" => self.observe_output_item(event),
             "response.completed" => completed_compaction = self.complete_active(event),
+            "response.incomplete"
+                if self
+                    .active
+                    .as_ref()
+                    .is_some_and(|a| a.interruption.completes(event)) =>
+            {
+                completed_compaction = self.complete_active(event);
+            }
             "response.failed" | "response.incomplete" | "error" => self.fail_active(kind),
             _ => {}
         }
@@ -358,6 +379,7 @@ impl ResponsesWebSocketState {
                 a.request.as_ref().map_or(0, RequestSnapshot::cost)
                     + a.output_bytes * 4
                     + a.output_lifecycle.retained_bytes()
+                    + a.interruption.retained_bytes()
             })
     }
 
@@ -393,10 +415,11 @@ impl ResponsesWebSocketState {
         self.active = Some(ActiveOperation {
             kind: planned.kind,
             request: planned.request,
-            output: Vec::new(),
+            output: BTreeMap::new(),
             output_bytes: 0,
             compaction_output: Default::default(),
             output_lifecycle: Default::default(),
+            interruption: Default::default(),
             reusable: true,
             pending_compaction: planned.pending_compaction,
         });

@@ -16,7 +16,7 @@ const KEY: &str = "synthetic-key";
 
 async fn prepare(store: &RequestStateStore, body: Value) -> PreparedEmulatedRequest {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

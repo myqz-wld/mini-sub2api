@@ -187,9 +187,9 @@ func (h *Handler) serveHTTPResponses(writer http.ResponseWriter, request *http.R
 			_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
 		}
 		h.finish(requestID, started, storage.RequestUpstreamErr, response.StatusCode, ttfb, nil, nil, providerRequestID)
-		writeOpenAIErrorWithFailure(
+		writeOpenAIErrorWithUsageWindow(
 			writer, response.StatusCode, coreError.Code, coreError.Message, requestID,
-			coreError.FailureMetadata,
+			coreError.FailureMetadata, coreError.LimitWindowMinutes,
 		)
 		return
 	}

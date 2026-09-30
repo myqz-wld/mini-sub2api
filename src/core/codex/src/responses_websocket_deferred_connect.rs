@@ -134,6 +134,9 @@ pub(super) async fn send_protocol_failure(internal: &mut WebSocket, error: &Core
     if let Some(kind) = error.native_error_type() {
         event["error"]["type"] = kind.into();
     }
+    if let Some(minutes) = error.limit_window_minutes() {
+        event["error"]["limit_window_minutes"] = minutes.into();
+    }
     internal
         .send(Message::Text(event.to_string().into()))
         .await

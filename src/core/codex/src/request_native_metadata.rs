@@ -1,4 +1,4 @@
-//! Optional v0.158.0 lifecycle metadata. These fields never locate a session.
+//! Optional v0.159.2 lifecycle metadata. These fields never locate a session.
 use crate::request_identity_projection::ResolvedRequestIdentity;
 use crate::request_state_editor::RequestStateEditor;
 use crate::request_state_types::WireIdDomain;

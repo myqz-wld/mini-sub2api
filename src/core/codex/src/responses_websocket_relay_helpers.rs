@@ -1,5 +1,19 @@
 use super::*;
 
+pub(super) fn prepare_interrupt(
+    continuation: &StdMutex<ResponsesWebSocketState>,
+    text: &str,
+) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return false;
+    };
+    crate::response_interrupt::control_id(&value).is_ok_and(|id| {
+        continuation_guard(continuation)
+            .request_interrupt(id)
+            .is_ok()
+    })
+}
+
 pub(crate) async fn fingerprint_is_current(
     vault: &Vault,
     account_ref: &str,

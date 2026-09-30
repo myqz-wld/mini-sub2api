@@ -11,8 +11,8 @@ func TestRenderSnapshotsPreservesLiteralTemplateAndWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rendered) != 8 {
-		t.Fatalf("snapshot count = %d, want 8", len(rendered))
+	if len(rendered) != 9 {
+		t.Fatalf("snapshot count = %d, want 9", len(rendered))
 	}
 	for _, name := range modelFiles {
 		if string(rendered[name]) != "  {{ personality }}\n" {
@@ -21,6 +21,22 @@ func TestRenderSnapshotsPreservesLiteralTemplateAndWhitespace(t *testing.T) {
 	}
 	if string(rendered["fallback.md"]) != " fallback\n" {
 		t.Fatal("fallback rendering changed")
+	}
+}
+
+func TestRenderSnapshotsKeepsSol61TemplateDistinct(t *testing.T) {
+	models := fixtureModels()
+	for i := range models {
+		if models[i].Slug == "gpt-6.1-sol" {
+			*models[i].Messages.Template = "  distinct {{literal}} Sol 6.1\n"
+		}
+	}
+	rendered, err := renderSnapshots(marshalModels(t, models), "fallback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(rendered["gpt-6.1-sol.md"]) != "  distinct {{literal}} Sol 6.1\n" || string(rendered["gpt-6-sol.md"]) != "  {{ personality }}\n" {
+		t.Fatal("distinct native Sol templates were merged or rendered")
 	}
 }
 

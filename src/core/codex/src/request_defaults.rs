@@ -15,9 +15,16 @@ pub(crate) struct ModelProfile {
     verbosity: Option<&'static str>,
 }
 
-const MODEL_PROFILES: [(&str, ModelProfile); 10] = [
+const MODEL_PROFILES: [(&str, ModelProfile); 11] = [
     (
         "gpt-6-astra",
+        ModelProfile {
+            node_repl_auto_review_required: true,
+            ..profile(true, Some("low"), None, Some("low"))
+        },
+    ),
+    (
+        "gpt-6.1-sol",
         ModelProfile {
             node_repl_auto_review_required: true,
             ..profile(true, Some("low"), None, Some("low"))
@@ -65,7 +72,7 @@ pub(crate) fn model_profile(model: &str) -> ModelProfile {
         .or_else(|| find_model_by_namespaced_suffix(model))
         .unwrap_or(("other", FALLBACK_PROFILE));
     profile.ultra_effort = match label {
-        "gpt-6-astra" | "gpt-5.5" => "xhigh",
+        "gpt-6-astra" | "gpt-6.1-sol" | "gpt-5.5" => "xhigh",
         "other" => "medium",
         _ => "max",
     };
@@ -236,6 +243,9 @@ mod tests {
 
         for model in [
             "vendor/group/gpt-5.6-sol-snapshot",
+            "vendor/group/gpt-6.1-sol",
+            "vendor!/gpt-6.1-sol",
+            "/gpt-6.1-sol",
             "vendor!/gpt-5.4-mini-preview",
             "future-model",
         ] {
@@ -244,6 +254,41 @@ mod tests {
             assert_eq!(fallback.reasoning_effort, None, "model {model}");
             assert_eq!(fallback.reasoning_summary, Some("auto"), "model {model}");
             assert_eq!(fallback.verbosity, None, "model {model}");
+        }
+    }
+
+    #[test]
+    fn sol_61_profile_preserves_distinct_native_defaults_and_capabilities() {
+        for model in [
+            "gpt-6.1-sol",
+            "gpt-6.1-sol-preview",
+            "vendor/gpt-6.1-sol-snapshot",
+        ] {
+            let profile = model_profile(model);
+            assert!(profile.responses_lite, "model {model}");
+            assert!(profile.node_repl_auto_review_required, "model {model}");
+            assert!(!profile.node_repl_disabled, "model {model}");
+            assert!(
+                profile.supports_verbosity && profile.original_images,
+                "model {model}"
+            );
+            assert_eq!(profile.reasoning_effort, Some("low"), "model {model}");
+            assert_eq!(profile.reasoning_summary, None, "model {model}");
+            assert_eq!(profile.verbosity, Some("low"), "model {model}");
+            assert_eq!(profile.ultra_effort, "xhigh", "model {model}");
+            assert!(profile.supports_tier("priority"), "model {model}");
+            assert_eq!(diagnostic_model(model), "gpt-6.1-sol");
+        }
+        for model in [
+            "gpt-6-sol",
+            "gpt-6-sol-preview",
+            "vendor/gpt-6-sol-snapshot",
+        ] {
+            assert_eq!(
+                model_profile(model).reasoning_effort,
+                Some("medium"),
+                "model {model}"
+            );
         }
     }
 

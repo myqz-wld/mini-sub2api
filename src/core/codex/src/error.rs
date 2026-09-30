@@ -168,6 +168,13 @@ impl CoreFailure {
         }
     }
 
+    pub(crate) fn limit_window_minutes(&self) -> Option<u16> {
+        match self {
+            Self::NativeResponse(category, _) => category.limit_window_minutes(),
+            _ => None,
+        }
+    }
+
     pub fn into_response(self, request_id: String) -> axum::response::Response {
         let status = self.status();
         let body = ErrorEnvelope {
@@ -175,6 +182,7 @@ impl CoreFailure {
                 code: self.code().to_string(),
                 message: self.public_message().to_string(),
                 request_id,
+                limit_window_minutes: self.limit_window_minutes(),
                 failure: self.failure(),
             },
         };

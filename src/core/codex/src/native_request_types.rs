@@ -11,7 +11,7 @@ pub(crate) fn normalize(object: &mut Map<String, Value>) {
         keep(object, name, "request", Value::is_object);
     }
     if let Some(reasoning) = object.get_mut("reasoning").and_then(Value::as_object_mut) {
-        // 0.158.0 serializes a Custom(String) that parses as u64 as a JSON number.
+        // 0.159.2 serializes a Custom(String) that parses as u64 as a JSON number.
         // Accept that native wire form as well as caller-selected effort strings.
         keep(reasoning, "effort", "reasoning", |v| {
             v.as_str().is_some_and(|s| !s.is_empty()) || v.as_u64().is_some()

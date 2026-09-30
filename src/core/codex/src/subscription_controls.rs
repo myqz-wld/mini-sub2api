@@ -11,6 +11,9 @@ impl ContextStore {
         binding: Option<&ResolvedRequestIdentity>,
         value: &Value,
     ) -> Result<(), Error> {
+        if value["type"] == "response.interrupt" {
+            return self.prepare_interrupt(scope, binding, value);
+        }
         let object = value.as_object().ok_or(Error::InvalidRequest)?;
         let id = optional_id(object.get("response_id"))?;
         let inject = object.get("type").and_then(Value::as_str) == Some("response.inject");
@@ -104,5 +107,39 @@ impl ContextStore {
             scope.rebuild_index();
         }
         Ok(())
+    }
+
+    fn prepare_interrupt(
+        &self,
+        scope: &str,
+        binding: Option<&ResolvedRequestIdentity>,
+        value: &Value,
+    ) -> Result<(), Error> {
+        let id = crate::response_interrupt::control_id(value).map_err(|_| Error::InvalidRequest)?;
+        let bound = binding.ok_or(Error::InvalidRequest)?;
+        let socket = bound.connection_id.as_ref().ok_or(Error::InvalidRequest)?;
+        let mut inner = self.inner.lock().map_err(|_| Error::StateUnavailable)?;
+        if !inner.sockets.contains(socket) {
+            return Err(Error::InvalidRequest);
+        }
+        let mut candidates = inner.operations.values_mut().filter(|op| {
+            op.scope == scope
+                && op.response_id.as_deref() == Some(id)
+                && op.record.identity.session_id == bound.session_id
+                && op.record.identity.thread_id == bound.thread_id
+                && op.record.socket.as_ref() == Some(socket)
+        });
+        let active = candidates.next().ok_or(Error::InvalidRequest)?;
+        if candidates.next().is_some()
+            || active.record.upstream_format != crate::subscription_request::Format::Lite
+            || active.record.identity.request_kind != "turn"
+            || active.record.compaction.is_some()
+        {
+            return Err(Error::InvalidRequest);
+        }
+        active
+            .interruption
+            .request(id)
+            .map_err(|_| Error::InvalidRequest)
     }
 }

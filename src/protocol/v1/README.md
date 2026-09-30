@@ -106,7 +106,7 @@ selects the request and response profile:
 | Credential kind | Profile for every caller |
 | --- | --- |
 | OpenAI API key | `ApiKeyPassthrough` |
-| Codex subscription | `CodexSubscription1580` |
+| Codex subscription | `CodexSubscription1592` |
 
 Caller markers never grant permissions or change the selected credential. API-key bodies, valid WS
 application frames and response bodies remain byte-transparent, including Codex-marked callers;
@@ -117,7 +117,7 @@ Caller `x-codex-routing-hint` is preserved for API-key HTTP/WS requests, includi
 value; omission stays omission. Subscription derives its hint from the actual model/service tier.
 
 Subscription replaces `User-Agent`, `originator`, and `version` with the runtime-derived Codex
-v0.158.0 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
+v0.159.2 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
 level-3 zstd. Only API-key upstreams receive `OpenAI-Organization`, `OpenAI-Project` and reviewed
 `X-Stainless-*` headers. Both layers remove caller cookies, proxy authentication, forwarding headers,
 content length, transfer encoding, connection-specific headers, unreviewed internal headers and
@@ -125,7 +125,7 @@ unknown `X-Stainless-*` headers.
 
 ## Subscription request preparation
 
-Subscription follows Codex v0.158.0, commit `064c6b8c737f5b41d171fdda80bd9ef10ad06eb3`.
+Subscription follows Codex v0.159.2, commit `ff6aec96948b70d94983af2641a6b67c94faeff5`.
 Classify original transport, identity/reference evidence and caller format before applying the overlay.
 Caller format, complete context and transmitted format remain distinct. Deterministic repairs require
 equivalent-content proof and revalidation. There is no HTTP/WS conversion.
@@ -197,7 +197,9 @@ unsupported state is preserved and fails with `state_unavailable`; final-owner d
 it without decoding, while duplicate credential owners retain it.
 
 Publish response ownership/mappings before IDs become visible and complete context before terminal
-delivery. Reconcile output once; failed/incomplete attempts never form complete baselines.
+delivery. Reconcile output once; failed/incomplete attempts do not form baselines except for
+an authorized, validated native Lite interruption. That path preserves only finished items;
+other incomplete responses and interrupted compaction operations remain ineligible.
 Definition carriers allocate aliases; historical provider references require provider-origin mappings.
 Translate only enumerated lifecycle fields; opaque content and file/vector-store/model/connector/prompt
 IDs remain unchanged. [Completion and compaction](../../../docs/BEHAVIOR.md#completion-and-recovery)
@@ -209,7 +211,7 @@ caller workspaces remain intact.
 
 Each credential owns HTTP/WS transport contexts. HTTP uses reqwest/native-tls. Provider WS uses
 AWS-LC rustls/native roots, PQ-first groups, HTTP/1 without ALPN, and fresh TLS session state per
-connection. Pinned tungstenite forks and compression match v0.158.0; Go need not parse bodies for identity.
+connection. Pinned tungstenite forks and compression match v0.159.2; Go need not parse bodies for identity.
 
 ## Inference response
 
@@ -274,15 +276,19 @@ Subscription upgrades internally first, then connects upstream from the first no
   Go owns eight sockets/Key, credential revalidation, public overlap policy, operation accounting,
   first-frame/inter-turn/write deadlines and shutdown.
 - Application frames are bounded UTF-8 JSON text. API-key valid frames are byte-exact. Subscription
-  overlays creates and logs/ignores unsupported application controls, including response.inject.
+  overlays creates and admits native response.interrupt only for the current Lite response,
+  with exact discard_partial_items mode and scoped response ownership. Other unsupported
+  application controls, including response.inject, remain logged/ignored. A valid interrupted
+  terminal publishes only proved finished items and preserves public incomplete/interrupted.
   Protocol Ping/Pong remains supported. Public admission rejects controls while no operation is active.
 - Preserve nonempty `x-codex-ws-stream-request-start-ms`; generate only missing/empty values.
-  Native prewarm retains empty `turn_id` and absent `root_turn_id/turn_started_at_unix_ms`.
+  Native prewarm retains empty request `turn_id` and absent `root_turn_id/turn_started_at_unix_ms`.
+  History prewarm preserves historical item turn aliases and rejects unrelated-thread evidence.
   Deferred handshake turn metadata comes from the normalized first frame. Hidden prewarm uses
   `request_kind=prewarm`, empty turn ID and no root/parent/start fields in both handshake and frame.
   A replacement whose first frame is public full-create instead uses that public turn identity.
-- Before every create, re-read the fingerprint revision. Changed/unreadable revisions close both
-  sockets with empty-reason `1012` before sending. Other events do not trigger this check.
+- Before every create or interrupt, re-read the fingerprint revision. Changed/unreadable revisions
+  close both sockets with empty-reason `1012` before sending. Other events do not trigger this check.
   Observe upstream response IDs before translation, then persist mappings before downstream delivery.
 - Provider beta is `responses_websockets=2026-02-06`. Subscription uses its account header and
   runtime identity; OAuth retains provider/extra/default/auth header construction and one default originator.
@@ -355,6 +361,11 @@ Before any upstream response bytes are sent, core errors use the JSON shape in `
 - `upstream_handshake_rejected`
 - `upstream_auth_failed`
 - `internal_error`
+
+The optional v1 `limitWindowMinutes` field is an unsigned 16-bit integer, omitted when absent;
+`fixtures/usage_window_error.json` is shared by Go and Rust. Only usage_limit_reached populates
+it; the public envelope exposes `limit_window_minutes` for that category. Invalid provider
+values are omitted without losing the error category. This is an additive v1 field.
 
 Every error also carries `retryAdvice`, `phase`, and `deliveryState`. The coordinator accepts only
 known codes, the matching request id, valid enum values, and a coherent retry/delivery pair before

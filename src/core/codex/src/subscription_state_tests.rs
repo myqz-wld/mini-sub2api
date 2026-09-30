@@ -43,6 +43,9 @@ mod integrity_tests;
 #[path = "subscription_partial_output_tests.rs"]
 mod partial_output_tests;
 
+#[path = "subscription_interrupt_tests.rs"]
+mod interrupt_tests;
+
 #[path = "subscription_sse_failure_tests.rs"]
 mod sse_failure_tests;
 
@@ -51,6 +54,9 @@ mod http_lifetime_tests;
 
 #[path = "subscription_observation_tests.rs"]
 mod observation_tests;
+
+#[path = "subscription_late_metadata1592_tests.rs"]
+mod late_metadata1592_tests;
 
 const NAMESPACE: &str = "context-admission";
 const OWNER: &str = "acct_context_tests";
@@ -102,7 +108,7 @@ async fn prepare(
     body: Value,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -250,7 +256,7 @@ async fn admission_reclaims_idle_ws_comparison_without_closing_its_socket() {
     let socket = store.contexts.open_socket().unwrap();
     identity.connection_id = Some(socket.id.clone());
     let mut baseline =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1580);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1592);
     baseline.plan_public_create(&json!({"type":"response.create","model":"gpt-5.4",
         "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x".repeat(40 * 1024)}]}]}));
     assert!(baseline.mark_public_create_attempted());

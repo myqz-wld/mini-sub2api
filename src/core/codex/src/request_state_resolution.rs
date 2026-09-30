@@ -107,18 +107,24 @@ pub(crate) fn resolve_and_project(
             .flatten(),
     )?;
 
-    let current_turn_raw = evidence
-        .turn
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            evidence
-                .items
-                .iter()
-                .rev()
-                .find_map(|item| item.turn_id.clone())
-        });
+    // History prewarm has no active turn. Historical item turns retain their own
+    // scoped projection below and must never be bound to the empty prewarm turn.
+    let current_turn_raw = if evidence.is_prewarm() {
+        None
+    } else {
+        evidence
+            .turn
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| {
+                evidence
+                    .items
+                    .iter()
+                    .rev()
+                    .find_map(|item| item.turn_id.clone())
+            })
+    };
     let turn_key = if let Some(raw) = current_turn_raw.as_deref() {
         turn_key_for_raw(editor, raw)?
     } else if !evidence.new_user_submission

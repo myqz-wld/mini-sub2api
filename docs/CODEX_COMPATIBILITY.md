@@ -1,12 +1,50 @@
-# Codex 0.158.0 compatibility
+# Codex 0.159.2 compatibility
 
 [Behavior](BEHAVIOR.md) · [Capture suite](../src/coordinator/integration/NATIVE_PARITY.md)
 
-The Subscription emulator targets [Codex 0.158.0](https://github.com/openai/codex/releases/tag/rust-v0.158.0),
-source commit `064c6b8c737f5b41d171fdda80bd9ef10ad06eb3`. The release source and official macOS arm64
-CLI are compared with the previous 0.156.0 anchor. API-key bodies and valid WebSocket frames remain transparent.
+The Subscription emulator targets [Codex 0.159.2](https://github.com/openai/codex/releases/tag/rust-v0.159.2),
+source commit `ff6aec96948b70d94983af2641a6b67c94faeff5`. Exact tagged sources and the official macOS
+arm64 CLI/Code Mode host anchor validation. API-key bodies and valid WebSocket frames remain transparent.
 
-## Changes from 0.156.0
+## Changes from 0.158.0
+
+| Native change | Gateway adaptation |
+|---|---|
+| gpt-6.1-sol | Add Lite layout, low effort/verbosity, model-required review metadata, priority support and ultra-to-xhigh mapping. Keep gpt-6-sol's medium default. Eleven catalog models and nine literal instruction fixtures include fallback; fixtures remain test-only. |
+| History-bearing prewarm | Keep the request turn empty while projecting each historical item turn through normal scoped ownership. Retain native Lite setup and historical tool origins; allow same-socket explicit continuation after completed prewarm. |
+| Optional Lite interruption | Admit exact response.interrupt/discard_partial_items only for the active scoped Lite sampling response. Preserve interrupted reason and accept only proved finished output as continuation history, removing matched partial items. Keep the public incomplete terminal and account once. Native automatic steering still requires instant_interrupt. |
+| Usage-window errors | Preserve limit_window_minutes only for usage_limit_reached integers 0..65535 across HTTP rejection, deferred WS rejection and streamed errors. Invalid values are omitted without losing the category; provider text stays private. |
+| Validation anchors | Repin source/CLI/version identity and catalog counts; follow the relocated native failed-response parser. Compare actual CLI direct/API-key/Subscription interruption with both done and discarded output. |
+
+The request/item/tool schemas, UUIDv5 Lite setup, transport dependencies, Rust toolchain,
+OpenSSL 3.6.4 setup, HTTP zstd and WS deflate contracts remain unchanged. Native namespace-summary
+and Guardian evidence text remains caller-owned. Late truncated tool results retain the existing
+metadata/budget/reuse checks; the gateway does not acquire a client execution host.
+
+The interruption exception was selected for this upgrade. Other incomplete reasons, prewarm and
+compaction operations remain ineligible for interruption baselines. Controls require a known
+current response and cannot target another Key, session, thread or socket, or replay a prior control.
+See [completion and recovery](BEHAVIOR.md#completion-and-recovery) for the full contract.
+
+## Validation on 2026-09-29
+
+| Check | Result |
+|---|---|
+| Standard suite | 580 Core tests and eight protocol tests passed; three manual benchmarks ignored. Full Go race tests, vet, clippy, formatting and build policy passed. The shared usage-window fixture also passed Go validation. |
+| Official 0.159.2 loopback | 1,336 verified cases across 96 groups, combining the full matrix with targeted correction runs. The first full run exposed the new model's ultra mapping and one stale ten-model fixture; both were corrected and all affected cases passed. |
+| Release-specific native captures | Six direct/API-key/Subscription interruption cases, six new-model controls/image/Code Mode cases and eight provider metadata opt-in cases passed with race detection. |
+| State integrity | Historical prewarm, late truncated results, original exec attribution and reuse regressions passed. Both context and socket state reject 45 malformed interruption cases; an independent bounded inspection accepted the repairs. |
+| OpenCode | All 20 actual 1.18.29 loopback cases passed against the updated Core. |
+| Fixtures and release | Exact-source regeneration verified eleven catalog models plus fallback in nine prompt files. The macOS arm64 build, both installed checks, anonymous three-file archive metadata and identifying-path scans passed. |
+
+Actual CLI capture established that gpt-6.1-sol uses its catalog's `xhigh` multi-agent
+effort for `ultra`, correcting the assessment's initial `max` expectation. Provider
+opt-in captures verify built-in versus configured OpenAI providers at loopback URLs
+and empty MCP attribution; populated Apps provenance remains covered by synthetic
+projection/budget tests, not an Apps execution host. All new validation was local;
+no live provider, Linux deployment, installed-app replacement or publication was performed.
+
+## Earlier changes from 0.156.0 to 0.158.0
 
 | Native change | Gateway adaptation |
 |---|---|
@@ -76,7 +114,7 @@ gateway decision is a Codex requirement or a separately selected user policy.
 | User-selected isolation | Scoped reversible session/thread/turn/item/response IDs; account-level installation convergence in device mode. | Separates callers and preserves correlation. UUID formats follow native conventions, but the aliasing and convergence policy is gateway-specific. |
 | User-selected continuation | Keep the caller's transport; resolve eligible anonymous histories and referenced continuations; rebuild HTTP full context; expire local history after three business-idle hours. | Supports ordinary clients. These ownership, matching and retention rules extend native client behavior. |
 | User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests, filter public visibility by include; classifier requests keep their native empty include. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
-| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and 0.158.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
+| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and 0.159.2 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
 | Gateway implementation defaults | Pin a Codex TUI identity using the Core runtime; synthesize missing root-agent/timing/analytics metadata and model catalog flags; choose backend Guardian metadata for bare non-reviewer requests. | Supplies a consistent emulated session. Individual fallback values are not all explicit user choices or evidence of the caller's real execution environment. |
 | Gateway implementation mechanisms | Infer omitted turns; suppress additional gateway prewarm/incrementality for callers with Originator; choose bounded storage, admission, retry and timeout mechanisms. | Prevents duplicated client automation and bounds resource use. Exact budgets/mechanisms are implementation choices, distinct from native wire behavior. |
 

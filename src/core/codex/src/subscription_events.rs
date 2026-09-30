@@ -25,18 +25,6 @@ impl ContextStore {
         terminal: Option<bool>,
     ) -> anyhow::Result<()> {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
-        if kind == "response.output_item.done" {
-            anyhow::ensure!(
-                event.get("item").is_some_and(Value::is_object),
-                "invalid completed item"
-            );
-            anyhow::ensure!(
-                event
-                    .get("output_index")
-                    .is_none_or(|i| i.as_u64().and_then(|i| usize::try_from(i).ok()).is_some()),
-                "invalid completed item index"
-            );
-        }
         let is_terminal = terminal.is_some()
             || matches!(
                 kind,
@@ -50,6 +38,7 @@ impl ContextStore {
             .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
         let active = operation.and_then(|operation| inner.operations.get_mut(&operation.0.id));
         let valid = (|| {
+            crate::response_output::validate_done(event)?;
             anyhow::ensure!(
                 operation.is_none()
                     || active.is_some()
@@ -58,13 +47,22 @@ impl ContextStore {
                 "operation already terminated"
             );
             if let Some(active) = active {
-                active
-                    .output_lifecycle
-                    .observe(event, self.limits.output_items)?;
+                active.interruption.observe(event)?;
+                active.output_lifecycle.observe_with_interrupt(
+                    event,
+                    self.limits.output_items,
+                    active.interruption.requested(),
+                )?;
                 if !is_terminal {
                     return Ok(());
                 }
-                if completed {
+                let interrupted = active.interruption.completes(event);
+                if interrupted {
+                    active.output_lifecycle.validate_interrupted(
+                        response,
+                        active.observed_items.iter().map(|(i, item)| (*i, *item)),
+                    )?;
+                } else if completed {
                     active.output_lifecycle.validate_completed(response)?;
                 }
                 if let (Some(previous), Some(id)) = (
@@ -75,6 +73,9 @@ impl ContextStore {
                         previous == id,
                         "response ownership changed during inference"
                     );
+                }
+                if interrupted {
+                    return Ok(());
                 }
                 crate::response_output::validate_terminal(
                     response,
@@ -220,7 +221,10 @@ impl ContextStore {
                 active.output_bytes += size;
             }
         }
-        let completed = terminal
+        let interrupted = active.interruption.completes(event);
+        let completed = interrupted
+            .then_some(true)
+            .or(terminal)
             .or(match kind {
                 "response.completed" => Some(true),
                 "response.failed" | "response.incomplete" | "error" => Some(false),
@@ -266,9 +270,9 @@ impl ContextStore {
         }
         let output: Cow<'_, [Value]> =
             if let Some(output) = crate::response_output::populated(response.get("output")) {
-                for (index, item) in &active.output {
+                for (position, (index, item)) in active.output.iter().enumerate() {
                     if output
-                        .get(*index)
+                        .get(if interrupted { position } else { *index })
                         .is_none_or(|final_item| !completion_items_compatible(item, final_item))
                     {
                         active.output_available = false;
@@ -276,11 +280,12 @@ impl ContextStore {
                     }
                 }
                 Cow::Borrowed(output)
-            } else if active
-                .observed_items
-                .keys()
-                .copied()
-                .eq(0..active.observed_items.len())
+            } else if interrupted
+                || active
+                    .observed_items
+                    .keys()
+                    .copied()
+                    .eq(0..active.observed_items.len())
             {
                 Cow::Owned(active.output.into_values().collect())
             } else {

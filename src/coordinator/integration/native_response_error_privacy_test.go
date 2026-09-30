@@ -18,17 +18,17 @@ import (
 // retryable category because a gateway privacy allowlist forgot it. Derive this oracle from
 // the independent pinned consumer, excluding its unrelated event/metadata cases and tests.
 func TestNativeResponsePrivacyPreservesErrorCategories(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join(nativeSource(t), "codex-rs/codex-api/src/sse/responses.rs"))
+	source, err := os.ReadFile(filepath.Join(nativeSource(t), "codex-rs/codex-api/src/sse/responses_error.rs"))
 	if err != nil {
 		t.Fatal("read pinned native error classifications")
 	}
 	text := string(source)
-	start := strings.Index(text, `"response.failed" =>`)
-	end := strings.Index(text, "#[cfg(test)]\nmod tests {")
+	start := strings.Index(text, "pub(super) fn parse_failed_response(")
+	end := strings.Index(text, "\nfn try_parse_retry_delay(")
 	if start < 0 || end <= start {
 		t.Fatal("native error classification boundary moved")
 	}
-	groups := regexp.MustCompile(`Some\(\s*("[a-z_]+"(?:\s*\|\s*"[a-z_]+")*)\s*\)`)
+	groups := regexp.MustCompile(`Some\(\s*("[a-z_]+"(?:\s*\|\s*"[a-z_]+")*)\s*,?\s*\)`)
 	literal := regexp.MustCompile(`"([a-z_]+)"`)
 	var codes []string
 	for _, group := range groups.FindAllStringSubmatch(text[start:end], -1) {
@@ -38,7 +38,7 @@ func TestNativeResponsePrivacyPreservesErrorCategories(t *testing.T) {
 			}
 		}
 	}
-	if len(codes) < 10 || !slices.Contains(codes, "invalid_prompt") {
+	if len(codes) < 13 || !slices.Contains(codes, "invalid_prompt") || !slices.Contains(codes, "project_spend_limit_exceeded") {
 		t.Fatal("native error oracle lost classifications")
 	}
 	slices.Sort(codes)

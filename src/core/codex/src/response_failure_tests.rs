@@ -24,7 +24,7 @@ async fn http_flex_category_is_bounded_private_and_subscription_only() {
             let response = reqwest::Client::builder().no_proxy().build().unwrap()
                 .get(&upstream.base_url).send().await.unwrap();
             let profile = if subscription {
-                crate::request_profile::UpstreamProfile::CodexSubscription1580
+                crate::request_profile::UpstreamProfile::CodexSubscription1592
             } else {
                 crate::request_profile::UpstreamProfile::ApiKeyPassthrough
             };
@@ -144,7 +144,7 @@ async fn non_streaming_flex_event_finishes_without_waiting_for_eof() {
             response,
             0,
             false,
-            crate::request_profile::UpstreamProfile::CodexSubscription1580,
+            crate::request_profile::UpstreamProfile::CodexSubscription1592,
             None,
             "synthetic-request",
         ),

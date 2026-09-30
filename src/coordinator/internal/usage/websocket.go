@@ -11,6 +11,7 @@ type WebSocketEvent struct {
 	Usage               *storage.TokenUsage
 	ResponseID          string
 	ExpectsFailedFooter bool
+	Interrupted         bool
 }
 
 func ParseWebSocketEvent(data []byte) (WebSocketEvent, bool) {
@@ -30,9 +31,19 @@ func ParseWebSocketEvent(data []byte) (WebSocketEvent, bool) {
 	}
 	event := WebSocketEvent{Type: envelope.Type}
 	var response struct {
-		ID json.RawMessage `json:"id"`
+		ID                json.RawMessage `json:"id"`
+		Status            json.RawMessage `json:"status"`
+		IncompleteDetails json.RawMessage `json:"incomplete_details"`
 	}
 	_ = json.Unmarshal(envelope.Response, &response)
+	if event.Type == "response.incomplete" {
+		var details struct {
+			Reason string `json:"reason"`
+		}
+		var status string
+		statusValid := len(response.Status) == 0 || (json.Unmarshal(response.Status, &status) == nil && status == "incomplete")
+		event.Interrupted = statusValid && json.Unmarshal(response.IncompleteDetails, &details) == nil && details.Reason == "interrupted"
+	}
 	id := response.ID
 	if len(id) == 0 {
 		id = envelope.ResponseID

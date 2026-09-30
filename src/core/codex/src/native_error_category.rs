@@ -1,4 +1,4 @@
-//! Fixed native error categories; no upstream messages or extensions are retained.
+//! Fixed native categories with bounded usage-window metadata; no provider text.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum NativeErrorCategory {
     ServerOverloaded,
@@ -6,7 +6,7 @@ pub(crate) enum NativeErrorCategory {
     MisalignmentPolicy,
     CyberPolicy,
     BioPolicy,
-    UsageLimitReached,
+    UsageLimitReached(Option<u16>),
     UsageNotIncluded,
     QuotaExceeded,
 }
@@ -19,7 +19,7 @@ impl NativeErrorCategory {
             Self::MisalignmentPolicy => "misalignment_policy_violation",
             Self::CyberPolicy => "cyber_policy",
             Self::BioPolicy => "bio_policy",
-            Self::UsageLimitReached => "usage_limit_reached",
+            Self::UsageLimitReached(_) => "usage_limit_reached",
             Self::UsageNotIncluded => "usage_not_included",
             Self::QuotaExceeded => "insufficient_quota",
         }
@@ -27,9 +27,16 @@ impl NativeErrorCategory {
 
     pub(crate) fn error_type(self) -> Option<&'static str> {
         match self {
-            Self::UsageLimitReached | Self::UsageNotIncluded | Self::QuotaExceeded => {
+            Self::UsageLimitReached(_) | Self::UsageNotIncluded | Self::QuotaExceeded => {
                 Some(self.code())
             }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn limit_window_minutes(self) -> Option<u16> {
+        match self {
+            Self::UsageLimitReached(minutes) => minutes,
             _ => None,
         }
     }
@@ -41,7 +48,7 @@ impl NativeErrorCategory {
             Self::MisalignmentPolicy | Self::CyberPolicy | Self::BioPolicy => {
                 "The upstream service rejected the request under its policy."
             }
-            Self::UsageLimitReached => "The upstream usage limit has been reached.",
+            Self::UsageLimitReached(_) => "The upstream usage limit has been reached.",
             Self::UsageNotIncluded => "The selected credential does not include this usage.",
             Self::QuotaExceeded => "The upstream quota has been exhausted.",
         }

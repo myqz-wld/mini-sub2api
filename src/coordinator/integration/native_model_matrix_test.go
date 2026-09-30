@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,113 @@ import (
 	"reflect"
 	"testing"
 )
+
+// Exercise the new catalog profile through the real CLI and matching Code Mode host.
+// Images and tool output remain synthetic; all inference/auth endpoints are loopback.
+func TestNativeSol61ControlsImageAndCodeModeLoop(t *testing.T) {
+	const imageURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	for _, ws := range []bool{false, true} {
+		for _, route := range []string{"direct", "api-key", "subscription"} {
+			t.Run(fmt.Sprintf("ws=%t/%s", ws, route), func(t *testing.T) {
+				capture := newNativeCapture(t)
+				capture.mu.Lock()
+				capture.codeModeLoop = true
+				capture.mu.Unlock()
+				endpoint, bearer := capture.server.URL, ""
+				var gateway nativeGateway
+				if route != "direct" {
+					gateway = newNativeGateway(t, endpoint, route == "subscription")
+					endpoint, bearer = gateway.server.URL, gateway.secret
+				}
+				calls := 0
+				options := nativeOptions{endpoint: endpoint, bearer: bearer, model: "gpt-6.1-sol", ws: ws,
+					base: "Synthetic Sol 6.1 image and code-mode probe.",
+					configOverrides: map[string]string{
+						"features.code_mode": "true", "features.code_mode_host": "true", "model_reasoning_effort": `"ultra"`,
+					},
+					threadParams: map[string]any{"serviceTier": "priority"},
+					observe: func(event map[string]any) {
+						if event["method"] == "item/tool/call" {
+							calls++
+						}
+					},
+				}
+				client := startNativeClient(t, options)
+				thread := client.thread(options)
+				client.turnWith(thread, map[string]any{"input": []any{
+					map[string]any{"type": "text", "text": "Run the synthetic nested probe."},
+					map[string]any{"type": "image", "url": imageURL},
+				}})
+				client.turn(thread, "Next synthetic Sol 6.1 turn.")
+				wires := capture.snapshot()
+				business := businessWires(wires)
+				if calls != 1 || len(business) != 3 {
+					t.Fatalf("Sol 6.1 loop count differs: callbacks=%d requests=%d", calls, len(business))
+				}
+				for _, wire := range business {
+					reasoning, _ := wire.value["reasoning"].(map[string]any)
+					text, _ := wire.value["text"].(map[string]any)
+					for _, field := range []struct {
+						name             string
+						actual, expected any
+					}{
+						{"reasoning.effort", reasoning["effort"], "xhigh"},
+						{"reasoning.context", reasoning["context"], "all_turns"},
+						{"reasoning.summary", reasoning["summary"], nil},
+						{"text.verbosity", text["verbosity"], "low"},
+						{"parallel_tool_calls", wire.value["parallel_tool_calls"], false},
+						{"service_tier", wire.value["service_tier"], "priority"},
+					} {
+						if field.actual != field.expected {
+							t.Fatalf("Sol 6.1 selected field %s: got %v, want %v", field.name, field.actual, field.expected)
+						}
+					}
+					if len(finalTools(wire.value)) > 0 {
+						assertNativeLiteIDs(t, wire)
+					}
+				}
+				imageFound, outputFound := false, false
+				for _, wire := range business[:2] {
+					for _, raw := range wire.value["input"].([]any) {
+						item := raw.(map[string]any)
+						if item["type"] == "custom_tool_call_output" {
+							output, _ := json.Marshal(item["output"])
+							outputFound = bytes.Contains(output, []byte("synthetic tool result"))
+						}
+						content, _ := item["content"].([]any)
+						for _, raw := range content {
+							part := raw.(map[string]any)
+							if part["type"] == "input_image" {
+								if part["image_url"] != imageURL || part["detail"] != nil {
+									t.Fatal("Sol 6.1 Lite image content or detail changed")
+								}
+								imageFound = true
+							}
+						}
+					}
+				}
+				if !imageFound || !outputFound {
+					t.Fatal("Sol 6.1 image or actual nested callback result absent")
+				}
+				if route != "direct" {
+					packets := gateway.tap.packets(t)
+					if len(packets) != len(wires) {
+						t.Fatal("Sol 6.1 gateway changed request count")
+					}
+					for i, wire := range wires {
+						if route == "api-key" {
+							if !bytes.Equal(packets[i].payload, wire.encodedBody) {
+								t.Fatal("API-key Sol 6.1 request changed")
+							}
+						} else {
+							assertNativeMessageParity(t, packets[i], wire)
+						}
+					}
+				}
+			})
+		}
+	}
+}
 
 func capturedBase(t *testing.T, wire nativeWire) string {
 	t.Helper()
@@ -44,7 +152,7 @@ func TestNativeAllCatalogModelDefaults(t *testing.T) {
 			Slug string `json:"slug"`
 		} `json:"models"`
 	}
-	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 10 {
+	if json.Unmarshal(data, &catalog) != nil || len(catalog.Models) != 11 {
 		t.Fatal("pinned catalog shape")
 	}
 	// A removed catalog slug must use native fallback settings, not stale 0.156.0 defaults.
@@ -153,7 +261,7 @@ func TestNativeLitePrefixContentAndThreadDimensions(t *testing.T) {
 					t.Fatal("native thread did not namespace prefix ID")
 				}
 			}
-			// v0.158.0 requires a persisted source rollout for fork/resume. Assert this
+			// v0.159.2 requires a persisted source rollout for fork/resume. Assert this
 			// boundary explicitly; native ephemeral tests never create transcript fixtures.
 			client.callExpect("thread/fork", map[string]any{"threadId": thread, "ephemeral": true}, -32600)
 			options.base = "基础 {{literal}}\n"

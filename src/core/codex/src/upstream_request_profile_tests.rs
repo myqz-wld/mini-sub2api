@@ -24,7 +24,7 @@ fn guardian_headers_survive_http_and_websocket_without_crossing_response_privacy
         &headers,
         "http://127.0.0.1:1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         Bytes::from_static(b"{}"),
     )
     .unwrap();
@@ -32,7 +32,7 @@ fn guardian_headers_survive_http_and_websocket_without_crossing_response_privacy
         &headers,
         "http://127.0.0.1:1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         1024,
     )
     .unwrap();
@@ -86,7 +86,7 @@ fn guardian_reviewer_uses_native_01580_late_header_merge_order() {
         &headers,
         "http://127.0.0.1:1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         Bytes::from_static(b"{}"),
     )
     .unwrap();
@@ -102,7 +102,7 @@ fn guardian_reviewer_uses_native_01580_late_header_merge_order() {
         &headers,
         "http://127.0.0.1:1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         4096,
     )
     .unwrap();
@@ -158,7 +158,7 @@ fn originator_profile_cannot_promote_an_api_key_to_subscription_auth() {
         &HeaderMap::new(),
         "https://example.test/v1/responses",
         &auth,
-        UpstreamProfile::CodexSubscription1580,
+        UpstreamProfile::CodexSubscription1592,
         Bytes::from_static(br#"{"model":"offline"}"#),
     );
 

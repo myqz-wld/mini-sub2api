@@ -1,8 +1,7 @@
-# These compatibility prompts are byte-exact copies from Codex 0.153.4 and intentionally retain
-# upstream line endings and trailing spaces protected by SHA-256 tests.
-src/core/codex/prompts/codex-0.153.4/gpt-*.md whitespace=-trailing-space
-src/core/codex/prompts/codex-0.153.4/fallback.md whitespace=-trailing-space
-src/core/codex/prompts/codex-0.153.4/exp-codex-personality.md whitespace=-trailing-space
+# Compatibility prompt snapshots retain byte-exact upstream whitespace, including trailing
+# spaces and final blank lines. Source regeneration and SHA-256 tests protect these bytes.
+src/core/codex/prompts/codex-*/gpt-*.md -whitespace
+src/core/codex/prompts/codex-*/fallback.md -whitespace
 
 # Private local instructions must also stay out of git-archive exports if explicitly added later.
 AGENTS.override.md export-ignore

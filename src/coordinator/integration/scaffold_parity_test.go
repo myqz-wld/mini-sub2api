@@ -125,7 +125,7 @@ func assertScaffoldContinuation(t *testing.T, wires []nativeWire, toolFollowup b
 // Compare its business fields using the declared ordinary conversion rules, without erasing text.
 func assertScaffoldMessageParity(t *testing.T, packet nativePacket, wire nativeWire) {
 	t.Helper()
-	if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.158.0" {
+	if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.159.2" {
 		t.Fatal("scaffold Subscription upstream client identity changed")
 	}
 	metadata, _ := wire.value["client_metadata"].(map[string]any)

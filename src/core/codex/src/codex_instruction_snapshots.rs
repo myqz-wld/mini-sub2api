@@ -1,17 +1,19 @@
 //! Pinned native instruction fixtures; never linked into production request normalization.
-const GPT_6_ASTRA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.158.0/gpt-6-astra.md");
-const GPT_6_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.158.0/gpt-6-sol.md");
-const GPT_6_LUNA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.158.0/gpt-6-luna.md");
+const GPT_6_ASTRA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6-astra.md");
+const GPT_6_1_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6.1-sol.md");
+const GPT_6_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6-sol.md");
+const GPT_6_LUNA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6-luna.md");
 const DAYBREAK_BLUE_INSTRUCTIONS: &str =
-    include_str!("../prompts/codex-0.158.0/gpt-daybreak-blue.md");
+    include_str!("../prompts/codex-0.159.2/gpt-daybreak-blue.md");
 const DAYBREAK_RED_INSTRUCTIONS: &str =
-    include_str!("../prompts/codex-0.158.0/gpt-daybreak-red.md");
-const GPT_5_6_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.158.0/gpt-5.6.md");
-const GPT_5_5_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.158.0/gpt-5.5.md");
-const FALLBACK_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.158.0/fallback.md");
+    include_str!("../prompts/codex-0.159.2/gpt-daybreak-red.md");
+const GPT_5_6_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-5.6.md");
+const GPT_5_5_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-5.5.md");
+const FALLBACK_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/fallback.md");
 
 const MODEL_INSTRUCTIONS: &[(&str, &str)] = &[
     ("gpt-6-astra", GPT_6_ASTRA_INSTRUCTIONS),
+    ("gpt-6.1-sol", GPT_6_1_SOL_INSTRUCTIONS),
     ("gpt-6-sol", GPT_6_SOL_INSTRUCTIONS),
     ("gpt-6-luna", GPT_6_LUNA_INSTRUCTIONS),
     ("gpt-daybreak-blue-latest", DAYBREAK_BLUE_INSTRUCTIONS),
@@ -58,11 +60,17 @@ mod tests {
 
     #[test]
     fn model_lookup_matches_catalog_prefix_and_namespace_rules() {
-        assert_eq!(MODEL_INSTRUCTIONS.len(), 10);
+        assert_eq!(MODEL_INSTRUCTIONS.len(), 11);
         for (model, instructions) in MODEL_INSTRUCTIONS {
             assert_eq!(for_model(model), *instructions, "catalog model {model}");
         }
         assert_eq!(for_model("gpt-5.6-sol"), GPT_5_6_INSTRUCTIONS);
+        assert_eq!(for_model("gpt-6.1-sol-preview"), GPT_6_1_SOL_INSTRUCTIONS);
+        assert_eq!(
+            for_model("vendor/gpt-6.1-sol-preview"),
+            GPT_6_1_SOL_INSTRUCTIONS
+        );
+        assert_ne!(GPT_6_1_SOL_INSTRUCTIONS, GPT_6_SOL_INSTRUCTIONS);
         assert_eq!(for_model("gpt-5.6-terra-preview"), GPT_5_6_INSTRUCTIONS);
         assert_eq!(
             for_model("vendor/gpt-5.4-mini-preview"),
@@ -72,6 +80,9 @@ mod tests {
         assert_eq!(for_model("exp-codex-personality"), FALLBACK_INSTRUCTIONS);
         for model in [
             "vendor/group/gpt-5.6-sol",
+            "vendor/group/gpt-6.1-sol",
+            "vendor!/gpt-6.1-sol",
+            "/gpt-6.1-sol",
             "vendor!/gpt-5.4",
             "future-model",
         ] {
@@ -95,7 +106,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_prompt_hashes_match_codex_01580_effective_defaults() {
+    fn bundled_prompt_hashes_match_codex_01592_effective_defaults() {
         for (prompt, expected) in [
             (
                 GPT_6_ASTRA_INSTRUCTIONS,
@@ -116,6 +127,10 @@ mod tests {
             (
                 GPT_5_5_INSTRUCTIONS,
                 "2351631dfc5644dc5a45eaaca4139475bd02810ee6cb792d058b551559b3242e",
+            ),
+            (
+                GPT_6_1_SOL_INSTRUCTIONS,
+                "e1bdd4f8f0df4b20f4a0ffc8a861ce819df45325d8cecdfb92e80379cf8d142e",
             ),
             (
                 GPT_6_SOL_INSTRUCTIONS,

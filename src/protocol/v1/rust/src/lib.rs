@@ -139,6 +139,8 @@ pub struct CoreError {
     pub code: String,
     pub message: String,
     pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_window_minutes: Option<u16>,
     #[serde(flatten)]
     pub failure: FailureMetadata,
 }
@@ -184,6 +186,7 @@ mod tests {
                 code: "credential_requires_login".to_string(),
                 message: "The selected credential requires sign-in.".to_string(),
                 request_id: "req_01JEXAMPLE".to_string(),
+                limit_window_minutes: None,
                 failure: FailureMetadata {
                     retry_advice: RetryAdvice::Never,
                     phase: FailurePhase::Credential,
@@ -193,6 +196,39 @@ mod tests {
         };
         assert_eq!(got, want);
         assert!(got.error.failure.is_valid());
+    }
+
+    #[test]
+    fn usage_window_error_fixture_matches_contract() {
+        let fixture = include_str!("../../fixtures/usage_window_error.json");
+        let mut value: serde_json::Value = serde_json::from_str(fixture).unwrap();
+        let got: ErrorEnvelope = serde_json::from_str(fixture).unwrap();
+        assert_eq!(got.error.code, "usage_limit_reached");
+        assert_eq!(got.error.limit_window_minutes, Some(300));
+        assert!(got.error.failure.is_valid());
+        assert_eq!(serde_json::to_value(&got).unwrap(), value);
+
+        for minutes in [0, 65535] {
+            value["error"]["limitWindowMinutes"] = minutes.into();
+            let got: ErrorEnvelope = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(got.error.limit_window_minutes, Some(minutes as u16));
+        }
+        for invalid in [
+            serde_json::json!(-1),
+            serde_json::json!(65536),
+            serde_json::json!(1.5),
+            serde_json::json!("300"),
+        ] {
+            value["error"]["limitWindowMinutes"] = invalid;
+            assert!(serde_json::from_value::<ErrorEnvelope>(value.clone()).is_err());
+        }
+        value["error"]
+            .as_object_mut()
+            .unwrap()
+            .remove("limitWindowMinutes");
+        let got: ErrorEnvelope = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(got.error.limit_window_minutes, None);
+        assert_eq!(serde_json::to_value(&got).unwrap(), value);
     }
 
     #[test]

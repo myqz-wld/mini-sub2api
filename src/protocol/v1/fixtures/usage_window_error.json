@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "usage_limit_reached",
+    "message": "The upstream usage limit has been reached.",
+    "requestId": "req_01JEXAMPLE",
+    "limitWindowMinutes": 300,
+    "retryAdvice": "never",
+    "phase": "upstream_response",
+    "deliveryState": "delivered"
+  }
+}

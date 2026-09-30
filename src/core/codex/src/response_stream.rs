@@ -256,6 +256,7 @@ fn normalized_upstream_failure(
     let envelope = ErrorEnvelope {
         error: mini_sub2api_protocol_v1::CoreError {
             code: failure.code().to_string(),
+            limit_window_minutes: failure.limit_window_minutes(),
             message: failure.public_message().to_string(),
             request_id: gateway_request_id.to_string(),
             failure: failure.failure(),

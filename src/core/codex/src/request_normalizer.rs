@@ -69,7 +69,7 @@ struct InvalidStatefulProjection {
     source: anyhow::Error,
 }
 
-/// Applies the Codex 0.158.0 request overlay selected by `upstream_profile`.
+/// Applies the Codex 0.159.2 request overlay selected by `upstream_profile`.
 ///
 /// The caller object is cloned in full before the supported request-field allowlist and targeted
 /// normalization are applied. `ApiKeyPassthrough` is deliberately rejected: callers must retain its
@@ -479,3 +479,7 @@ mod state_tests;
 #[cfg(test)]
 #[path = "request_normalizer_history_tests.rs"]
 mod history_tests;
+
+#[cfg(test)]
+#[path = "request_normalizer_prewarm_history_tests.rs"]
+mod prewarm_history_tests;

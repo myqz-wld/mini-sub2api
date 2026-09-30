@@ -1,7 +1,7 @@
 //! Bounded identities of started output items; never retain partial content or argument bodies.
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 type Fingerprint = [u8; 32];
 
@@ -53,6 +53,10 @@ fn fingerprint(value: Option<&Value>) -> Option<Fingerprint> {
 pub(crate) struct OutputLifecycle {
     pending: BTreeMap<Locator, Identity>,
     by_id: BTreeMap<Fingerprint, Locator>,
+    finished: BTreeMap<Locator, Identity>,
+    finished_ids: BTreeSet<Fingerprint>,
+    discarded: BTreeMap<Locator, Identity>,
+    discarded_ids: BTreeSet<Fingerprint>,
     unverified: bool,
 }
 
@@ -78,6 +82,15 @@ impl OutputLifecycle {
     }
 
     pub(crate) fn observe(&mut self, event: &Value, maximum: usize) -> anyhow::Result<()> {
+        self.observe_with_interrupt(event, maximum, false)
+    }
+
+    pub(crate) fn observe_with_interrupt(
+        &mut self,
+        event: &Value,
+        maximum: usize,
+        interrupt_requested: bool,
+    ) -> anyhow::Result<()> {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
         if matches!(kind, "response.created" | "response.in_progress") {
             if let Some(items) = event.pointer("/response/output").and_then(Value::as_array) {
@@ -114,8 +127,11 @@ impl OutputLifecycle {
                 kind: None,
             }
         };
-        if kind == "response.output_item.done" && !unfinished(&event["item"]) {
-            self.finish(index, identity)
+        if kind == "response.output_item.interrupted" {
+            anyhow::ensure!(interrupt_requested, "unsolicited output interruption");
+            self.discard(index, identity)
+        } else if kind == "response.output_item.done" && !unfinished(&event["item"]) {
+            self.finish(index, identity, maximum)
         } else {
             self.start(index, identity, maximum)
         }
@@ -147,6 +163,7 @@ impl OutputLifecycle {
             self.unverified = true;
             return Ok(());
         };
+        self.ensure_not_discarded(key, identity)?;
         if let Some(previous) = self
             .existing_id(identity)
             .filter(|previous| *previous != key)
@@ -157,7 +174,7 @@ impl OutputLifecycle {
         if let Some(previous) = self.pending.get_mut(&key) {
             previous.merge(identity)?;
             identity = *previous;
-        } else if self.pending.len() < maximum {
+        } else if self.pending.len() + self.discarded.len() + self.finished.len() < maximum {
             self.pending.insert(key, identity);
         } else {
             // A bounded proof cannot silently forget a pending item and later authorize success.
@@ -170,10 +187,16 @@ impl OutputLifecycle {
         Ok(())
     }
 
-    fn finish(&mut self, index: Option<usize>, identity: Identity) -> anyhow::Result<()> {
+    fn finish(
+        &mut self,
+        index: Option<usize>,
+        mut identity: Identity,
+        maximum: usize,
+    ) -> anyhow::Result<()> {
         let Some(key) = self.locate(index, identity)? else {
             return Ok(());
         };
+        self.ensure_not_discarded(key, identity)?;
         let other = self.existing_id(identity).filter(|other| *other != key);
         for key in [Some(key), other].into_iter().flatten() {
             if let Some(previous) = self.pending.get(&key) {
@@ -189,10 +212,107 @@ impl OutputLifecycle {
                 self.by_id.remove(&id);
             }
         }
+        if let Some(previous) = self.finished.get_mut(&key) {
+            previous.merge(identity)?;
+            identity = *previous;
+        } else if self.pending.len() + self.discarded.len() + self.finished.len() < maximum {
+            self.finished.insert(key, identity);
+        } else {
+            self.unverified = true;
+            return Ok(());
+        }
+        if let Some(id) = identity.id {
+            self.finished_ids.insert(id);
+        }
         Ok(())
     }
 
+    fn ensure_not_discarded(&self, key: Locator, identity: Identity) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.discarded.contains_key(&key)
+                && !identity
+                    .id
+                    .is_some_and(|id| self.discarded_ids.contains(&id)),
+            "discarded output item reappeared"
+        );
+        Ok(())
+    }
+
+    fn discard(&mut self, index: Option<usize>, identity: Identity) -> anyhow::Result<()> {
+        let key = self
+            .locate(index, identity)?
+            .ok_or_else(|| anyhow::anyhow!("interrupted output has no identity"))?;
+        self.ensure_not_discarded(key, identity)?;
+        anyhow::ensure!(
+            !self.finished.contains_key(&key)
+                && !identity
+                    .id
+                    .is_some_and(|id| self.finished_ids.contains(&id)),
+            "interrupted output was already completed"
+        );
+        let pending_key = if self.pending.contains_key(&key) {
+            key
+        } else {
+            self.existing_id(identity).unwrap_or(key)
+        };
+        let previous = self
+            .pending
+            .get(&pending_key)
+            .ok_or_else(|| anyhow::anyhow!("interrupted output was not pending"))?;
+        anyhow::ensure!(
+            previous.id.is_none_or(|id| identity.id == Some(id)),
+            "interrupted output identity changed"
+        );
+        let mut previous = self.pending.remove(&pending_key).expect("checked pending");
+        previous.merge(identity)?;
+        if let Some(id) = previous.id {
+            self.by_id.remove(&id);
+            self.discarded_ids.insert(id);
+        }
+        self.discarded.insert(key, previous);
+        Ok(())
+    }
+
+    pub(crate) fn validate_interrupted(
+        &self,
+        response: &Value,
+        observed: impl Iterator<Item = (usize, super::CompletionFingerprint)>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.unverified && self.pending.is_empty(),
+            "interrupted response contains unresolved output"
+        );
+        let observed: Vec<_> = observed.collect();
+        anyhow::ensure!(
+            observed
+                .iter()
+                .all(|(index, _)| !self.discarded.contains_key(&Locator::Index(*index))),
+            "interrupted output overlaps a completed item"
+        );
+        let observed: Vec<_> = observed
+            .into_iter()
+            .map(|(_, item)| item)
+            .enumerate()
+            .collect();
+        if let Some(output) = super::populated(response.get("output")) {
+            anyhow::ensure!(
+                output.len() == observed.len() && output.iter().all(|item| !unfinished(item)),
+                "interrupted footer contains unproven output"
+            );
+            anyhow::ensure!(
+                output.iter().all(|item| !fingerprint(item.get("id"))
+                    .is_some_and(|id| self.discarded_ids.contains(&id))),
+                "interrupted footer revives discarded output"
+            );
+        }
+        super::validate_terminal(response, observed.into_iter(), true)
+    }
+
     pub(crate) fn validate_completed(&self, response: &Value) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.discarded.is_empty(),
+            "completed response discarded output"
+        );
         super::validate_terminal(response, std::iter::empty(), true)?;
         anyhow::ensure!(
             !self.unverified,
@@ -255,11 +375,12 @@ impl OutputLifecycle {
     }
 
     pub(crate) fn retained_bytes(&self) -> usize {
-        self.pending.len() * 192 + self.by_id.len() * 128
+        (self.pending.len() + self.discarded.len() + self.finished.len()) * 192
+            + (self.by_id.len() + self.discarded_ids.len() + self.finished_ids.len()) * 128
     }
 }
 
-fn unfinished(item: &Value) -> bool {
+pub(super) fn unfinished(item: &Value) -> bool {
     matches!(
         item.get("status").and_then(Value::as_str),
         Some("in_progress" | "incomplete" | "queued" | "searching" | "generating" | "interpreting")

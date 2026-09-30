@@ -6,6 +6,30 @@ fn item(id: &str) -> Value {
 }
 
 #[test]
+fn discard_learns_an_id_without_blocking_unrelated_completed_output() {
+    let mut lifecycle = OutputLifecycle::default();
+    for event in [
+        json!({"type":"response.output_text.delta","output_index":0,"delta":"partial"}),
+        json!({"type":"response.output_item.interrupted","output_index":0,"item_id":"msg_discarded"}),
+        json!({"type":"response.output_item.done","output_index":1,"item":item("msg_kept")}),
+    ] {
+        lifecycle.observe_with_interrupt(&event, 2, true).unwrap();
+    }
+    lifecycle
+        .validate_interrupted(
+            &json!({"output":[item("msg_kept")]}),
+            [(
+                1,
+                super::super::CompletionFingerprint::new(&item("msg_kept")),
+            )]
+            .into_iter(),
+        )
+        .unwrap();
+    assert_eq!(lifecycle.discarded_ids.len(), 1);
+    assert!(lifecycle.retained_bytes() <= 640);
+}
+
+#[test]
 fn every_partial_output_carrier_requires_completion_evidence() {
     for kind in [
         "response.output_text.delta",

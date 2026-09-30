@@ -31,7 +31,7 @@ pub(super) fn complete_turn_metadata(raw: &str, generated: &str) -> Option<Strin
     if existing.get("request_kind").and_then(Value::as_str) == Some("memory") {
         return encode_reordered(existing, None);
     }
-    // Codex 0.158.0 deliberately emits startup prewarm metadata with an empty turn ID and without
+    // Codex 0.159.2 deliberately emits startup prewarm metadata with an empty turn ID and without
     // root-turn or turn-start fields. That native shape is complete and must remain byte-stable.
     if is_complete_native_prewarm_metadata(existing) {
         return encode_reordered(existing, None);
