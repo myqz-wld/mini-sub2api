@@ -322,6 +322,7 @@ WS failure permanently retires the physical stream before releasing its operatio
 non-flex error permits up to one second of read-only tail processing; a matching `response.failed`
 may contribute usage once. No new create is admitted during or after that window. The matching
 footer, deadline or EOF closes the public and upstream sockets with delivered/never-retry evidence.
+Failure-tail accounting finishes before the public close handshake can wait for a client ACK.
 Numeric-status errors, flex errors and failed terminals close after forwarding the terminal frame.
 Other incomplete terminals also retire the stream; validated requested interruption remains eligible
 for its documented continuation. New work needs a fresh connection and complete-history admission;

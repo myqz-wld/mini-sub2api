@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -9,6 +10,34 @@ import (
 	"github.com/coder/websocket"
 	"mini-sub2api/src/coordinator/internal/storage"
 )
+
+func TestWebSocketFailureHistoryDoesNotWaitForDownstreamClose(t *testing.T) {
+	for _, subscription := range []bool{false, true} {
+		t.Run(failureTailRoute(subscription), func(t *testing.T) {
+			closeUpstream := make(chan struct{})
+			release := sync.OnceFunc(func() { close(closeUpstream) })
+			fixture := newResponsesProfileWebSocketFixtureWithResponder(t, func(c *websocket.Conn, _ []byte, id string) {
+				writeFailureTailEvent(c, "response.created", id, 0)
+				writeFailureTailEvent(c, "error", "", 0)
+				<-closeUpstream
+				_ = c.CloseNow()
+			})
+			t.Cleanup(release)
+			c, keyID := dialFailureTail(t, fixture, subscription)
+			defer c.CloseNow()
+			writeE2EWebSocketText(t, c, failureTailCreate)
+			readFailureTailEvent(t, c, "response.created")
+			readFailureTailEvent(t, c, "error")
+			release()
+			// Do not read the close frame yet: accounting must not wait for its ACK.
+			history := waitForFailureTailHistory(t, fixture.store, keyID, 1)
+			if history[0].Status != storage.RequestUpstreamErr || history[0].Usage != nil {
+				t.Fatal("error-only history lost its status or invented usage")
+			}
+			assertFailureTailClose(t, c)
+		})
+	}
+}
 
 func TestWebSocketFailureRetiresBeforeAnotherCreate(t *testing.T) {
 	for _, subscription := range []bool{false, true} {

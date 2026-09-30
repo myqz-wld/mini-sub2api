@@ -33,6 +33,7 @@ For the Codex CLI, follow the [client setup](docs/OPERATIONS.md#codex-client).
 After a failed WebSocket response, open a new connection for subsequent work.
 The gateway retires the failed stream and never automatically replays its request;
 a matching failure footer may supply usage for up to one second before closure.
+Failure-tail accounting does not wait for the client to acknowledge closure.
 
 ```bash
 curl --no-buffer http://127.0.0.1:8787/v1/responses \

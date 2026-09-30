@@ -85,6 +85,14 @@ func (s *websocketSession) takeFailedOperation() *websocketOperation {
 	return operation
 }
 
+func (s *websocketSession) finishFailedOperation() {
+	// A peer that stops reading must not delay failed-request accounting while
+	// the WebSocket close handshake waits for its acknowledgement.
+	if failed := s.takeFailedOperation(); failed != nil {
+		s.finishOperation(failed, storage.RequestUpstreamErr)
+	}
+}
+
 func (s *websocketSession) expireFailureTail() {
 	s.mu.Lock()
 	var operation *websocketOperation

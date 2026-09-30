@@ -166,6 +166,7 @@ func (s *websocketSession) finishSession(result websocketPumpResult) {
 	if s.stopping.Load() {
 		status = storage.RequestUpstreamErr
 	} else if status == storage.RequestUpstreamErr {
+		s.finishFailedOperation()
 		s.closePublicForCoreFailure(result)
 	}
 	s.cancel()
@@ -347,9 +348,7 @@ func (s *websocketSession) finishActive(status string) {
 	if operation := s.takeActive(); operation != nil {
 		s.finishOperation(operation, status)
 	}
-	if failed := s.takeFailedOperation(); failed != nil {
-		s.finishOperation(failed, storage.RequestUpstreamErr)
-	}
+	s.finishFailedOperation()
 }
 
 func (s *websocketSession) takeActive() *websocketOperation {
