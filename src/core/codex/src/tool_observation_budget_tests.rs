@@ -144,3 +144,64 @@ fn malformed_optional_calls_are_removed_without_panicking_or_losing_business_out
         }
     }
 }
+
+#[test]
+fn extended_marker_payload_obeys_actual_argument_limit() {
+    let mut failures = 0;
+    for extra in ["x".repeat(9000), "界".repeat(3000), "🦀".repeat(2250)] {
+        let args = json!({TRUNCATED:{"original_bytes":10000,"max_bytes":8192,"extra":extra}});
+        let mut request = json!({"input":[output("probe","cell",args,json!({}))]});
+        prompt(&mut request);
+        message(&mut request);
+        let actual = size(&request["input"][0][META][CALLS][0]["arguments"]);
+        assert_eq!(request["input"][0]["output"], "business-output");
+        assert!(request["input"][0][META].get(COMPLETE).is_none());
+        failures += usize::from(actual > ARGUMENT_BYTES);
+    }
+    assert_eq!(
+        failures, 0,
+        "recognized extended marker bypasses final argument bound"
+    );
+}
+
+#[test]
+fn argument_boundary_controls() {
+    for length in [8191, 8192, 8193] {
+        let mut request =
+            json!({"input":[output("probe","cell",json!("x".repeat(length-2)),json!({}))]});
+        prompt(&mut request);
+        message(&mut request);
+        assert!(size(&request["input"][0][META][CALLS][0]["arguments"]) <= ARGUMENT_BYTES);
+        assert_eq!(request["input"][0]["output"], "business-output");
+    }
+    let args = marker(10000, 8192, None, None);
+    let mut request = json!({"input":[output("probe","cell",args.clone(),json!({}))]});
+    prompt(&mut request);
+    assert_eq!(request["input"][0][META][CALLS][0]["arguments"], args);
+}
+
+#[test]
+fn final_argument_limit_covers_marker_integer_edges_and_outer_payloads() {
+    for integer in [
+        json!(0),
+        json!(u64::MAX),
+        json!(-1),
+        serde_json::from_str::<Value>("18446744073709551616").unwrap(),
+    ] {
+        for outer_payload in [false, true] {
+            let mut args = json!({TRUNCATED:{"original_bytes":integer,"max_bytes":integer,"extra":"x".repeat(9000)}});
+            if outer_payload {
+                args["payload"] = "y".repeat(9000).into();
+            }
+            for reducer in [prompt, message] {
+                let mut request =
+                    json!({"input":[output("bounded","cell",args.clone(),json!({}))]});
+                let losses = reducer(&mut request);
+                assert!(!losses.is_empty());
+                assert!(size(&request["input"][0][META][CALLS][0]["arguments"]) <= ARGUMENT_BYTES);
+                assert!(request["input"][0][META].get(COMPLETE).is_none());
+                assert_eq!(request["input"][0]["output"], "business-output");
+            }
+        }
+    }
+}

@@ -309,9 +309,11 @@ Subscription upgrades internally first, then connects upstream from the first no
   cannot become the original public HTTP rejection; API-key keeps pre-upgrade bounded HTTP rejection.
 - Application `error` frames may contain native numeric `status` or `status_code`; usage observation
   cannot reject them because optional response/status fields differ. A statusless non-flex error
-  releases its lane while retaining one failed operation for one second. Its matching failed footer
-  may contribute usage once without changing a later operation. Failed history is never reusable;
-  expiry does not erase observed delivery. API-key application frames remain transparent.
+  retires its physical stream before releasing the lane and retains one failed operation for one
+  second of read-only tail processing. Its matching failed footer may contribute usage once.
+  No later create is admitted; footer/deadline closes both sockets with delivered/never evidence.
+  Failed history is never reusable; expiry does not erase observed delivery. New work requires a
+  fresh connection. API-key application frame contents remain transparent.
 
 Compaction v2 uses ordinary Responses fields, including `compaction_trigger` and
 `request_kind=compaction`; it adds no route. Retry markers use projected thread plus stable operation
@@ -394,7 +396,8 @@ The core records the real transport boundary. An HTTP connect failure is safe; f
 send attempt but before response headers is ambiguous; an upstream response or later stream
 failure proves delivery. For WebSocket, a `response.create` becomes ambiguous immediately before
 the provider write, becomes delivered after the first provider application event, and returns to
-idle after a terminal event. State-store failures retain that active delivery state instead of
+idle after a successful terminal event. Failed streams retain delivered/never evidence through
+closure, including when their usage footer or deadline finishes. State-store failures retain that active delivery state instead of
 resetting it to safe; an upstream response or application event is recorded before fallible response
 ID translation. A deferred Codex handshake failure occurs before inference delivery.
 

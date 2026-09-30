@@ -45,66 +45,51 @@ func TestWebSocketFailedFooterRecordsUsage(t *testing.T) {
 	}
 }
 
-func TestWebSocketFailedFooterDoesNotOwnNextOperation(t *testing.T) {
+func TestWebSocketFailureAllowsNewWorkOnlyOnNewConnection(t *testing.T) {
 	for _, subscription := range []bool{false, true} {
-		for _, createdFirst := range []bool{false, true} {
-			name := failureTailRoute(subscription) + "/footer_before_created"
-			if createdFirst {
-				name = failureTailRoute(subscription) + "/footer_after_created"
-			}
-			t.Run(name, func(t *testing.T) {
-				var failedID string
-				fixture := newResponsesProfileWebSocketFixtureWithResponder(t, func(c *websocket.Conn, _ []byte, id string) {
-					if failedID == "" {
-						failedID = id
-						writeFailureTailEvent(c, "response.created", id, 0)
-						writeFailureTailEvent(c, "error", "", 0)
-						return
-					}
-					if createdFirst {
-						writeFailureTailEvent(c, "response.created", id, 0)
-					}
-					writeFailureTailEvent(c, "response.failed", failedID, 7)
-					if !createdFirst {
-						writeFailureTailEvent(c, "response.created", id, 0)
-					}
-					writeFailureTailEvent(c, "response.completed", id, 11)
-				})
-				c, keyID := dialFailureTail(t, fixture, subscription)
-				defer c.CloseNow()
-				writeE2EWebSocketText(t, c, failureTailCreate)
-				old := readFailureTailEvent(t, c, "response.created")["response"].(map[string]any)["id"]
-				readFailureTailEvent(t, c, "error")
-				writeE2EWebSocketText(t, c, failureTailCreate)
-				if createdFirst {
-					readFailureTailEvent(t, c, "response.created")
+		t.Run(failureTailRoute(subscription), func(t *testing.T) {
+			var failedID string
+			fixture := newResponsesProfileWebSocketFixtureWithResponder(t, func(c *websocket.Conn, _ []byte, id string) {
+				writeFailureTailEvent(c, "response.created", id, 0)
+				if failedID == "" {
+					failedID = id
+					writeFailureTailEvent(c, "error", "", 0)
+					return
 				}
-				footer := readFailureTailEvent(t, c, "response.failed")
-				if footer["response"].(map[string]any)["id"] != old {
-					t.Fatal("late footer changed its response owner")
-				}
-				if !createdFirst {
-					readFailureTailEvent(t, c, "response.created")
-				}
-				completed := readFailureTailEvent(t, c, "response.completed")
-				if completed["response"].(map[string]any)["id"] == old {
-					t.Fatal("new response reused failed identity")
-				}
-				history := waitForFailureTailHistory(t, fixture.store, keyID, 2)
-				for _, record := range history {
-					if record.Status == storage.RequestUpstreamErr {
-						assertFailureTailRecord(t, record, storage.RequestUpstreamErr, 7)
-					} else {
-						assertFailureTailRecord(t, record, storage.RequestCompleted, 11)
-					}
-				}
-				assertFailureTailStats(t, fixture.store, keyID, 2, 1, 18)
-				captures := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 2)
-				if decodeRequestObject(t, captures[1].Frame)["previous_response_id"] != nil {
-					t.Fatal("failed response became a continuation baseline")
-				}
+				writeFailureTailEvent(c, "response.completed", id, 11)
 			})
-		}
+			first, keyID := dialFailureTail(t, fixture, subscription)
+			defer first.CloseNow()
+			writeE2EWebSocketText(t, first, failureTailCreate)
+			old := readFailureTailEvent(t, first, "response.created")["response"].(map[string]any)["id"]
+			readFailureTailEvent(t, first, "error")
+			assertFailureTailClose(t, first)
+			second, _ := dialFailureTail(t, fixture, subscription)
+			defer second.CloseNow()
+			writeE2EWebSocketText(t, second, failureTailCreate)
+			readFailureTailEvent(t, second, "response.created")
+			completed := readFailureTailEvent(t, second, "response.completed")
+			if completed["response"].(map[string]any)["id"] == old {
+				t.Fatal("new connection reused failed response identity")
+			}
+			history := waitForFailureTailHistory(t, fixture.store, keyID, 2)
+			for _, record := range history {
+				if record.Status == storage.RequestUpstreamErr {
+					if record.Usage != nil {
+						t.Fatal("expired failed request acquired usage")
+					}
+				} else {
+					assertFailureTailRecord(t, record, storage.RequestCompleted, 11)
+				}
+			}
+			captures := waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 2)
+			if captures[0].ProviderRequestID == captures[1].ProviderRequestID {
+				t.Fatal("failed physical connection was reused")
+			}
+			if decodeRequestObject(t, captures[1].Frame)["previous_response_id"] != nil {
+				t.Fatal("failed response became a continuation baseline")
+			}
+		})
 	}
 }
 

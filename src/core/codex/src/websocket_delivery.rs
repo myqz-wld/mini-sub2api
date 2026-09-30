@@ -7,6 +7,7 @@ use mini_sub2api_protocol_v1::FAILURE_CLOSE_CODE;
 use mini_sub2api_protocol_v1::FailureMetadata;
 use mini_sub2api_protocol_v1::FailurePhase;
 use mini_sub2api_protocol_v1::RetryAdvice;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
@@ -21,9 +22,19 @@ const INTERNAL_FAILURE_REASON: &str =
 pub(crate) struct WebSocketDeliveryTracker {
     // Low two bits are delivery state; the rest identify the public create.
     state: AtomicU64,
+    retired: AtomicBool,
 }
 
 impl WebSocketDeliveryTracker {
+    pub(crate) fn retire(&self) {
+        self.retired.store(true, Ordering::Release);
+        self.mark_response_observed();
+    }
+
+    pub(crate) fn is_retired(&self) -> bool {
+        self.retired.load(Ordering::Acquire)
+    }
+
     pub(crate) fn mark_attempted(&self) {
         let _ = self
             .state
@@ -57,6 +68,9 @@ impl WebSocketDeliveryTracker {
     }
 
     pub(crate) fn failure_for_phase(&self, phase: FailurePhase) -> FailureMetadata {
+        if self.is_retired() {
+            return failure(RetryAdvice::Never, phase, DeliveryState::Delivered);
+        }
         match self.state.load(Ordering::Acquire) & 3 {
             DELIVERY_ATTEMPTED => failure(
                 RetryAdvice::Ambiguous,

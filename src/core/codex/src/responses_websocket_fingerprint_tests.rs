@@ -24,6 +24,9 @@ use tokio::task::JoinHandle;
 
 const INTERNAL_TOKEN: &str = "internal-websocket-fingerprint-token-at-least-32-bytes";
 
+#[path = "responses_websocket_startup_tests.rs"]
+mod startup_tests;
+
 #[derive(Clone, Default)]
 struct FingerprintCapture {
     handshakes: Arc<Mutex<Vec<HeaderMap>>>,

@@ -30,6 +30,10 @@ The default listener is `127.0.0.1:8787`. Remote access requires
 Use `http://127.0.0.1:8787/v1` as the base URL and your `ms2a_` key for authentication.
 For the Codex CLI, follow the [client setup](docs/OPERATIONS.md#codex-client).
 
+After a failed WebSocket response, open a new connection for subsequent work.
+The gateway retires the failed stream and never automatically replays its request;
+a matching failure footer may supply usage for up to one second before closure.
+
 ```bash
 curl --no-buffer http://127.0.0.1:8787/v1/responses \
   -H 'Authorization: Bearer ms2a_EXAMPLE' -H 'Content-Type: application/json' \

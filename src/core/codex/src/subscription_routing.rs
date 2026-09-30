@@ -98,10 +98,14 @@ impl ContextStore {
                 .lock()
                 .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
             if let Some(active) = inner.operations.get(&operation.0.id)
-                && active.record.identity.request_kind == "prewarm"
-                && active.record.socket.is_some()
+                && active.record.startup.is_some()
+                && active
+                    .record
+                    .socket
+                    .as_ref()
+                    .is_some_and(|socket| inner.sockets.contains(socket))
             {
-                if active.record.startup_token.is_some() {
+                if active.record.startup.as_ref().unwrap().token.is_some() {
                     return Ok(());
                 }
                 let (scope, session) = (
@@ -118,8 +122,12 @@ impl ContextStore {
                     .get_mut(&operation.0.id)
                     .expect("active prewarm");
                 active.reserved = active.reserved.saturating_add(token.len());
-                active.record.startup_token = Some(token.to_string());
+                active.record.startup.as_mut().unwrap().token = Some(token.to_string());
                 return Ok(());
+            }
+            if !inner.operations.contains_key(&operation.0.id) {
+                drop(inner);
+                return self.learn_completed_startup(operation, token);
             }
         }
         self.learn_turn(operation, token)

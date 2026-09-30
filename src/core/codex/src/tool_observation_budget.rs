@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 
 #[path = "tool_observation_shedding.rs"]
 mod shedding;
+#[path = "tool_result_sources.rs"]
+mod sources;
 
 pub(crate) const META: &str = "internal_chat_message_metadata_passthrough";
 const CALLS: &str = "executed_tool_calls";
@@ -141,24 +143,28 @@ pub(crate) fn prompt(value: &mut Value) -> Vec<Origin> {
     };
     let mut losses = Vec::new();
     sanitize_calls(items, &mut losses);
+    bound_arguments(items, &mut losses);
+    bound(items, PROMPT_BYTES, false, &mut losses);
+    losses
+}
+
+fn bound_arguments(items: &mut [Value], losses: &mut Vec<Origin>) {
     for item in items.iter_mut() {
         let mut damaged = false;
         for call in calls_mut(item).into_iter().flatten() {
             let Some(arguments) = call.get_mut("arguments") else {
                 continue;
             };
-            if truncation(arguments).is_none() && size(arguments) > ARGUMENT_BYTES {
+            if size(arguments) > ARGUMENT_BYTES {
                 *arguments = marker(size(arguments), ARGUMENT_BYTES, None, None);
             }
             damaged |= truncation(arguments).is_some();
         }
         if damaged {
-            lose(item, &mut losses);
+            lose(item, losses);
         }
     }
-    clear_cells(items, &losses);
-    bound(items, PROMPT_BYTES, false, &mut losses);
-    losses
+    clear_cells(items, losses);
 }
 
 pub(crate) fn message(value: &mut Value) -> Vec<Origin> {
@@ -167,6 +173,7 @@ pub(crate) fn message(value: &mut Value) -> Vec<Origin> {
         return losses;
     }
     sanitize_calls(value["input"].as_array_mut().unwrap(), &mut losses);
+    bound_arguments(value["input"].as_array_mut().unwrap(), &mut losses);
     let overage = size(value).saturating_sub(MESSAGE_BYTES);
     if overage == 0 {
         return losses;
@@ -199,6 +206,10 @@ fn sanitize_calls(items: &mut [Value], losses: &mut Vec<Origin>) {
             // output and host metadata survive; the reducer never indexes an untyped scalar.
             lose(item, losses);
             clear_inventory(item);
+        } else {
+            for call in calls_mut(item).into_iter().flatten() {
+                sources::normalize(call);
+            }
         }
     }
     clear_cells(items, losses);

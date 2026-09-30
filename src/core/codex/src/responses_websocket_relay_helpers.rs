@@ -1,5 +1,58 @@
 use super::*;
 
+fn auth_hash(token: &str, account: Option<&str>, upstream: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update([u8::from(account.is_some())]);
+    for value in [token, account.unwrap_or_default(), upstream] {
+        hash.update((value.len() as u64).to_le_bytes());
+        hash.update(value.as_bytes());
+    }
+    hash.finalize().into()
+}
+
+pub(crate) fn auth_binding(
+    auth: &crate::upstream_request::ResolvedAuth,
+    upstream: &str,
+) -> [u8; 32] {
+    use crate::upstream_request::ResolvedAuth;
+    match auth {
+        ResolvedAuth::CodexOAuth { token, account_id } => {
+            auth_hash(token, Some(account_id), upstream)
+        }
+        ResolvedAuth::OpenAiApiKey { token } => auth_hash(token, None, upstream),
+    }
+}
+
+pub(super) async fn identity_is_current(
+    vault: &Vault,
+    account: &str,
+    fingerprint: &FingerprintSnapshot,
+    binding: &[u8; 32],
+) -> bool {
+    use crate::vault::{CredentialMaterial, CredentialStatus};
+    let Ok(locked) = vault.lock_record(account).await else {
+        return false;
+    };
+    let current = locked.fingerprint();
+    if current.revision() != fingerprint.revision()
+        || current.mode() != fingerprint.mode()
+        || locked.record.status != CredentialStatus::Ready
+    {
+        return false;
+    }
+    let upstream = &locked.record.upstream_url;
+    let current = match &locked.record.material {
+        CredentialMaterial::CodexOAuth {
+            access_token,
+            account_id,
+            ..
+        } => auth_hash(access_token, Some(account_id), upstream),
+        CredentialMaterial::OpenAiApiKey { api_key } => auth_hash(api_key, None, upstream),
+    };
+    current == *binding
+}
+
 pub(super) fn prepare_interrupt(
     continuation: &StdMutex<ResponsesWebSocketState>,
     text: &str,

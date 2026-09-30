@@ -76,10 +76,18 @@ The gateway conservatively rebuilds near-threshold explicit WS prompts; unavaila
 remain caller-owned. Loss of source ownership or the bounded revocation table makes completeness
 unknown instead of restoring `true`. See [observation/state policy](BEHAVIOR.md#state-and-limits).
 
-The follow-up audit fixes also retain one matching WS failed footer for one second after a
-statusless non-flex error. It may supply native category and usage after the lane is released,
-without publishing failed history or changing a later operation. Direct-output revocation and
+The follow-up audit fixes retain one matching WS failed footer for one second after a
+statusless non-flex error. The physical stream is retired before releasing the lane and accepts
+no later create; footer/deadline closes both sockets. It may supply native category and usage
+without publishing failed history or attributing an old footer to another operation. Direct-output revocation and
 conservative legacy-ledger migration are gateway consistency policies beyond the native cell hook.
+
+The 0.159.2 repair pass also retains idle successful-prewarm routing metadata for one matching
+business turn, preserves empty first values, and prevents metadata from binding a business response
+ID. Browser OAuth uses the actual `127.0.0.1` callback port and the same redirect URI for authorize
+and code exchange. Refresh HTTP/1.1 identity headers precede Accept. Optional observation arguments
+remain bounded even when they imitate a truncation marker, and sources use native shape and
+deduplicated count/UTF-8 limits. All repair regression endpoints are local synthetic mocks.
 
 ## Validation on 2026-09-28
 

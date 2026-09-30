@@ -329,6 +329,12 @@ impl ResponsesWebSocketState {
         }
     }
 
+    pub(crate) fn completes_interruption(&self, event: &Value) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|active| active.interruption.completes(event))
+    }
+
     pub(crate) fn fail_hidden_setup(&mut self) {
         self.fail_operation(OperationKind::HiddenSetup);
     }

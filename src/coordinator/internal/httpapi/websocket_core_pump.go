@@ -55,8 +55,14 @@ func (s *websocketSession) corePump() websocketPumpResult {
 		if err != nil {
 			return s.pumpResult(storage.RequestDisconnected)
 		}
+		if failed != nil {
+			return s.upstreamPumpResult(nil)
+		}
 		if !belongsToOldResponse && terminal && s.completeActive(terminalStatus) {
 			s.notifyDeadline(deadlineTurnFinished)
+			if terminalStatus == storage.RequestUpstreamErr {
+				return s.upstreamPumpResult(nil)
+			}
 		}
 	}
 }

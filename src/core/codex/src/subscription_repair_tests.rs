@@ -348,3 +348,6 @@ mod lineage_tests;
 
 #[path = "subscription_control_history_tests.rs"]
 mod control_history_tests;
+
+#[path = "subscription_startup_tests.rs"]
+mod startup_tests;

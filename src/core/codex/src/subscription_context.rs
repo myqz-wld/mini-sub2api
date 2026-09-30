@@ -68,7 +68,7 @@ pub(crate) struct Record {
     pub(crate) completed: bool,
     // Startup routing is published only with a completed prewarm and consumed by the first turn
     // on that same socket/thread. It is live connection metadata, never persisted body history.
-    pub(crate) startup_token: Option<String>,
+    pub(crate) startup: Option<crate::subscription_startup::StartupRouting>,
     pub(crate) compaction: Option<crate::request_compaction::PendingCompaction>,
     // Set only by accepted output replacement; never inferred from caller input.
     pub(crate) compaction_key: Option<u64>,
@@ -110,6 +110,7 @@ pub(crate) struct Active {
 pub(crate) struct Operation(pub(crate) Arc<Lease>);
 pub(crate) struct Lease {
     pub(crate) id: String,
+    pub(crate) scope: String,
     pub(crate) store: Weak<Mutex<Inner>>,
     pub(crate) reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility,
     pub(crate) transport: crate::request_normalizer::EmulationTransport,
@@ -236,7 +237,7 @@ impl ContextStore {
                 for record in scope.records.values_mut() {
                     if record.socket.as_deref() == Some(socket) {
                         record.socket = None;
-                        record.startup_token = None;
+                        record.startup = None;
                     }
                 }
             }
@@ -260,7 +261,7 @@ impl Record {
         2048 + self.dependencies.cost()
             + self.lineage.cost
             + self.socket.as_ref().map_or(0, String::len)
-            + self.startup_token.as_ref().map_or(0, String::len)
+            + self.startup.as_ref().map_or(0, |startup| startup.cost())
     }
 }
 

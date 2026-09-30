@@ -82,10 +82,12 @@ type websocketSession struct {
 	failed                 *websocketFailedOperation
 	generation             uint64
 	failedResponseObserved bool
+	retired                bool
 	providerRequestID      *string
 }
 
 var errOverlappingResponse = errors.New("a response is already active")
+var errRetiredResponseStream = errors.New("response stream is retired")
 
 func newWebSocketSession(
 	handler *Handler,
@@ -144,17 +146,10 @@ func (s *websocketSession) run() {
 		case <-tailChannel:
 			tailChannel = nil
 			s.expireFailureTail()
+			s.finishSession(s.upstreamPumpResult(nil))
+			return
 		case result := <-results:
-			status := s.causalStatus(result.terminalStatus)
-			if s.stopping.Load() {
-				status = storage.RequestUpstreamErr
-			} else if status == storage.RequestUpstreamErr {
-				s.closePublicForCoreFailure(result)
-			}
-			s.cancel()
-			_ = s.publicSocket.CloseNow()
-			_ = s.coreSocket.CloseNow()
-			s.finishActive(status)
+			s.finishSession(result)
 			return
 		case <-timerChannel:
 			_ = s.publicSocket.Close(websocket.StatusPolicyViolation, "")
@@ -166,13 +161,17 @@ func (s *websocketSession) run() {
 	}
 }
 
-func stopWebSocketTimer(timer *time.Timer) {
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
+func (s *websocketSession) finishSession(result websocketPumpResult) {
+	status := s.causalStatus(result.terminalStatus)
+	if s.stopping.Load() {
+		status = storage.RequestUpstreamErr
+	} else if status == storage.RequestUpstreamErr {
+		s.closePublicForCoreFailure(result)
 	}
+	s.cancel()
+	_ = s.publicSocket.CloseNow()
+	_ = s.coreSocket.CloseNow()
+	s.finishActive(status)
 }
 
 func (s *websocketSession) stop() {
@@ -208,6 +207,9 @@ func (s *websocketSession) clientPump() websocketPumpResult {
 		}
 		if event.eventType == "response.create" {
 			if err := s.beginOperation(event.operationKind); err != nil {
+				if errors.Is(err, errRetiredResponseStream) {
+					return s.upstreamPumpResult(nil)
+				}
 				status := websocket.StatusInternalError
 				if errors.Is(err, errOverlappingResponse) || errors.Is(err, storage.ErrUnauthorized) {
 					status = websocket.StatusPolicyViolation
@@ -237,6 +239,10 @@ func (s *websocketSession) clientPump() websocketPumpResult {
 func (s *websocketSession) beginOperation(kind string) error {
 	for {
 		s.mu.Lock()
+		if s.retired {
+			s.mu.Unlock()
+			return errRetiredResponseStream
+		}
 		if s.active != nil && s.active.terminalPending {
 			ready := s.active.terminalReady
 			s.mu.Unlock()
@@ -295,6 +301,11 @@ func (s *websocketSession) hasActiveOperation() bool {
 func (s *websocketSession) observeServerEvent(event usage.WebSocketEvent, terminal bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	interrupted := event.Interrupted && s.active != nil && s.active.interruptRequested &&
+		event.ResponseID != "" && s.active.responseID == event.ResponseID
+	if event.Type == "error" || event.Type == "response.failed" || (event.Type == "response.incomplete" && !interrupted) {
+		s.retired = true
+	}
 	if s.active == nil {
 		return
 	}
@@ -415,6 +426,11 @@ func (s *websocketSession) currentDeliveryFailure() protocolv1.FailureMetadata {
 	metadata := protocolv1.FailureMetadata{
 		RetryAdvice: protocolv1.RetrySafe, Phase: protocolv1.PhaseWebSocketRelay,
 		DeliveryState: protocolv1.DeliveryNotDelivered,
+	}
+	if s.retired {
+		metadata.RetryAdvice = protocolv1.RetryNever
+		metadata.DeliveryState = protocolv1.DeliveryDelivered
+		return metadata
 	}
 	if s.active == nil {
 		if s.failedResponseObserved {

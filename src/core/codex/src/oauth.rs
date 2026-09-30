@@ -117,9 +117,9 @@ pub async fn refresh_if_needed(
     let response = codex_auth_request(
         client
             .post(&endpoint)
-            .header(http::header::CONTENT_TYPE, "application/json")
-            .header(http::header::ACCEPT, "*/*"),
+            .header(http::header::CONTENT_TYPE, "application/json"),
     )
+    .header(http::header::ACCEPT, "*/*")
     .json(&RefreshRequest {
         client_id: &client_id,
         grant_type: "refresh_token",

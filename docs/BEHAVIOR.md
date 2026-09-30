@@ -85,7 +85,11 @@ opaque header values with a separate 64 KiB limit, retain the first value (inclu
 and consume actual retained-state budget; the 512-byte logical-ID limit does not apply. WS metadata
 accepts a string or the first array value, matching the pinned native parser.
 Failed-turn facts follow idle expiry/capacity; admitted work is protected. Completed prewarm may
-transfer its token only to the first business turn on that socket/thread. Hidden setup updates the
+learn an idle metadata token and transfer it only to the first business turn on that socket/thread.
+The handoff includes an empty first value, is charged to the state budget, and expires with the
+socket or incompatible work. Metadata received after the business frame was prepared affects
+later same-turn requests; it never changes the business response ID. Credential or upstream-address
+changes require a new connection and do not carry an unconsumed startup token. Hidden setup updates the
 business frame before sending. Native memory-consolidation turn/root-turn IDs are projected when
 present; absent memory turns remain absent. Core provides no memory-writing service.
 
@@ -175,7 +179,10 @@ serialized carrier is bounded at 16 KiB, including after mapping. The gateway co
 provenance and does not synthesize an absent carrier.
 
 Optional executed-tool observations follow the native 8 KiB argument and 2 MiB complete-prompt
-budgets. The final HTTP body or selected WS frame gets a 15 MiB soft message limit, shedding
+budgets. The argument bound uses actual serialized UTF-8 bytes, including truncation markers.
+Sources are string type/id pairs, deduplicated in order, with at most 32 unique pairs and 128 UTF-8
+bytes per field. Overflow omits the entire sources field; malformed shapes become the native
+`parse_failed` source marker. The final HTTP body or selected WS frame gets a 15 MiB soft message limit, shedding
 generic metadata before resource evidence/inventory. Ordinary content is never truncated to
 meet that soft limit. WS message shedding leaves logical reuse snapshots intact; an available
 explicit-reference prefix is rebuilt when its combined prompt needs reduction. Unseen remote
@@ -311,12 +318,14 @@ request as failed. Neither path publishes history or commits compaction. JSON ag
 rejects an error event. Valid SSE prefix events survive later malformed/oversized chunks; failure
 trailers cross the internal HTTP hop even after a previously delivered terminal.
 
-WS retains at most one failed operation's validation/accounting facts for one second after a
-statusless non-flex error. A matching `response.failed` contributes usage once, including when a
-new create has started. Its response identity and delivery generation cannot own the new operation.
-Conflicting output/success is rejected for Subscription; API-key application frames stay transparent.
-Expiry/EOF releases retained facts and finalizes failed usage without inventing a safe replay.
-Wrapped native numeric error statuses and flex errors are immediately terminal.
+WS failure permanently retires the physical stream before releasing its operation. A statusless
+non-flex error permits up to one second of read-only tail processing; a matching `response.failed`
+may contribute usage once. No new create is admitted during or after that window. The matching
+footer, deadline or EOF closes the public and upstream sockets with delivered/never-retry evidence.
+Numeric-status errors, flex errors and failed terminals close after forwarding the terminal frame.
+Other incomplete terminals also retire the stream; validated requested interruption remains eligible
+for its documented continuation. New work needs a fresh connection and complete-history admission;
+the failed request is not replayed. Usage arriving beyond the tail is unavailable.
 
 Subscription HTTP/deferred-WS failures preserve the native invalid-prompt, flex, overload, slowdown,
 policy and quota/usage categories. Inspection is limited to 64 KiB and one second; arbitrary provider

@@ -255,3 +255,99 @@ fn oauth_material(account_id: &str, issuer: &str, expires_in: i64) -> Credential
         client_id: "client-test".to_string(),
     }
 }
+
+#[tokio::test]
+async fn refresh_raw_header_order_matches_official_01592() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let issuer = format!("http://{}", listener.local_addr().unwrap());
+    let capture = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut bytes = Vec::new();
+        let (end, length) = loop {
+            let mut chunk = [0; 4096];
+            let n = socket.read(&mut chunk).await.unwrap();
+            assert!(n > 0);
+            bytes.extend_from_slice(&chunk[..n]);
+            if let Some(end) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+                let raw = std::str::from_utf8(&bytes[..end]).unwrap();
+                let length = raw
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length: ")
+                            .and_then(|v| v.parse::<usize>().ok())
+                    })
+                    .unwrap();
+                break (end, length);
+            }
+        };
+        while bytes.len() < end + 4 + length {
+            let mut chunk = [0; 4096];
+            let n = socket.read(&mut chunk).await.unwrap();
+            assert!(n > 0);
+            bytes.extend_from_slice(&chunk[..n]);
+        }
+        let raw = std::str::from_utf8(&bytes[..end]).unwrap();
+        let names = raw
+            .lines()
+            .skip(1)
+            .map(|line| line.split_once(':').unwrap().0.to_ascii_lowercase())
+            .collect::<Vec<_>>();
+        assert!(raw.contains("\r\ncontent-type: application/json\r\n"));
+        assert!(raw.contains("\r\naccept: */*\r\n"));
+        assert!(!names.iter().any(|name| name == "accept-encoding"));
+        assert!(raw.lines().any(|line| line
+            == format!(
+                "originator: {}",
+                crate::upstream_request::DEFAULT_CODEX_ORIGINATOR
+            )));
+        assert!(
+            raw.lines().any(|line| line
+                == format!("user-agent: {}", crate::codex_user_agent::canonical_value()))
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+        assert_eq!(body["grant_type"], "refresh_token");
+        assert_eq!(body["client_id"], "client-test");
+        let reply = r#"{"error":{"code":"invalid_grant"}}"#;
+        socket.write_all(format!("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",reply.len()).as_bytes()).await.unwrap();
+        (names, length)
+    });
+    let temp = tempfile::tempdir().unwrap();
+    let vault = Vault::open(temp.path().to_path_buf()).unwrap();
+    let metadata = vault
+        .create_oauth(
+            oauth_material("synthetic-account", &issuer, -3600),
+            format!("{issuer}/responses"),
+            crate::fingerprint::FingerprintMode::Device,
+        )
+        .await
+        .unwrap();
+    let client = crate::http_client::native_tls_builder()
+        .no_proxy()
+        .build()
+        .unwrap();
+    let mut locked = vault.lock_record(&metadata.account_ref).await.unwrap();
+    let error = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        refresh_if_needed(&mut locked, &client, false),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(error, OAuthFailure::RequiresLogin));
+    let (names, length) = capture.await.unwrap();
+    assert_eq!(length, 91);
+    assert_eq!(
+        names,
+        vec![
+            "content-type",
+            "originator",
+            "user-agent",
+            "accept",
+            "host",
+            "content-length"
+        ]
+    );
+}

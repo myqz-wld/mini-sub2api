@@ -10,6 +10,7 @@ pub(crate) struct RelayContext {
     pub(crate) pending: VecDeque<InternalMessage>,
     pub(crate) vault: Vault,
     pub(crate) fingerprint: FingerprintSnapshot,
+    pub(crate) auth_binding: [u8; 32],
     pub(crate) identity: Option<ResolvedRequestIdentity>,
     pub(crate) operation: Option<crate::subscription_context::Operation>,
 }

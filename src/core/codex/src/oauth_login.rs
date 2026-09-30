@@ -17,7 +17,6 @@ use reqwest::Client;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
@@ -151,10 +150,7 @@ async fn device_login(client: &Client, config: &OAuthConfig) -> Result<TokenResp
 
 async fn browser_login(client: &Client, config: &OAuthConfig) -> Result<TokenResponse> {
     let listener = bind_browser_listener().await?;
-    let redirect_uri = format!(
-        "http://localhost:{}/auth/callback",
-        listener.local_addr()?.port()
-    );
+    let redirect_uri = browser_redirect_uri(&listener)?;
     let pkce = generate_pkce();
     let state = random_urlsafe(32);
     let auth_url = authorize_url(config, &redirect_uri, &pkce, &state)?;
@@ -162,14 +158,30 @@ async fn browser_login(client: &Client, config: &OAuthConfig) -> Result<TokenRes
     let _ = webbrowser::open(auth_url.as_str());
 
     let callback = tokio::time::timeout(Duration::from_secs(10 * 60), async {
-        receive_browser_callback(listener, &state).await
+        receive_browser_callback(listener, &state, &redirect_uri).await
     })
     .await
     .context("OAuth callback timed out")??;
     exchange_code(client, config, &redirect_uri, &pkce, &callback).await
 }
 
-async fn receive_browser_callback(listener: TcpListener, state: &str) -> Result<String> {
+fn browser_redirect_uri(listener: &TcpListener) -> Result<String> {
+    Ok(format!(
+        "http://127.0.0.1:{}/auth/callback",
+        listener.local_addr()?.port()
+    ))
+}
+
+async fn receive_browser_callback(
+    listener: TcpListener,
+    state: &str,
+    redirect_uri: &str,
+) -> Result<String> {
+    let expected = Url::parse(redirect_uri)?;
+    anyhow::ensure!(
+        expected.port_or_known_default() == Some(listener.local_addr()?.port()),
+        "OAuth callback port mismatch"
+    );
     let (mut socket, _) = listener.accept().await?;
     let mut request = Vec::with_capacity(4096);
     let mut complete = false;
@@ -189,31 +201,8 @@ async fn receive_browser_callback(listener: TcpListener, state: &str) -> Result<
         complete && request.len() <= 8192,
         "invalid OAuth callback request"
     );
-    let first_line = String::from_utf8_lossy(&request)
-        .lines()
-        .next()
-        .context("missing OAuth callback request line")?
-        .to_string();
-    let mut request_parts = first_line.split_whitespace();
-    anyhow::ensure!(
-        request_parts.next() == Some("GET"),
-        "invalid OAuth callback method"
-    );
-    let target = request_parts
-        .next()
-        .context("missing OAuth callback target")?;
-    let url = Url::parse(&format!("http://localhost{target}"))?;
-    anyhow::ensure!(
-        url.path() == "/auth/callback",
-        "invalid OAuth callback path"
-    );
-    let params: HashMap<_, _> = url.query_pairs().into_owned().collect();
-    let valid_state = params.get("state").is_some_and(|value| value == state);
-    let code = params
-        .get("code")
-        .filter(|value| !value.is_empty())
-        .cloned();
-    let (status, body) = if valid_state && code.is_some() {
+    let code = parse_browser_callback(&request, state, &expected);
+    let (status, body) = if code.is_ok() {
         ("200 OK", "Sign-in completed. You may close this window.")
     } else {
         ("400 Bad Request", "Sign-in failed.")
@@ -223,8 +212,67 @@ async fn receive_browser_callback(listener: TcpListener, state: &str) -> Result<
         body.len()
     );
     socket.write_all(response.as_bytes()).await?;
-    anyhow::ensure!(valid_state, "OAuth state mismatch");
-    code.context("OAuth callback did not contain a code")
+    code
+}
+
+fn parse_browser_callback(request: &[u8], state: &str, expected: &Url) -> Result<String> {
+    let request = std::str::from_utf8(request).context("invalid OAuth callback encoding")?;
+    let mut lines = request.lines();
+    let mut parts = lines
+        .next()
+        .context("missing OAuth callback request line")?
+        .split_whitespace();
+    anyhow::ensure!(parts.next() == Some("GET"), "invalid OAuth callback method");
+    let target = parts.next().context("missing OAuth callback target")?;
+    anyhow::ensure!(
+        matches!(parts.next(), Some("HTTP/1.0" | "HTTP/1.1")) && parts.next().is_none(),
+        "invalid OAuth callback request line"
+    );
+    anyhow::ensure!(
+        target.starts_with('/') && !target.starts_with("//") && !target.contains('#'),
+        "invalid OAuth callback target"
+    );
+    let mut host = None;
+    for line in lines.take_while(|line| !line.is_empty()) {
+        let (name, value) = line
+            .split_once(':')
+            .context("invalid OAuth callback header")?;
+        if name.eq_ignore_ascii_case("host") {
+            anyhow::ensure!(
+                host.replace(value.trim()).is_none(),
+                "duplicate OAuth callback host"
+            );
+        }
+    }
+    let authority = &expected[url::Position::BeforeHost..url::Position::AfterPort];
+    anyhow::ensure!(host == Some(authority), "OAuth callback authority mismatch");
+    let url = Url::parse(&format!(
+        "{}{target}",
+        expected.origin().ascii_serialization()
+    ))?;
+    anyhow::ensure!(url.path() == expected.path(), "invalid OAuth callback path");
+    let mut received_state = None;
+    let mut code = None;
+    let mut error = None;
+    for (name, value) in url.query_pairs() {
+        let slot = match name.as_ref() {
+            "state" => &mut received_state,
+            "code" => &mut code,
+            "error" => &mut error,
+            _ => continue,
+        };
+        anyhow::ensure!(
+            slot.replace(value.into_owned()).is_none(),
+            "duplicate OAuth callback parameter"
+        );
+    }
+    anyhow::ensure!(
+        received_state.as_deref() == Some(state),
+        "OAuth state mismatch"
+    );
+    anyhow::ensure!(error.is_none(), "OAuth callback returned an error");
+    code.filter(|code| !code.is_empty())
+        .context("OAuth callback did not contain a code")
 }
 
 async fn exchange_code(

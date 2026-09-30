@@ -340,6 +340,7 @@ impl ContextStore {
         );
         let admission = Operation(Arc::new(Lease {
             id,
+            scope: scope_key.clone(),
             store: Arc::downgrade(&self.inner),
             reasoning_visibility: evidence.reasoning_visibility,
             transport: evidence.transport,

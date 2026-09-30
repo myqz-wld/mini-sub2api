@@ -150,11 +150,6 @@ impl ResponseStateContext {
             .lock()
             .map_err(|_| anyhow::anyhow!("operation state unavailable"))?
             .clone();
-        if let Some(operation) = &operation
-            && let Some(token) = crate::subscription_routing::metadata_token(&value)
-        {
-            self.store.contexts.learn_response_turn(operation, token)?;
-        }
         let pending_compaction = match pending_compaction {
             Some(pending)
                 if self.store.contexts.accepts_compaction(
@@ -213,6 +208,9 @@ impl ResponseStateContext {
             .await?;
         if let Some(operation) = operation {
             if !failed_tail && (terminal.is_some() || translated.get("type").is_some()) {
+                self.store
+                    .contexts
+                    .learn_response_metadata(&operation, &translated)?;
                 self.store
                     .contexts
                     .observe(&operation, &translated, terminal)?;

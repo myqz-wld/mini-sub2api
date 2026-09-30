@@ -69,7 +69,7 @@ async fn codex1580_configuration_updates_and_tool_evidence_survive_both_transpor
             let harness = CodexStateTestHarness::new();
             let update = json!({"type":"configuration_update", "reasoning":{"effort":"high"}});
             let evidence = json!({"name":"functions.lookup","arguments":{"id":"opaque"},
-                "tool_result_sources":[{"type":"url","url":"https://example.test"}],
+                "tool_result_sources":[{"type":"url","id":"https://example.test"}],
                 "tool_result_metadata":{"response_id":"opaque","nested":{"id":"opaque"}}});
             let body = json!({"model":model,"input":[update.clone(),
                 {"type":"message","role":"user","content":"synthetic task",
@@ -221,4 +221,83 @@ async fn codex1580_memory_consolidation_preserves_its_turn_without_copying_raw_i
     assert_ne!(turn["turn_id"], "memory-turn");
     assert_eq!(turn["turn_id"], turn["root_turn_id"]);
     assert_eq!(turn["turn_trigger"], "memory_consolidation");
+}
+
+#[tokio::test]
+async fn outbound_observation_limits_on_both_transports() {
+    let cases = vec![
+        (
+            "extended-marker",
+            json!({"_codex_executed_tool_call_truncated":{"original_bytes":10000,"max_bytes":8192,"extra":"x".repeat(9000)}}),
+            json!([]),
+        ),
+        (
+            "33-unique",
+            json!({}),
+            json!(
+                (0..33)
+                    .map(|n| json!({"type":"file","id":format!("unique-{n}")}))
+                    .collect::<Vec<_>>()
+            ),
+        ),
+        (
+            "40-duplicate",
+            json!({}),
+            json!(
+                (0..40)
+                    .map(|_| json!({"type":"file","id":"same"}))
+                    .collect::<Vec<_>>()
+            ),
+        ),
+        (
+            "129-id-bytes",
+            json!({}),
+            json!([{"type":"file","id":"界".repeat(43)}]),
+        ),
+        (
+            "129-type-bytes",
+            json!({}),
+            json!([{"type":"x".repeat(129),"id":"valid"}]),
+        ),
+        (
+            "missing-id",
+            json!({}),
+            json!([{"type":"url","url":"https://example.test"}]),
+        ),
+        ("numeric-id", json!({}), json!([{"type":"file","id":7}])),
+    ];
+    for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
+        for (label, args, sources) in &cases {
+            let harness = CodexStateTestHarness::new();
+            let evidence =
+                json!({"name":"functions.lookup","arguments":args,"tool_result_sources":sources});
+            let body = json!({"model":"gpt-5.4","input":[{"type":"message","role":"user","content":"synthetic task","internal_chat_message_metadata_passthrough":{"executed_tool_calls":[evidence]}}]});
+            let prepared = prepare(&harness, transport, &HeaderMap::new(), body, SCOPE)
+                .await
+                .unwrap();
+            let wire = value(&prepared);
+            let item = wire["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| v["role"] == "user")
+                .unwrap();
+            let call =
+                &item["internal_chat_message_metadata_passthrough"]["executed_tool_calls"][0];
+            let size = serde_json::to_vec(&call["arguments"]).unwrap().len();
+            match *label {
+                "extended-marker" => assert!(size <= 8192),
+                "40-duplicate" => assert_eq!(
+                    call["tool_result_sources"],
+                    json!([{"type":"file","id":"same"}])
+                ),
+                "missing-id" | "numeric-id" => assert_eq!(
+                    call["tool_result_sources"],
+                    json!([{"type":"parse_failed","id":""}])
+                ),
+                _ => assert!(call.get("tool_result_sources").is_none(), "{label}"),
+            }
+            assert_eq!(item["content"][0]["text"], "synthetic task");
+        }
+    }
 }

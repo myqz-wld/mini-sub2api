@@ -17,6 +17,7 @@ struct FailedResponse {
 pub(super) struct Inbound {
     failed: Option<FailedResponse>,
     response_id: Option<String>,
+    retired: bool,
 }
 
 impl Inbound {
@@ -24,15 +25,16 @@ impl Inbound {
         &mut self,
         stream: &mut S,
     ) -> Option<S::Item> {
-        loop {
-            if let Some(failed) = &self.failed {
-                tokio::select! {
-                    message = stream.next() => return message,
-                    _ = tokio::time::sleep_until(failed.deadline) => self.failed = None,
-                }
-            } else {
-                return stream.next().await;
+        if let Some(failed) = &self.failed {
+            tokio::select! {
+                biased;
+                _ = tokio::time::sleep_until(failed.deadline) => None,
+                message = stream.next() => message,
             }
+        } else if self.retired {
+            None
+        } else {
+            stream.next().await
         }
     }
 
@@ -56,6 +58,15 @@ impl Inbound {
             .get("type")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        if matches!(kind, "error" | "response.failed")
+            || (kind == "response.incomplete"
+                && !continuation_guard(continuation).completes_interruption(&value))
+        {
+            // Retire before observe_server_event releases the active lane. A deadline only
+            // bounds how long we read its usage footer; it never makes this stream reusable.
+            self.retired = true;
+            delivery.retire();
+        }
         let response_id = value
             .get("response")
             .and_then(|r| r.get("id"))
@@ -92,17 +103,7 @@ impl Inbound {
                 }
                 return Ok(Some((translated, terminal)));
             }
-            anyhow::ensure!(
-                state.is_none()
-                    || failed.response_id.is_some()
-                    || same_operation
-                    || self
-                        .response_id
-                        .as_deref()
-                        .is_some_and(|id| response_id == Some(id))
-                    || kind != "response.failed",
-                "ambiguous failure footer after a new operation"
-            );
+            anyhow::bail!("unassociated frame on a retired response stream");
         }
 
         let observed = observe_server_event(continuation, &value);
@@ -184,3 +185,7 @@ fn encode(value: Value) -> anyhow::Result<String> {
 #[cfg(test)]
 #[path = "responses_websocket_performance_tests.rs"]
 mod performance_tests;
+
+#[cfg(test)]
+#[path = "responses_websocket_retirement_tests.rs"]
+mod retirement_tests;

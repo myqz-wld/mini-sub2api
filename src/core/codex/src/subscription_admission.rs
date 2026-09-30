@@ -122,9 +122,11 @@ impl ContextStore {
             history,
             dependencies: plan.dependencies,
             lineage,
+            startup: (identity.request_kind == "prewarm" && plan.socket.is_some()).then(|| {
+                crate::subscription_startup::StartupRouting::new(plan.admission.0.id.clone())
+            }),
             socket: plan.socket,
             completed: false,
-            startup_token: None,
             compaction,
             compaction_key: None,
             last_used: now,
@@ -171,6 +173,25 @@ impl ContextStore {
             active.record.branch.clone(),
         );
         let session = &identity.session_id;
+        let routing_key = identity
+            .turn_id
+            .as_deref()
+            .filter(|turn| !turn.is_empty())
+            .map(|turn| format!("{branch}:{turn}"));
+        if socket.as_ref().is_some_and(|socket| {
+            inner.scopes.get(&key).is_some_and(|scope| {
+                scope.records.values().any(|record| {
+                    record.socket.as_ref() == Some(socket) && record.startup.is_some()
+                })
+            })
+        }) && !inner.make_room(
+            &self.limits,
+            &key,
+            session,
+            1024 + 2 * routing_key.as_ref().map_or(0, String::len),
+        ) {
+            return Err(Error::StateUnavailable);
+        }
         let now = Instant::now();
         let scope = inner.scopes.entry(key).or_default();
         let explicit = publication.raw_session.is_some();
@@ -185,28 +206,7 @@ impl ContextStore {
             scope.aliases.insert(raw, session.clone());
         }
         if let Some(socket) = socket {
-            if let Some(turn) = identity.turn_id.as_deref().filter(|turn| !turn.is_empty()) {
-                let mut startup = None;
-                for record in scope.records.values_mut().filter(|record| {
-                    record.socket.as_deref() == Some(socket.as_str())
-                        && record.completed
-                        && record.identity.thread_id == identity.thread_id
-                }) {
-                    if let Some(token) = record.startup_token.take()
-                        && startup
-                            .as_ref()
-                            .is_none_or(|(seen, _)| record.last_used < *seen)
-                    {
-                        startup = Some((record.last_used, token));
-                    }
-                }
-                if let Some((_, token)) = startup {
-                    scope
-                        .routing
-                        .entry(format!("{branch}:{turn}"))
-                        .or_insert(token);
-                }
-            }
+            scope.adopt_startup(&socket, &identity.thread_id, routing_key.as_deref());
             scope.bindings.insert(socket, session.clone());
         }
         for turn in [publication.raw_turn, identity.turn_id]

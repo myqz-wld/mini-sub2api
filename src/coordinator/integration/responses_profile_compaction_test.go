@@ -65,6 +65,12 @@ func TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal(t *testing.T) {
 					}
 					if event["type"] == "response.completed" || event["type"] == "response.failed" {
 						terminal = true
+						if event["type"] == "response.failed" {
+							assertFailureTailClose(t, connection)
+							connection = dialResponsesProfileWebSocket(t, fixture.public, profile.secret,
+								http.Header{"Originator": []string{"codex_exec"}})
+							defer connection.CloseNow()
+						}
 						break
 					}
 					if event["type"] != "response.output_item.done" {
@@ -91,12 +97,15 @@ func TestCodexProfilesCommitCompactionOnlyAfterCompletedTerminal(t *testing.T) {
 				!strings.HasSuffix(windows[2], ":1") {
 				t.Fatalf("two-phase compaction windows = %#v", windows)
 			}
-			if captures[0].ProviderRequestID != captures[1].ProviderRequestID ||
+			if captures[0].ProviderRequestID == captures[1].ProviderRequestID ||
 				captures[1].ProviderRequestID != captures[2].ProviderRequestID {
-				t.Fatal("one compaction socket changed provider request diagnostic")
+				t.Fatal("compaction failure did not retire exactly its failed connection")
 			}
 			assertProfileWebSocketDiagnosticHistory(
-				t, fixture.store, profile.keyID, captures[0].ProviderRequestID, 3,
+				t, fixture.store, profile.keyID, captures[0].ProviderRequestID, 1,
+			)
+			assertProfileWebSocketDiagnosticHistory(
+				t, fixture.store, profile.keyID, captures[1].ProviderRequestID, 2,
 			)
 		})
 	}

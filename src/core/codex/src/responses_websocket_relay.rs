@@ -16,6 +16,7 @@ pub(crate) async fn relay(
         mut pending,
         vault,
         fingerprint,
+        auth_binding,
         mut identity,
         operation,
     } = context;
@@ -49,7 +50,14 @@ pub(crate) async fn relay(
         let client_response_state = response_state.clone();
         let client_to_upstream = async {
             if let Some(initial) = initial {
-                if !fingerprint_is_current(&vault, &account_ref, &fingerprint).await {
+                if !relay_helpers::identity_is_current(
+                    &vault,
+                    &account_ref,
+                    &fingerprint,
+                    &auth_binding,
+                )
+                .await
+                {
                     return RelayExit::StaleFingerprint;
                 }
                 if let Err(exit) = initial::send(
@@ -84,12 +92,21 @@ pub(crate) async fn relay(
                         };
                         let is_interrupt =
                             !is_create && crate::response_interrupt::is_control(&text);
+                        if delivery.is_retired() {
+                            return RelayExit::Failure(delivery.failure());
+                        }
                         if !is_create && !is_interrupt && profile.emulates_codex() {
                             crate::ignored_fields::websocket_control(&headers);
                             continue;
                         }
                         if (is_create || is_interrupt)
-                            && !fingerprint_is_current(&vault, &account_ref, &fingerprint).await
+                            && !relay_helpers::identity_is_current(
+                                &vault,
+                                &account_ref,
+                                &fingerprint,
+                                &auth_binding,
+                            )
+                            .await
                         {
                             return RelayExit::StaleFingerprint;
                         }
@@ -118,11 +135,11 @@ pub(crate) async fn relay(
                             Err(ClientPrepareError::Protocol) => return RelayExit::Protocol,
                             Ok(prepared) => {
                                 if is_interrupt
-                                    && profile.emulates_codex()
                                     && !relay_helpers::prepare_interrupt(
                                         &client_continuation,
                                         &prepared.text,
                                     )
+                                    && profile.emulates_codex()
                                 {
                                     return RelayExit::Protocol;
                                 }
@@ -202,6 +219,9 @@ pub(crate) async fn relay(
                 };
                 let terminal = matches!(outbound, UpstreamMessage::Close(_));
                 if create_attempt {
+                    if delivery.is_retired() {
+                        return RelayExit::Failure(delivery.failure());
+                    }
                     if !continuation_guard(&client_continuation).mark_public_create_attempted() {
                         return RelayExit::Policy;
                     }
@@ -299,7 +319,7 @@ pub(crate) async fn relay(
                 .await;
         }
         RelayExit::Failure(metadata) => {
-            continuation_guard(&continuation).fail_public_create();
+            continuation_guard(&continuation).reset();
             let _ = internal_write.send(failure_close(metadata)).await;
             let _ = upstream_write
                 .send(upstream_close(UpstreamCloseCode::Restart))

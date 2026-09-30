@@ -47,6 +47,7 @@ mod initial;
 mod relay_helpers;
 use relay_context::RelayExit;
 use relay_helpers::allowed_close_code;
+pub(crate) use relay_helpers::auth_binding;
 use relay_helpers::continuation_guard;
 pub(crate) use relay_helpers::fingerprint_is_current;
 use relay_helpers::observe_server_event;
@@ -138,6 +139,7 @@ async fn responses_socket_inner(
         pending: VecDeque::new(),
         vault: state.vault.clone(),
         fingerprint,
+        auth_binding: relay_helpers::auth_binding(&resolved.auth, &resolved.upstream_url),
         identity: None,
         operation: None,
     };

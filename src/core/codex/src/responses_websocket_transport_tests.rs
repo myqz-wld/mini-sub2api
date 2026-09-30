@@ -271,6 +271,21 @@ async fn subscription_websocket_compaction_commits_only_completed_terminal() {
                 event["type"].as_str(),
                 Some("response.completed" | "response.failed")
             ) {
+                if event["type"] == "response.failed" {
+                    assert!(matches!(
+                        socket.next().await.unwrap().unwrap(),
+                        DownstreamMessage::Close { .. }
+                    ));
+                    socket = internal_handshake(&core.base_url, &account_ref)
+                        .header("originator", "codex_exec")
+                        .upgrade()
+                        .send()
+                        .await
+                        .unwrap()
+                        .into_websocket()
+                        .await
+                        .unwrap();
+                }
                 break;
             }
             assert_eq!(event["type"], "response.output_item.done");

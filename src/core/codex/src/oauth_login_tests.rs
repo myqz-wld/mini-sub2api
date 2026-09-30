@@ -4,6 +4,7 @@ use crate::test_support::test_jwt;
 use axum::Json;
 use axum::Router;
 use axum::routing::post;
+use std::collections::HashMap;
 
 #[tokio::test]
 async fn device_flow_uses_loopback_mock_and_persists_tokens() {
@@ -130,7 +131,7 @@ fn browser_authorize_url_uses_codex_originator_and_registered_ports() {
     };
     let url = authorize_url(
         &config,
-        &format!("http://localhost:{DEFAULT_CALLBACK_PORT}/auth/callback"),
+        &format!("http://127.0.0.1:{DEFAULT_CALLBACK_PORT}/auth/callback"),
         &pkce,
         "state-test",
     )
@@ -143,7 +144,7 @@ fn browser_authorize_url_uses_codex_originator_and_registered_ports() {
     );
     assert_eq!(
         pairs.get("redirect_uri").map(String::as_str),
-        Some("http://localhost:1455/auth/callback")
+        Some("http://127.0.0.1:1455/auth/callback")
     );
     assert!(url.as_str().contains("scope=openid+profile+email"));
     assert_eq!(
@@ -185,13 +186,15 @@ async fn send_callback(
         .await
         .expect("callback listener");
     let address = listener.local_addr().expect("callback address");
-    let task =
-        tokio::spawn(async move { receive_browser_callback(listener, expected_state).await });
+    let redirect_uri = browser_redirect_uri(&listener).unwrap();
+    let task = tokio::spawn(async move {
+        receive_browser_callback(listener, expected_state, &redirect_uri).await
+    });
     let mut stream = tokio::net::TcpStream::connect(address)
         .await
         .expect("connect callback");
     let request = format!(
-        "GET /auth/callback?code=code-test&state={supplied_state} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        "GET /auth/callback?code=code-test&state={supplied_state} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
     );
     stream
         .write_all(request.as_bytes())
@@ -203,4 +206,85 @@ async fn send_callback(
         .await
         .expect("read callback response");
     (task.await.expect("callback task"), response)
+}
+
+#[tokio::test]
+async fn browser_flow_reuses_numeric_redirect_for_authorize_and_exchange() {
+    let callback = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let redirect = browser_redirect_uri(&callback).unwrap();
+    let expected = redirect.clone();
+    let mock = spawn_loopback(Router::new().route("/oauth/token",post(move |body: String| {
+        let expected=expected.clone();
+        async move {
+            let fields: HashMap<_,_> = url::form_urlencoded::parse(body.as_bytes()).into_owned().collect();
+            assert_eq!(fields.get("redirect_uri"),Some(&expected));
+            Json(serde_json::json!({"id_token":test_jwt(Some("synthetic-browser"),3600),"access_token":test_jwt(None,3600),"refresh_token":"synthetic-browser-refresh"}))
+        }
+    }))).await;
+    let config = OAuthConfig {
+        issuer: mock.base_url.clone(),
+        client_id: "synthetic-client".into(),
+        upstream_url: format!("{}/responses", mock.base_url),
+        fingerprint_mode: crate::fingerprint::FingerprintMode::Device,
+    };
+    let pkce = generate_pkce();
+    let url = authorize_url(&config, &redirect, &pkce, "synthetic-state").unwrap();
+    let authorized = url
+        .query_pairs()
+        .find(|(key, _)| key == "redirect_uri")
+        .unwrap()
+        .1
+        .into_owned();
+    assert_eq!(authorized, redirect);
+    let parsed = Url::parse(&authorized).unwrap();
+    assert_eq!(parsed.host_str(), Some("127.0.0.1"));
+    assert_eq!(parsed.port(), Some(callback.local_addr().unwrap().port()));
+    let client = Client::builder().no_proxy().build().unwrap();
+    exchange_code(&client, &config, &authorized, &pkce, "synthetic-code")
+        .await
+        .unwrap();
+}
+
+#[test]
+fn browser_callback_rejects_duplicate_fields_encoded_paths_and_wrong_authorities() {
+    let expected = Url::parse("http://127.0.0.1:32145/auth/callback").unwrap();
+    let valid = "/auth/callback?code=synthetic-code&state=synthetic-state";
+    let parse = |target: &str, host: &str| {
+        parse_browser_callback(
+            format!("GET {target} HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes(),
+            "synthetic-state",
+            &expected,
+        )
+    };
+    assert_eq!(parse(valid, "127.0.0.1:32145").unwrap(), "synthetic-code");
+    for target in [
+        "/auth/callback?code=one&code=two&state=synthetic-state",
+        "/auth/callback?code=one&state=wrong&state=synthetic-state",
+        "/auth/callback?code=one&state=synthetic-state&error=denied",
+        "/auth/callback?error=one&error=two&state=synthetic-state",
+        "/auth/callback?code=one&state=wrong",
+        "/auth/callback?code=&state=synthetic-state",
+        "/auth/%63allback?code=one&state=synthetic-state",
+        "/auth/callback%2f?code=one&state=synthetic-state",
+        "//127.0.0.1:32145/auth/callback?code=one&state=synthetic-state",
+    ] {
+        assert!(parse(target, "127.0.0.1:32145").is_err());
+    }
+    for host in [
+        "127.0.0.1:32146",
+        "localhost:32145",
+        "127.0.0.1",
+        "127.0.0.1:32145\r\nHost: 127.0.0.1:32145",
+    ] {
+        assert!(parse(valid, host).is_err());
+    }
+    let legacy = Url::parse("http://localhost:32145/auth/callback").unwrap();
+    assert!(
+        parse_browser_callback(
+            format!("GET {valid} HTTP/1.1\r\nHost: localhost:32145\r\n\r\n").as_bytes(),
+            "synthetic-state",
+            &legacy
+        )
+        .is_ok()
+    );
 }

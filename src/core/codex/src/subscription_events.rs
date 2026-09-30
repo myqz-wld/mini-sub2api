@@ -130,6 +130,11 @@ impl ContextStore {
         event: &Value,
         terminal: Option<bool>,
     ) -> anyhow::Result<()> {
+        // Metadata can name a completed prewarm while the first business operation is active.
+        // Its routing owner is checked separately; it never establishes response ownership.
+        if event.get("type").and_then(Value::as_str) == Some("response.metadata") {
+            return Ok(());
+        }
         let mut inner = self
             .inner
             .lock()

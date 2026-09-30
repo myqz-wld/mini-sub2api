@@ -9,8 +9,8 @@ import (
 
 const websocketFailureTail = time.Second
 
-// One bounded failed response can retain usage facts after releasing its lane.
-// A response ID and operation generation prevent its footer from owning a new turn.
+// A retired stream may read one bounded failure tail for usage, but never admit
+// another create. Expiring this record must not clear websocketSession.retired.
 type websocketFailedOperation struct {
 	operation  *websocketOperation
 	generation uint64
@@ -95,5 +95,14 @@ func (s *websocketSession) expireFailureTail() {
 	s.mu.Unlock()
 	if operation != nil {
 		s.finishOperation(operation, storage.RequestUpstreamErr)
+	}
+}
+
+func stopWebSocketTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
 	}
 }
