@@ -140,7 +140,7 @@ provides no JavaScript bridge or claim of complete default-native code-mode equi
 Codex 0.158.0 `configuration_update` input items retain their reasoning effort and history position
 in stored history, without item IDs or turn stamps. The fixed native feature policy disables effort
 updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags survive normalization; optional tool observations follow the budgets below.
-Guardian requests retain `x-codex-guardian`; reviewer requests omit ordinary
+Guardian requests retain `x-codex-guardian`; backend reviewer requests with that header omit ordinary
 service-tier/routing hints, use the native late HTTP/WS header merge position, and their parent
 response IDs require an existing mapping in the same Key.
 Ordinary Subscription callers receive the backend Guardian credit metadata flag. Classifiers use
@@ -159,7 +159,13 @@ lower `const` to a one-element `enum` and keep the native subset. Both paths use
 ordering and omit null optional schema fields. Search actions place `query` before `queries`. Enum
 business objects and free output schemas keep their content/order. JSON numbers retain arbitrary
 precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
-strictness is false for basic Guardian. Invalid optional container/value types are logged and
+strictness is false for basic Guardian. Basic review is also recognized by exact `guardian_review`
+values in `thread_source` or `turn_trigger` within serialized `x-codex-turn-metadata` (body first,
+then header). This covers custom providers and review model overrides without the backend reviewer
+header, preserving optional assessment fields such as `risk_level`. Metadata alone does not select
+backend reviewer routing or remove a supported service tier. Explicit reviewer/classifier headers
+retain precedence; a generic `x-openai-subagent: guardian` does not identify a basic review.
+Invalid optional container/value types are logged and
 ignored before defaults; unknown nonempty string efforts and opaque business values remain valid.
 Unsigned 64-bit effort strings serialize as JSON numbers; numeric native values are accepted,
 while turn metadata retains the selected string. `ultra` resolves by the strict model catalog

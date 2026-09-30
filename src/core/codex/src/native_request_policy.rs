@@ -6,7 +6,8 @@ use serde_json::{Map, Value, json};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Role {
     Model,
-    Reviewer,
+    // The backend header selects special routing independently of basic review semantics.
+    Reviewer { backend: bool },
     Classifier,
     Memory,
 }
@@ -17,7 +18,7 @@ impl Role {
             .and_then(|v| v.to_str().ok())
         {
             Some("classifier") => return Self::Classifier,
-            Some("reviewer") => return Self::Reviewer,
+            Some("reviewer") => return Self::Reviewer { backend: true },
             _ => {}
         }
         let raw = object
@@ -29,11 +30,15 @@ impl Role {
                     .get("x-codex-turn-metadata")
                     .and_then(|v| v.to_str().ok())
             });
-        if raw
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
-            .is_some_and(|v| v["request_kind"] == "memory")
-        {
+        let turn = raw.and_then(|s| serde_json::from_str::<Value>(s).ok());
+        if turn.as_ref().is_some_and(|v| v["request_kind"] == "memory") {
             Self::Memory
+        } else if turn.as_ref().is_some_and(|v| {
+            v["thread_source"] == "guardian_review" || v["turn_trigger"] == "guardian_review"
+        }) {
+            // Codex omits the backend reviewer header for custom providers/model overrides,
+            // but those basic Guardian sessions still use a non-strict output schema.
+            Self::Reviewer { backend: false }
         } else {
             Self::Model
         }
@@ -41,7 +46,7 @@ impl Role {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Model => "model",
-            Self::Reviewer => "reviewer",
+            Self::Reviewer { .. } => "reviewer",
             Self::Classifier => "classifier",
             Self::Memory => "memory",
         }
@@ -163,7 +168,7 @@ pub(crate) fn apply_controls(
         object.insert("parallel_tool_calls".into(), false.into());
     }
     if let Some(tier) = object.get("service_tier")
-        && (role == Role::Reviewer
+        && (role == Role::Reviewer { backend: true }
             || tier
                 .as_str()
                 .is_none_or(|tier| !profile.supports_tier(tier)))
@@ -223,7 +228,7 @@ pub(crate) fn apply_controls(
                     log::record("text.format", "name", "role_policy");
                 }
                 format.insert("name".into(), "codex_output_schema".into());
-                let strict = Value::Bool(role != Role::Reviewer);
+                let strict = Value::Bool(!matches!(role, Role::Reviewer { .. }));
                 if format.get("strict").is_some_and(|value| value != &strict) {
                     log::record("text.format", "strict", "role_policy");
                 }
