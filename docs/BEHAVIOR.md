@@ -173,7 +173,10 @@ while turn metadata retains the selected string. `ultra` resolves by the strict 
 local metadata may retain the selected alias. Unsupported/default tiers and `summary:none` are
 omitted; `flex` remains available. Lite removes image detail, including in structured tool outputs.
 Function/custom tool outputs retain encrypted content; ordinary message and agent-message content
-use their separate native enums. Reasoning omits a content list with no reasoning_text (including
+use their separate native enums. Agent history carries `author` and `recipient`, with `input_text`
+and opaque `encrypted_content` blocks. A canonical leading `Message Type: NEW_TASK` line participates
+in implicit new-turn selection; ordinary agent mail continues the existing turn. Explicit turn IDs
+and pending tool calls retain their existing precedence. Reasoning omits a content list with no reasoning_text (including
 empty and text-only lists), preserves complete mixed lists, and preserves explicit null. Inner turn metadata follows native
 struct order plus sorted extras; outer client metadata keeps its separate HashMap ordering policy.
 Legacy item_reference carriers still require scoped ownership, then are logged and omitted from
@@ -237,8 +240,8 @@ compaction share this recovery path. V2 may append one terminal `compaction_trig
 complete source history; repeated/nonterminal triggers and triggers on ordinary turns do not
 qualify for import. Initial import requires no explicit
 session/current-turn/thread lineage, bound WS session, selected baseline/checkpoint, external
-conversation or response reference. The caller must supply a user-led history with closed tool
-dependencies: messages, direct function/custom calls and results, supplied reasoning ciphertext,
+conversation or response reference. The caller must supply a user- or agent-led history with closed tool
+dependencies: messages, typed agent messages, direct function/custom calls and results, supplied reasoning ciphertext,
 and ordinary/Lite setup. Conflicting declarations of one item ID, item references,
 missing ciphertext on reasoning items and unsupported
 opaque control items do not qualify. No source body or active source work may remain available.
@@ -355,6 +358,11 @@ matching observed output and capacity, publish a replacement window under the re
 
 - Explicit V2 retains caller user/system/developer context and formed Lite setup; the actual compaction
   item replaces covered assistant/reasoning/tool/compaction output and removes the trigger.
+  Agent messages follow native selective retention: keep tasks and peer/parent mail, omit descendant
+  progress/channel posts and final answers, and omit items above the 10,000 estimated-token bound.
+  The estimate includes UTF-8 author/recipient/text bytes and the native opaque-ciphertext size
+  estimate. Invalid agent shapes require a complete client replacement. Client-wide truncation
+  choices remain caller-owned.
 - In-band compaction retains that item and later output, plus formed Lite's leading setup.
   Ordinary-to-Lite setup still comes from each request's settings.
 

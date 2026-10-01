@@ -24,7 +24,7 @@ pub(crate) struct RequestIdentityEvidence {
     pub(crate) parent_turn: Option<String>,
     pub(crate) turn_started_at_unix_ms: Option<i64>,
     pub(crate) items: Vec<ItemIdentityEvidence>,
-    pub(crate) new_user_submission: bool,
+    pub(crate) new_turn_input: bool,
     pub(crate) window_number: Option<u64>,
     pub(crate) request_kind: String,
     classifier: bool,
@@ -35,7 +35,7 @@ pub(crate) struct ItemIdentityEvidence {
     pub(crate) id: Option<String>,
     pub(crate) turn_id: Option<String>,
     pub(crate) had_create_time: bool,
-    pub(crate) is_user: bool,
+    pub(crate) is_turn_input: bool,
 }
 
 impl RequestIdentityEvidence {
@@ -129,7 +129,7 @@ impl RequestIdentityEvidence {
             parent_turn,
             turn_started_at_unix_ms,
             items: item_evidence(object),
-            new_user_submission: new_user_submission(object),
+            new_turn_input: new_turn_input(object),
             window_number: window.as_deref().and_then(window_number),
             request_kind,
             classifier,
@@ -237,7 +237,7 @@ fn item_evidence(object: &Map<String, Value>) -> Vec<ItemIdentityEvidence> {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(Value::as_object)
+        .filter(|item| item.is_object())
         .map(|item| {
             let metadata = item
                 .get("internal_chat_message_metadata_passthrough")
@@ -248,7 +248,7 @@ fn item_evidence(object: &Map<String, Value>) -> Vec<ItemIdentityEvidence> {
                 had_create_time: metadata
                     .and_then(|metadata| metadata.get("create_time"))
                     .is_some_and(Value::is_number),
-                is_user: item.get("role").and_then(Value::as_str) == Some("user"),
+                is_turn_input: crate::agent_message::starts_turn(item),
             }
         })
         .collect()
@@ -266,14 +266,14 @@ fn item_turn_id(metadata: Option<&Map<String, Value>>) -> Option<String> {
         })
 }
 
-fn new_user_submission(object: &Map<String, Value>) -> bool {
+fn new_turn_input(object: &Map<String, Value>) -> bool {
     match object.get("input") {
         Some(Value::String(value)) => !value.is_empty(),
         Some(Value::Array(items)) => items
             .iter()
             .rev()
-            .find_map(Value::as_object)
-            .is_some_and(|item| item.get("role").and_then(Value::as_str) == Some("user")),
+            .find(|item| item.is_object())
+            .is_some_and(crate::agent_message::starts_turn),
         _ => false,
     }
 }

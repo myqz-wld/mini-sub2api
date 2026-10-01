@@ -52,7 +52,7 @@ impl ContextPlan {
 }
 
 fn self_contained(items: &[Value], detached_turn_import: bool, compaction: bool) -> bool {
-    let mut seen_user = false;
+    let mut seen_input = false;
     let mut ids = std::collections::BTreeMap::new();
     for (index, item) in items.iter().enumerate() {
         if let Some(id) = item
@@ -69,16 +69,21 @@ fn self_contained(items: &[Value], detached_turn_import: bool, compaction: bool)
         }
         match item.get("type").and_then(Value::as_str) {
             Some("message") => match item.get("role").and_then(Value::as_str) {
-                Some("user") => seen_user = true,
+                Some("user") => seen_input = true,
                 Some("system" | "developer") => {}
-                Some("assistant") if seen_user => {}
+                Some("assistant") if seen_input => {}
                 _ => return false,
             },
+            // A native subagent can start with agent input and no user-role item.
+            // Validate the typed content before granting the existing import rules.
+            Some("agent_message") if crate::agent_message::AgentMessage::read(item).is_some() => {
+                seen_input = true;
+            }
             Some("additional_tools" | "configuration_update") => {}
             // V2 appends one control after its complete source history. It does not establish
             // history by itself or make repeated/nonterminal controls eligible for import.
-            Some("compaction_trigger") if compaction && seen_user && index + 1 == items.len() => {}
-            Some("reasoning") if seen_user => {
+            Some("compaction_trigger") if compaction && seen_input && index + 1 == items.len() => {}
+            Some("reasoning") if seen_input => {
                 if detached_turn_import
                     && item
                         .get("encrypted_content")
@@ -93,18 +98,18 @@ fn self_contained(items: &[Value], detached_turn_import: bool, compaction: bool)
                 | "function_call_output"
                 | "custom_tool_call"
                 | "custom_tool_call_output",
-            ) if seen_user => {}
+            ) if seen_input => {}
             Some(
                 "local_shell_call"
                 | "web_search_call"
                 | "image_generation_call"
                 | "tool_search_call"
                 | "tool_search_output",
-            ) if seen_user && !detached_turn_import => {}
+            ) if seen_input && !detached_turn_import => {}
             _ => return false,
         }
     }
-    seen_user
+    seen_input
 }
 
 impl HistoryImport<'_> {

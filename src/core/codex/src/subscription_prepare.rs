@@ -182,11 +182,9 @@ impl ContextStore {
         };
         let awaiting_tools = dependencies.awaiting_tools();
         dependencies.append(suffix)?;
-        let new_user = suffix
-            .iter()
-            .any(|item| item.get("role").and_then(Value::as_str) == Some("user"));
+        let new_turn_input = suffix.iter().any(crate::agent_message::starts_turn);
         let turn = evidence.turn.clone().or_else(|| {
-            if !new_user || awaiting_tools {
+            if !new_turn_input || awaiting_tools {
                 baseline
                     .as_ref()
                     .and_then(|r| r.identity.turn_id.clone())

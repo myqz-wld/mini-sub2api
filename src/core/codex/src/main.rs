@@ -1,3 +1,4 @@
+mod agent_message;
 mod ascii_json;
 mod build_info;
 mod cli;

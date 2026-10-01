@@ -131,6 +131,12 @@ fn retain_explicit(source: &[&Arc<Item>], format: Format) -> Option<Vec<Arc<Item
                 Some("assistant") => {}
                 _ => return None,
             },
+            "agent_message" => {
+                let agent = crate::agent_message::AgentMessage::read(&item.value)?;
+                if agent.retain_for_compaction() {
+                    retained.push(Arc::clone(item));
+                }
+            }
             "reasoning"
             | "compaction"
             | "context_compaction"

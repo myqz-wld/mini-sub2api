@@ -127,7 +127,7 @@ pub(crate) fn resolve_and_project(
     };
     let turn_key = if let Some(raw) = current_turn_raw.as_deref() {
         turn_key_for_raw(editor, raw)?
-    } else if !evidence.new_user_submission
+    } else if !evidence.new_turn_input
         && let Some(current) = editor.current_turn_id(&thread_id)
     {
         turn_key_for_raw(editor, &current)?
@@ -393,7 +393,7 @@ fn turn_anchor(object: &Map<String, Value>, evidence: &RequestIdentityEvidence) 
         .items
         .iter()
         .rev()
-        .find(|item| item.is_user)
+        .find(|item| item.is_turn_input)
         .and_then(|item| item.id.as_deref())
     {
         return id.as_bytes().to_vec();
@@ -404,7 +404,7 @@ fn turn_anchor(object: &Map<String, Value>, evidence: &RequestIdentityEvidence) 
         .filter(|value| !value.is_empty())
     {
         let mut anchor = previous.as_bytes().to_vec();
-        if let Some(user) = latest_user_anchor(object) {
+        if let Some(user) = latest_turn_input_anchor(object) {
             anchor.extend_from_slice(&user);
         }
         return anchor;
@@ -412,13 +412,13 @@ fn turn_anchor(object: &Map<String, Value>, evidence: &RequestIdentityEvidence) 
     Uuid::now_v7().as_bytes().to_vec()
 }
 
-fn latest_user_anchor(object: &Map<String, Value>) -> Option<Vec<u8>> {
+fn latest_turn_input_anchor(object: &Map<String, Value>) -> Option<Vec<u8>> {
     object
         .get("input")?
         .as_array()?
         .iter()
         .rev()
-        .find(|item| item.get("role").and_then(Value::as_str) == Some("user"))?
+        .find(|item| crate::agent_message::starts_turn(item))?
         .as_object()
         .map(item_anchor)
 }

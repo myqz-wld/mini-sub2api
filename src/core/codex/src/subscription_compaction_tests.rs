@@ -11,6 +11,9 @@ mod checkpoint_tests;
 #[path = "subscription_compaction_rebuild_tests.rs"]
 mod rebuild_tests;
 
+#[path = "subscription_compaction_agent_tests.rs"]
+mod agent_tests;
+
 fn compacted(text: &str) -> Value {
     json!({"type":"compaction","id":"cmp_checkpoint","encrypted_content":text})
 }
