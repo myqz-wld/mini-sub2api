@@ -1,6 +1,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+#[path = "subscription_compaction_import_tests.rs"]
+mod compaction_import_tests;
+
 fn historical(turn: &str) -> Value {
     json!({"type":"message","id":"msg_history_copy","role":"assistant",
         "content":[{"type":"output_text","text":"Synthetic historical answer"}],

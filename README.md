@@ -33,6 +33,9 @@ For the Codex CLI, follow the [client setup](docs/OPERATIONS.md#codex-client).
 Guardian auto-review preserves its non-strict output schema when `guardian_review` turn
 metadata identifies the request, including custom providers without the reviewer header.
 
+Complete anonymous message/tool history can recover ordinary turns and compaction after
+cached history expires or Core restarts; the same [history validation rules](docs/BEHAVIOR.md#state-and-limits) apply.
+
 After a failed WebSocket response, open a new connection for subsequent work.
 The gateway retires the failed stream and never automatically replays its request;
 a matching failure footer may supply usage for up to one second before closure.

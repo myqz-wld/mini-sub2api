@@ -18,6 +18,8 @@ impl ContextPlan {
         identity: &RequestIdentityEvidence,
         bound: bool,
     ) {
+        let compaction = identity.request_kind == "compaction";
+        let replay = compaction || identity.request_kind == "turn";
         // Complete first replay can carry explicit session/turn identity. This does not grant
         // the separate ability to copy expired historical turns from an unrelated owner.
         self.preserve_imported_outputs = !bound
@@ -26,9 +28,9 @@ impl ContextPlan {
             && self.checkpoint.is_none()
             && self.restored_input.is_none()
             && !self.external_context
-            && identity.request_kind == "turn"
+            && replay
             && !self.dependencies.awaiting_tools()
-            && self_contained(&self.evidence.input, false);
+            && self_contained(&self.evidence.input, false, compaction);
         self.allow_history_import = !bound
             && self.evidence.session.is_none()
             && self.evidence.turn.is_none()
@@ -37,7 +39,7 @@ impl ContextPlan {
             && self.checkpoint.is_none()
             && self.restored_input.is_none()
             && !self.external_context
-            && identity.request_kind == "turn"
+            && replay
             && identity.thread.is_none()
             && identity.parent_thread.is_none()
             && identity.forked_from_thread.is_none()
@@ -45,14 +47,14 @@ impl ContextPlan {
             && identity.parent_turn.is_none()
             && !identity.explicit_thread_lineage
             && !self.dependencies.awaiting_tools()
-            && self_contained(&self.evidence.input, true);
+            && self_contained(&self.evidence.input, true, compaction);
     }
 }
 
-fn self_contained(items: &[Value], detached_turn_import: bool) -> bool {
+fn self_contained(items: &[Value], detached_turn_import: bool, compaction: bool) -> bool {
     let mut seen_user = false;
     let mut ids = std::collections::BTreeMap::new();
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         if let Some(id) = item
             .get("id")
             .and_then(Value::as_str)
@@ -73,6 +75,9 @@ fn self_contained(items: &[Value], detached_turn_import: bool) -> bool {
                 _ => return false,
             },
             Some("additional_tools" | "configuration_update") => {}
+            // V2 appends one control after its complete source history. It does not establish
+            // history by itself or make repeated/nonterminal controls eligible for import.
+            Some("compaction_trigger") if compaction && seen_user && index + 1 == items.len() => {}
             Some("reasoning") if seen_user => {
                 if detached_turn_import
                     && item

@@ -232,7 +232,10 @@ Full history/settings/comparison data expire after **3 business-idle hours**, on
 bulk expiry. Remote continuation cannot rebuild missing bodies; complete caller input can.
 Compaction/injection may require a client replacement before full reconstruction.
 Anonymous full replay can import old `internal_chat_message_metadata_passthrough.turn_id` metadata
-after source bodies expire, are evicted or disappear on restart. Initial import requires no explicit
+after source bodies expire, are evicted or disappear on restart. Ordinary turns and local/V2
+compaction share this recovery path. V2 may append one terminal `compaction_trigger` after the
+complete source history; repeated/nonterminal triggers and triggers on ordinary turns do not
+qualify for import. Initial import requires no explicit
 session/current-turn/thread lineage, bound WS session, selected baseline/checkpoint, external
 conversation or response reference. The caller must supply a user-led history with closed tool
 dependencies: messages, direct function/custom calls and results, supplied reasoning ciphertext,
