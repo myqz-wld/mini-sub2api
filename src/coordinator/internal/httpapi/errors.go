@@ -132,6 +132,9 @@ func writeOpenAIErrorWithUsageWindow(
 	if code == "usage_limit_reached" && limitWindowMinutes != nil {
 		publicError["limit_window_minutes"] = *limitWindowMinutes
 	}
+	if retryMetadata := writer.Header().Get("X-Retry-Metadata"); retryMetadata != "" {
+		publicError["headers"] = map[string]string{"x-retry-metadata": retryMetadata}
+	}
 	_ = json.NewEncoder(writer).Encode(map[string]any{"error": publicError})
 }
 

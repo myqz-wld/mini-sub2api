@@ -42,11 +42,16 @@ pub(crate) async fn build_http_response(
     response_state: Option<ResponseStateContext>,
     gateway_request_id: &str,
 ) -> Result<Response<Body>, CoreFailure> {
-    let filtered_headers = filtered_provider_headers(upstream.headers(), gateway_request_id)
+    let mut filtered_headers = filtered_provider_headers(upstream.headers(), gateway_request_id)
         .map_err(|_| CoreFailure::UpstreamResponseFailed)?;
     if profile.uses_identity_state() && !upstream.status().is_success() {
         let status = upstream.status();
-        let failure = crate::response_failure::classify_http(upstream).await;
+        let (failure, retry_metadata) = crate::response_failure::classify_http(upstream).await;
+        if let Some(value) = retry_metadata {
+            // The coordinator restores the nested public error header from this
+            // allowlisted control without forwarding the provider error body.
+            filtered_headers.insert("x-retry-metadata", value);
+        }
         return normalized_upstream_failure(
             status,
             ttfb_ms,

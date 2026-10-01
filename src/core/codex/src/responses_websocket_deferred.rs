@@ -199,7 +199,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                 return;
             }
             let metadata = failure_before_websocket_delivery(&failure.error);
-            if !connect_support::send_protocol_failure(&mut internal, &failure.error).await {
+            if !connect_support::send_protocol_failure(&mut internal, &failure).await {
                 return;
             }
             let _ = internal.send(failure_close(metadata)).await;
@@ -277,8 +277,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                         return;
                     }
                     let metadata = failure_before_websocket_delivery(&failure.error);
-                    if !connect_support::send_protocol_failure(&mut internal, &failure.error).await
-                    {
+                    if !connect_support::send_protocol_failure(&mut internal, &failure).await {
                         return;
                     }
                     let _ = internal.send(failure_close(metadata)).await;

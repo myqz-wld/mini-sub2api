@@ -57,6 +57,7 @@ var publicResponseHeaders = map[string]bool{
 	"Cache-Control":                         true,
 	"Retry-After":                           true,
 	"Retry-After-Ms":                        true,
+	"X-Retry-Metadata":                      true,
 	"Server-Timing":                         true,
 	"Openai-Model":                          true,
 	"Openai-Processing-Ms":                  true,

@@ -40,6 +40,8 @@ After a failed WebSocket response, open a new connection for subsequent work.
 The gateway retires the failed stream and never automatically replays its request;
 a matching failure footer may supply usage for up to one second before closure.
 Failure-tail accounting does not wait for the client to acknowledge closure.
+Upstream `x-retry-metadata`, including `NO_MORE_RETRY`, survives in response headers
+and streamed error events so clients retain the upstream retry signal.
 
 ```bash
 curl --no-buffer http://127.0.0.1:8787/v1/responses \

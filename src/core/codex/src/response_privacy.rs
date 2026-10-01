@@ -5,6 +5,10 @@ use crate::lifecycle_carriers::{CarrierAction, response_header_action};
 
 pub(crate) const FAILURE_MESSAGE: &str = "The upstream request failed.";
 
+#[cfg(test)]
+#[path = "response_retry_metadata_tests.rs"]
+mod retry_metadata_tests;
+
 pub(crate) fn filter_response(value: &mut Value, request_id: &str) {
     let Some(object) = value.as_object_mut() else {
         return;
@@ -166,6 +170,19 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
         })
         .unwrap_or("upstream_response_failed");
     let mut error = json!({"code": code, "message": FAILURE_MESSAGE});
+    if let Some(headers) = field("headers").and_then(Value::as_object) {
+        let headers: Map<String, Value> = headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("x-retry-metadata"))
+            .filter_map(|(name, value)| {
+                let mut value = value.clone();
+                header_value(&mut value, None, 0).then(|| (name.clone(), value))
+            })
+            .collect();
+        if !headers.is_empty() {
+            error["headers"] = headers.into();
+        }
+    }
     if matches!(code, "rate_limit_exceeded" | "slow_down")
         && let Some(delay) = field("message")
             .and_then(Value::as_str)

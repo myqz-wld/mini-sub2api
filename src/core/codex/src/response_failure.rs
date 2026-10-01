@@ -118,9 +118,27 @@ pub(crate) fn usage_limit_window(kind: Option<&str>, value: Option<&Value>) -> O
         .and_then(|minutes| u16::try_from(minutes).ok())
 }
 
+pub(crate) fn retry_metadata(bytes: &[u8]) -> Option<http::HeaderValue> {
+    if bytes.len() > 64 * 1024 {
+        return None;
+    }
+    let body: Value = serde_json::from_slice(bytes).ok()?;
+    let headers = body.pointer("/error/headers")?.as_object()?;
+    let (_, value) = headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("x-retry-metadata"))?;
+    let value = value.as_str()?;
+    if value.len() > crate::subscription_routing::MAX_ROUTING_TOKEN_BYTES {
+        return None;
+    }
+    http::HeaderValue::from_str(value).ok()
+}
+
 // A bounded, separately timed read only for native categorized rejection statuses. Other
 // failures keep the established content-free response and never read their body.
-pub(super) async fn classify_http(upstream: reqwest::Response) -> CoreFailure {
+pub(super) async fn classify_http(
+    upstream: reqwest::Response,
+) -> (CoreFailure, Option<http::HeaderValue>) {
     const MAXIMUM: usize = 64 * 1024;
     let status = upstream.status();
     if !matches!(
@@ -133,7 +151,7 @@ pub(super) async fn classify_http(upstream: reqwest::Response) -> CoreFailure {
         .content_length()
         .is_some_and(|n| n > MAXIMUM as u64)
     {
-        return CoreFailure::UpstreamResponseFailed;
+        return (CoreFailure::UpstreamResponseFailed, None);
     }
     let body = tokio::time::timeout(Duration::from_secs(1), async {
         let mut stream = upstream.bytes_stream();
@@ -145,10 +163,13 @@ pub(super) async fn classify_http(upstream: reqwest::Response) -> CoreFailure {
             }
             bytes.extend_from_slice(&chunk);
         }
-        http_category(status, &bytes)
+        Some((
+            http_category(status, &bytes).unwrap_or(CoreFailure::UpstreamResponseFailed),
+            retry_metadata(&bytes),
+        ))
     })
     .await;
     body.ok()
         .flatten()
-        .unwrap_or(CoreFailure::UpstreamResponseFailed)
+        .unwrap_or((CoreFailure::UpstreamResponseFailed, None))
 }

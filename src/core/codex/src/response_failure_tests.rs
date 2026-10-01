@@ -118,7 +118,10 @@ async fn native_http_categories_require_exact_status_and_bounded_body() {
         let category = tokio::time::timeout(Duration::from_secs(2), classify_http(response))
             .await
             .unwrap();
-        assert!(matches!(category, CoreFailure::UpstreamResponseFailed));
+        assert!(matches!(
+            category,
+            (CoreFailure::UpstreamResponseFailed, None)
+        ));
     }
 }
 

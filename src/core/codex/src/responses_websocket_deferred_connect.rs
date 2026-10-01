@@ -15,6 +15,7 @@ use http::StatusCode;
 pub(super) struct DeferredConnectFailure {
     pub(super) error: CoreFailure,
     pub(super) provider_request_id: Option<String>,
+    retry_metadata: Option<http::HeaderValue>,
 }
 
 impl DeferredConnectFailure {
@@ -22,6 +23,7 @@ impl DeferredConnectFailure {
         Self {
             error,
             provider_request_id: None,
+            retry_metadata: None,
         }
     }
 }
@@ -74,6 +76,7 @@ pub(super) async fn connect(
         .map_err(|error| DeferredConnectFailure {
             error,
             provider_request_id: initial_provider_request_id.clone(),
+            retry_metadata: None,
         })?;
         drop(guard);
         crate::server::validate_recovery_owner(&context.resolved, &retry)
@@ -89,6 +92,7 @@ pub(super) async fn connect(
         .map_err(|error| DeferredConnectFailure {
             error,
             provider_request_id: initial_provider_request_id,
+            retry_metadata: None,
         })?;
         context.resolved = retry;
     }
@@ -96,9 +100,18 @@ pub(super) async fn connect(
         return Err(DeferredConnectFailure {
             error: CoreFailure::UpstreamAuthFailed,
             provider_request_id: provider_request_id(handshake.headers()),
+            retry_metadata: None,
         });
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
+        let retry_metadata = match &handshake {
+            WebSocketHandshake::Rejected(response) => response
+                .body()
+                .as_deref()
+                .and_then(crate::response_failure::retry_metadata),
+            _ => None,
+        }
+        .or_else(|| handshake.headers().get("x-retry-metadata").cloned());
         let error = match &handshake {
             WebSocketHandshake::Rejected(response) => response
                 .body()
@@ -110,6 +123,7 @@ pub(super) async fn connect(
         return Err(DeferredConnectFailure {
             error,
             provider_request_id: provider_request_id(handshake.headers()),
+            retry_metadata,
         });
     }
     let turn_state = handshake.headers().get("x-codex-turn-state").cloned();
@@ -121,11 +135,16 @@ pub(super) async fn connect(
         WebSocketHandshake::Rejected(response) => Err(DeferredConnectFailure {
             error: CoreFailure::Internal,
             provider_request_id: provider_request_id(response.headers()),
+            retry_metadata: None,
         }),
     }
 }
 
-pub(super) async fn send_protocol_failure(internal: &mut WebSocket, error: &CoreFailure) -> bool {
+pub(super) async fn send_protocol_failure(
+    internal: &mut WebSocket,
+    failure: &DeferredConnectFailure,
+) -> bool {
+    let error = &failure.error;
     if !error.is_native_response() {
         return true;
     }
@@ -136,6 +155,13 @@ pub(super) async fn send_protocol_failure(internal: &mut WebSocket, error: &Core
     }
     if let Some(minutes) = error.limit_window_minutes() {
         event["error"]["limit_window_minutes"] = minutes.into();
+    }
+    if let Some(value) = failure
+        .retry_metadata
+        .as_ref()
+        .and_then(|value| value.to_str().ok())
+    {
+        event["error"]["headers"] = serde_json::json!({"x-retry-metadata":value});
     }
     internal
         .send(Message::Text(event.to_string().into()))

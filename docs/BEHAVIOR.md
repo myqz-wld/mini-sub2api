@@ -344,6 +344,11 @@ and typed diagnostics. Native quota classifiers also receive their fixed `error.
 For `usage_limit_reached`, optional integer `limit_window_minutes` survives only within
 0..65535; malformed or unrelated values are omitted in HTTP, deferred WS and streamed errors.
 
+Public response headers and JSON/SSE/WebSocket event header containers preserve
+`x-retry-metadata` verbatim, including `NO_MORE_RETRY`. Nested error headers retain
+only this retry field; other error extensions remain private. JSON header names are
+matched case-insensitively, with existing header value, size and nesting checks.
+
 V2 compaction requires matching completion and exactly one valid encrypted item-done; a final array
 alone is insufficient. Concurrent same-base commits advance once. With complete source history,
 matching observed output and capacity, publish a replacement window under the response ID:

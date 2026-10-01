@@ -11,6 +11,7 @@ import (
 func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	source := make(http.Header)
 	source.Set("Cache-Control", "no-store")
+	source["x-retry-metadata"] = []string{"NO_MORE_RETRY"}
 	source.Set("X-Request-Id", "provider-raw")
 	source.Set("X-Codex-Turn-State", "opaque")
 	source["x-codex-safety-buffering-enabled"] = []string{"true", "false"}
@@ -24,6 +25,7 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	destination := make(http.Header)
 	ttfb := copyResponseHeaders(destination, source, "req_gateway")
 	if destination.Get("Cache-Control") != "no-store" ||
+		destination.Get("X-Retry-Metadata") != "NO_MORE_RETRY" ||
 		destination.Get("X-Request-Id") != "req_gateway" ||
 		destination.Get("X-Codex-Turn-State") != "opaque" ||
 		strings.Join(destination.Values("X-Codex-Safety-Buffering-Enabled"), ",") != "true,false" ||

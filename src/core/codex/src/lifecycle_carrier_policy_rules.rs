@@ -7,6 +7,7 @@ pub(super) const RULES: &[CarrierRule] = &[
     header("cache-control", None, CarrierAction::Opaque),
     header("retry-after", None, CarrierAction::Opaque),
     header("retry-after-ms", None, CarrierAction::Opaque),
+    header("x-retry-metadata", None, CarrierAction::Opaque),
     header("server-timing", None, CarrierAction::Opaque),
     header("openai-model", None, CarrierAction::Opaque),
     header("openai-processing-ms", None, CarrierAction::Opaque),
