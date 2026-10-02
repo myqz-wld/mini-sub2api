@@ -99,7 +99,19 @@ async fn compacted_same_id_messages_replace_content_and_survive_continuation() {
                     assert_eq!(identity.session_id, seed_identity.session_id);
                     assert_eq!(identity.thread_id, seed_identity.thread_id);
                     assert_eq!(identity.window_number, 1);
-                    assert_rebuilt_content(&next, &upstream_id, &after);
+                    let rebuilt_wire: Value = serde_json::from_slice(&next.body).unwrap();
+                    let rebuilt_id = rebuilt_wire["input"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|item| item["role"] == "user")
+                        .unwrap()["id"]
+                        .clone();
+                    assert_ne!(
+                        rebuilt_id, upstream_id,
+                        "changed local content receives a new pseudonym"
+                    );
+                    assert_rebuilt_content(&next, &rebuilt_id, &after);
                     let next = finish_as(
                         &store,
                         next,
@@ -114,7 +126,7 @@ async fn compacted_same_id_messages_replace_content_and_survive_continuation() {
                     let next = prepare(&store, delta(&next, vec![input("later")]))
                         .await
                         .unwrap();
-                    assert_rebuilt_content(&next, &upstream_id, &after);
+                    assert_rebuilt_content(&next, &rebuilt_id, &after);
                 }
             }
         }

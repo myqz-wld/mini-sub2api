@@ -9,6 +9,7 @@ use std::sync::Arc;
 #[derive(Clone, Default)]
 pub(crate) struct HistoryLineage {
     pub(crate) turns: Arc<BTreeSet<String>>,
+    pub(crate) wire_bindings: Arc<crate::request_content_ids::WireBindings>,
     pub(crate) cost: usize,
 }
 
@@ -22,6 +23,20 @@ impl HistoryLineage {
 }
 
 impl ContextPlan {
+    pub(crate) fn wire_bindings(&self, session: &str) -> crate::request_content_ids::WireBindings {
+        self.baseline
+            .as_ref()
+            .map(|base| (&base.identity, &base.lineage))
+            .or_else(|| {
+                self.checkpoint
+                    .as_ref()
+                    .map(|base| (&base.identity, &base.lineage))
+            })
+            .filter(|(identity, _)| identity.session_id == session)
+            .map(|(_, lineage)| (*lineage.wire_bindings).clone())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn inherit_fork_source(
         &self,
         editor: &mut RequestStateEditor<'_>,
@@ -64,6 +79,7 @@ impl ContextPlan {
         editor: &mut RequestStateEditor<'_>,
         identity: &ResolvedRequestIdentity,
         object: &Map<String, Value>,
+        wire_bindings: crate::request_content_ids::WireBindings,
     ) -> anyhow::Result<HistoryLineage> {
         // Hydration introduces private state absent from the caller's body. Its source must
         // satisfy the same lineage checks as an explicit reference, including omitted item turns.
@@ -106,6 +122,13 @@ impl ContextPlan {
         if let Some(turn) = identity.turn_id.as_deref() {
             lineage.insert(turn);
         }
+        lineage.cost = lineage
+            .cost
+            .saturating_sub(crate::request_content_ids::bindings_cost(
+                &lineage.wire_bindings,
+            ))
+            .saturating_add(crate::request_content_ids::bindings_cost(&wire_bindings));
+        lineage.wire_bindings = Arc::new(wire_bindings);
         Ok(lineage)
     }
 }

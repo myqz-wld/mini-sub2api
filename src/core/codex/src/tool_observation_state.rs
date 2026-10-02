@@ -57,6 +57,15 @@ impl RequestStateEditor<'_> {
                     let mut anchors = std::collections::BTreeSet::from([raw.to_string()]);
                     anchors.extend(self.existing_wire_from_upstream(domain, raw).ok()?);
                     anchors.extend(self.existing_wire_from_downstream(domain, raw).ok()?);
+                    for alias in anchors.clone() {
+                        anchors.extend(
+                            self.content_wire_origins
+                                .get(&(domain, alias))
+                                .into_iter()
+                                .flatten()
+                                .cloned(),
+                        );
+                    }
                     for anchor in anchors {
                         keys.push(
                             self.derived_lookup(kind, &[owner.as_bytes(), anchor.as_bytes()]),
@@ -166,9 +175,17 @@ pub(crate) async fn finalize_frame(
     mut frame: Value,
     maximum: usize,
 ) -> anyhow::Result<String> {
+    let bindings = if budget::has_observations(&frame) {
+        store.contexts.content_origins(namespace, scope, thread)?
+    } else {
+        Vec::new()
+    };
     let thread = thread.to_string();
     store
         .edit(namespace, account, scope, move |editor| {
+            for ((domain, raw), alias) in bindings {
+                editor.record_content_origin(domain, &raw, &alias)?;
+            }
             finalize(editor, &mut frame, &thread);
             crate::responses_websocket_emulation::encode_frame_bounded(&frame, maximum)
                 .map_err(|_| anyhow::anyhow!("observation frame is too large"))

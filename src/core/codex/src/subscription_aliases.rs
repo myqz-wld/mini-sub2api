@@ -5,6 +5,40 @@ use crate::subscription_context::ContextStore;
 use std::collections::HashSet;
 
 impl ContextStore {
+    pub(crate) fn content_origins(
+        &self,
+        namespace: &str,
+        key: &str,
+        thread: &str,
+    ) -> anyhow::Result<Vec<((WireIdDomain, String), String)>> {
+        let scope = Self::scope_key(namespace, key);
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("context state unavailable"))?;
+        let retained = inner
+            .scopes
+            .get(&scope)
+            .into_iter()
+            .flat_map(|s| s.records.values());
+        let active = inner
+            .operations
+            .values()
+            .filter(|op| op.scope == scope)
+            .map(|op| &op.record);
+        Ok(retained
+            .chain(active)
+            .filter(|r| r.identity.thread_id == thread)
+            .flat_map(|r| {
+                r.lineage
+                    .wire_bindings
+                    .origins
+                    .iter()
+                    .map(|((domain, alias), raw)| ((*domain, raw.clone()), alias.clone()))
+            })
+            .collect())
+    }
+
     pub(crate) fn protect_aliases(
         &self,
         state: &PersistedRequestState,
@@ -78,6 +112,20 @@ impl ContextStore {
             ids.extend(sessions.iter().copied());
             ids.extend(turns.iter().copied());
             ids.extend(records.iter().map(|r| r.identity.thread_id.as_str()));
+            ids.extend(records.iter().flat_map(|r| {
+                r.lineage
+                    .wire_bindings
+                    .origins
+                    .keys()
+                    .map(|(_, alias)| alias.as_str())
+            }));
+            let local_upstream: HashSet<_> = scope
+                .wire_ids
+                .values()
+                .filter(|pair| ids.contains(pair.downstream_id.as_str()))
+                .map(|pair| pair.upstream_id.as_str())
+                .collect();
+            ids.extend(local_upstream);
             for (lookup, pair) in &scope.wire_ids {
                 if ids.contains(pair.upstream_id.as_str())
                     || ids.contains(pair.downstream_id.as_str())
@@ -120,10 +168,11 @@ impl ContextStore {
                 }
             }
             for (lookup, entry) in &scope.generated_items {
-                if entry
-                    .turn_id
-                    .as_deref()
-                    .is_some_and(|id| turns.contains(id))
+                if ids.contains(entry.id.as_str())
+                    || entry
+                        .turn_id
+                        .as_deref()
+                        .is_some_and(|id| turns.contains(id))
                 {
                     protected
                         .generated_items

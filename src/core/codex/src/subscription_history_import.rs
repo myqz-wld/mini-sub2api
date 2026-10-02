@@ -20,17 +20,6 @@ impl ContextPlan {
     ) {
         let compaction = identity.request_kind == "compaction";
         let replay = compaction || identity.request_kind == "turn";
-        // Complete first replay can carry explicit session/turn identity. This does not grant
-        // the separate ability to copy expired historical turns from an unrelated owner.
-        self.preserve_imported_outputs = !bound
-            && self.evidence.previous.is_none()
-            && self.baseline.is_none()
-            && self.checkpoint.is_none()
-            && self.restored_input.is_none()
-            && !self.external_context
-            && replay
-            && !self.dependencies.awaiting_tools()
-            && self_contained(&self.evidence.input, false, compaction);
         self.allow_history_import = !bound
             && self.evidence.session.is_none()
             && self.evidence.turn.is_none()

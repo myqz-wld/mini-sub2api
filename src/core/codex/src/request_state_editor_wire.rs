@@ -16,6 +16,42 @@ pub(crate) struct RequiredWireReferenceUnavailable {
 }
 
 impl RequestStateEditor<'_> {
+    pub(crate) fn record_content_origin(
+        &mut self,
+        domain: WireIdDomain,
+        raw: &str,
+        alias: &str,
+    ) -> Result<()> {
+        let Some(upstream) = self.existing_wire_from_downstream(domain, alias)? else {
+            return Ok(());
+        };
+        for id in [alias.to_string(), upstream] {
+            self.content_wire_origins
+                .entry((domain, id))
+                .or_default()
+                .insert(raw.to_string());
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_public_wire_alias(
+        &mut self,
+        domain: WireIdDomain,
+        downstream_id: &str,
+    ) -> Result<bool> {
+        validate_wire_id(downstream_id)?;
+        let lookup = self.keys.wire_downstream(domain, downstream_id);
+        let public = self.scope().wire_ids.get(&lookup).is_some_and(|entry| {
+            entry.domain == domain
+                && entry.downstream_id == downstream_id
+                && entry.origin == WireIdOrigin::Upstream
+        });
+        if public {
+            self.touch_wire(&lookup)?;
+        }
+        Ok(public)
+    }
+
     pub(crate) fn existing_wire_from_downstream(
         &mut self,
         domain: WireIdDomain,

@@ -47,11 +47,14 @@ func TestAgentMessageReplayIDs(t *testing.T) {
 								t.Error("agent content or routing changed")
 							}
 						}
-						if item["type"] == "reasoning" && item["id"] != "rs_synthetic_history" {
-							t.Error("reasoning ID was rewritten during complete history import")
+						if item["type"] == "reasoning" {
+							assertContentPseudonym(t, item["id"], "rs_synthetic_history", "rs_")
+							if item["encrypted_content"] != "synthetic-reasoning" {
+								t.Error("reasoning ciphertext changed")
+							}
 						}
-						if item["role"] == "assistant" && item["id"] != "msg_synthetic_history" {
-							t.Error("assistant ID was rewritten during complete history import")
+						if item["role"] == "assistant" {
+							assertContentPseudonym(t, item["id"], "msg_synthetic_history", "msg_")
 						}
 					}
 				})

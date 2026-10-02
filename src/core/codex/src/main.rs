@@ -26,6 +26,7 @@ mod oauth_login;
 mod reasoning_visibility;
 mod request_classifier;
 mod request_compaction;
+mod request_content_ids;
 mod request_defaults;
 mod request_diagnostics;
 mod request_identity;

@@ -62,6 +62,8 @@ Compare normalized caller input and retained public-ID output before upstream id
 Codex 0.158.0 can rebuild retained user messages during compaction while keeping their IDs.
 A complete caller replacement supplies the new content, including removed media or truncated text.
 Core accepts that replacement and uses its contents for later response-reference reconstruction.
+Changed content under a local caller ID receives a new upstream pseudonym; subsequent replay of
+that replacement keeps it stable. Known provider aliases retain their existing reverse mapping.
 WS prefix reuse compares message content; retained IDs alone cannot establish an unchanged prefix.
 External references and provider completion consistency retain their existing strict checks.
 
@@ -176,7 +178,9 @@ Function/custom tool outputs retain encrypted content; ordinary message and agen
 use their separate native enums. Agent history carries `author` and `recipient`, with `input_text`
 and opaque `encrypted_content` blocks. A canonical leading `Message Type: NEW_TASK` line participates
 in implicit new-turn selection; ordinary agent mail continues the existing turn. Explicit turn IDs
-and pending tool calls retain their existing precedence. Reasoning omits a content list with no reasoning_text (including
+and pending tool calls retain their existing precedence. The identity fallback skips trailing
+reasoning and checks the last remaining item itself; it does not search past later assistant
+messages, tool items or controls to rediscover an older task. Reasoning omits a content list with no reasoning_text (including
 empty and text-only lists), preserves complete mixed lists, and preserves explicit null. Inner turn metadata follows native
 struct order plus sorted extras; outer client metadata keeps its separate HashMap ordering policy.
 Legacy item_reference carriers still require scoped ownership, then are logged and omitted from
@@ -208,9 +212,23 @@ The pinned CustomToolCallOutput type still requires call_id. Anonymous reasoning
 status, agent, empty content and non-model metadata while checking IDs and ciphertext; provider
 item-done/terminal consistency remains strict.
 
-Complete first history replay preserves valid provider output item/call IDs with or without explicit
-session/thread/turn identity. Known public aliases reverse first. This does not relax reference,
-historical-owner or content checks, nor authorize copying unrelated expired turn ownership.
+Caller-defined item/call IDs use account/Key scope, resolved session, ID domain, original ID and
+canonical semantic content to select persistent pseudonyms. Object-key order, permitted empty
+output decoration and internal turn/time metadata do not change that fingerprint. Text, ordered
+content, tool names/arguments and result content remain significant. Unknown `msg_`/`call_` IDs,
+including first imported history, receive typed UUIDv7 upstream IDs; prefixes alone do not prove
+provider provenance. Hashes, client session names and local counters are never embedded in those
+upstream IDs. Known public aliases reverse through their existing ledger mappings.
+
+Call/result and schema-owned item/cell references follow their declarations. A repeated local call
+ID starts a new occurrence, with its result attached to that occurrence. Selected history retains
+reference bindings for WS deltas even after body expiry, charges their memory and protects active
+aliases from pruning. These bindings never authorize missing dependencies or unrelated history.
+Tool-inventory loss remains associated with original invocation identifiers across remapping.
+The persistent ledger stores only scoped lookup keys and generated aliases, without body content
+or a new disk schema. Stability lasts while the required identity state is retained. Clients need
+a stable `session-id` or `client_metadata.session_id` to distinguish independent sessions with
+identical histories; anonymous matching retains its existing association rules.
 Unsupported WS application controls are logged and ignored at the Subscription Core exit; protocol
 Ping/Pong remains supported. Public admission still rejects controls when no operation is active.
 
@@ -248,9 +266,9 @@ opaque control items do not qualify. No source body or active source work may re
 
 Each imported turn receives a separate stable identity in the target thread. Its original owner and
 aliases are never reassigned. Later full replay, eligible references, descendants and declared forks
-can reuse the target's copies. Known downstream aliases still reverse first. Newly imported native output item/call declarations
-retain valid native IDs through the existing scoped upstream map; their call/result pairs remain
-intact. A prefix never authorizes an external response/item reference. The gateway uses only supplied content and same-Key/account identity evidence;
+can reuse the target's copies. Known downstream aliases still reverse first. Unrecognized imported
+item/call declarations receive session/content-scoped pseudonyms; call/result pairs remain intact.
+A prefix never authorizes an external response/item reference. The gateway uses only supplied content and same-Key/account identity evidence;
 it never reconstructs expired ciphertext or fetches another scope's history. This checks protocol
 self-containment, not equality with unavailable old text. Explicit unrelated-session copies still
 require their declared ownership relationship; stable original-session reconstruction is unchanged.

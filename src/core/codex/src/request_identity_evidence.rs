@@ -272,7 +272,11 @@ fn new_turn_input(object: &Map<String, Value>) -> bool {
         Some(Value::Array(items)) => items
             .iter()
             .rev()
-            .find(|item| item.is_object())
+            // Reasoning can trail the last input. Inspect that input itself, stopping at
+            // any other item instead of finding an older task across assistant/tool output.
+            .find(|item| {
+                item.is_object() && item.get("type").and_then(Value::as_str) != Some("reasoning")
+            })
             .is_some_and(crate::agent_message::starts_turn),
         _ => false,
     }
@@ -289,6 +293,63 @@ fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
 mod tests {
     use super::*;
     use http::HeaderValue;
+
+    fn task(kind: &str) -> Value {
+        serde_json::json!({"type":"agent_message","author":"/root","recipient":"/root/worker",
+            "content":[{"type":"input_text","text":format!("Message Type: {kind}\nPayload:\nSynthetic task")}]})
+    }
+
+    #[test]
+    fn trailing_reasoning_keeps_the_selected_agent_message_as_turn_evidence() {
+        for (kind, expected) in [
+            ("NEW_TASK", true),
+            ("MESSAGE", false),
+            ("FINAL_ANSWER", false),
+            ("CHANNEL_POST", false),
+            ("NEW_TASK_OTHER", false),
+        ] {
+            for trailing in [0, 1, 3] {
+                // An older task must not replace the actual last non-reasoning item.
+                let mut items = vec![task("NEW_TASK"), task(kind)];
+                items.extend((0..trailing).map(|_| {
+                    serde_json::json!({
+                        "type":"reasoning","summary":[],"encrypted_content":"synthetic-cipher"
+                    })
+                }));
+                let body = serde_json::json!({"input":items});
+                assert_eq!(
+                    new_turn_input(body.as_object().unwrap()),
+                    expected,
+                    "{kind}, tail={trailing}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reasoning_tail_does_not_skip_assistant_tools_or_controls() {
+        let reasoning = serde_json::json!({"type":"reasoning","summary":[]});
+        for terminal in [
+            serde_json::json!({"type":"message","role":"assistant","content":[]}),
+            serde_json::json!({"type":"function_call","call_id":"call_synthetic","name":"probe","arguments":"{}"}),
+            serde_json::json!({"type":"function_call_output","call_id":"call_synthetic","output":"synthetic result"}),
+            serde_json::json!({"type":"compaction_trigger"}),
+        ] {
+            let body = serde_json::json!({"input":[task("NEW_TASK"),terminal,reasoning]});
+            assert!(!new_turn_input(body.as_object().unwrap()));
+        }
+        for input in [
+            serde_json::json!([]),
+            serde_json::json!([reasoning]),
+            Value::Null,
+            serde_json::json!(""),
+        ] {
+            let body = serde_json::json!({"input":input});
+            assert!(!new_turn_input(body.as_object().unwrap()));
+        }
+        let body = serde_json::json!({"input":[{"type":"message","role":"user","content":"Synthetic new input"},reasoning]});
+        assert!(new_turn_input(body.as_object().unwrap()));
+    }
 
     #[test]
     fn header_session_wins_and_root_conflicts_do_not_imply_lineage() {

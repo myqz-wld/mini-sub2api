@@ -33,6 +33,7 @@ pub(crate) struct ResolvedProjection {
     pub(crate) identity: ResolvedRequestIdentity,
     pub(crate) synthesized_item_ids: Vec<String>,
     pub(crate) pending_compaction: Option<PendingCompaction>,
+    pub(crate) wire_bindings: crate::request_content_ids::WireBindings,
 }
 
 pub(crate) struct InputProjection<'a> {
@@ -252,21 +253,26 @@ pub(crate) fn resolve_and_project(
             native_prefixes,
         )?);
     }
-    if history_import
-        .as_ref()
-        .is_some_and(|import| import.plan.preserve_imported_outputs)
-    {
-        crate::request_wire_ids::register_imported_outputs(
-            editor,
-            object,
-            &generated_upstream_ids,
-        )?;
-    }
+    let mut content_ids = crate::request_content_ids::ContentIds {
+        bindings: history_import
+            .as_ref()
+            .map(|import| import.plan.wire_bindings(&identity.session_id))
+            .unwrap_or_default(),
+        session: &identity.session_id,
+        generated: &generated_upstream_ids,
+    };
+    content_ids.rewrite(
+        editor,
+        object,
+        crate::lifecycle_carriers::CarrierContainer::TopLevel,
+    )?;
+    let wire_bindings = content_ids.bindings;
     translate_request_ids(editor, object, &generated_upstream_ids)?;
     Ok(ResolvedProjection {
         identity,
         synthesized_item_ids: Vec::new(),
         pending_compaction,
+        wire_bindings,
     })
 }
 

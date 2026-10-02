@@ -13,6 +13,9 @@ use http::HeaderMap;
 use mini_sub2api_protocol_v1::limits::InferenceLimits;
 use serde_json::{Value, json};
 
+#[path = "subscription_content_id_tests.rs"]
+mod content_id_tests;
+
 #[path = "subscription_repair_tests.rs"]
 mod repair_tests;
 

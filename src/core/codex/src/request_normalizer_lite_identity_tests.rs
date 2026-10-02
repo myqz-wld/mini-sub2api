@@ -119,7 +119,7 @@ async fn native_lite_prefixes_keep_legacy_aliases_and_require_native_proof() {
     let first = value(&prepare(&store, &HeaderMap::new(), arbitrary.clone()).await);
     arbitrary["input"][1]["content"][0]["text"] = json!("edited caller text");
     let edited = value(&prepare(&store, &HeaderMap::new(), arbitrary).await);
-    assert!(first["input"][1]["id"] == edited["input"][1]["id"]);
+    assert!(first["input"][1]["id"] != edited["input"][1]["id"]);
 }
 
 #[tokio::test]

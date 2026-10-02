@@ -13,6 +13,9 @@ const ACCOUNT_REF: &str = "acct_stateful_normalizer";
 const NAMESPACE: &str = "chatgpt-stateful-normalizer";
 const SCOPE: &str = "psn_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
 
+#[path = "request_normalizer_reasoning_tail_tests.rs"]
+mod reasoning_tail_tests;
+
 fn store() -> (TempDir, RequestStateStore) {
     let temp = TempDir::new().expect("temp dir");
     let accounts = temp.path().join("accounts");
@@ -185,8 +188,12 @@ async fn conflicting_root_carriers_converge_and_persist_true_uuid_versions() {
         assert!(!state.contains(discarded_conflict));
     }
     assert!(
-        state.contains("msg_downstream_real"),
-        "validated item alias must survive continuation"
+        !state.contains("msg_downstream_real"),
+        "local ID is retained only in its scoped content lookup"
+    );
+    assert_eq!(
+        first_value["input"][0]["id"],
+        second_value["input"][0]["id"]
     );
     assert!(
         !state.contains("hello"),

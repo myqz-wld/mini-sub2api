@@ -77,6 +77,11 @@ pub(crate) struct RequestStateEditor<'a> {
     now_unix_ms: i64,
     changed: bool,
     protected: ProtectedStateKeys,
+    // Request-local reverse origins let metadata loss survive content/session remapping.
+    content_wire_origins: std::collections::BTreeMap<
+        (crate::request_state_types::WireIdDomain, String),
+        BTreeSet<String>,
+    >,
 }
 
 #[path = "tool_observation_state.rs"]
@@ -119,6 +124,7 @@ impl<'a> RequestStateEditor<'a> {
             now_unix_ms,
             changed,
             protected,
+            content_wire_origins: Default::default(),
         })
     }
 

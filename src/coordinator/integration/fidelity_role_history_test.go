@@ -108,11 +108,12 @@ func TestFidelityFollowupRolesAndExplicitReplay(t *testing.T) {
 					body["client_metadata"] = map[string]any{"session_id": "restored-session", "thread_id": "restored-session", "turn_id": "restored-turn"}
 				}
 				wire, _, reply := peer.send(body, nil)
-				if fidelityItems(wire)[1].(map[string]any)["id"] != "msg_provider_import" {
-					t.Fatal("full replay provider output ID changed")
-				}
-				if fidelityItems(wire)[2].(map[string]any)["id"] != "fc_provider_import" || fidelityItems(wire)[2].(map[string]any)["call_id"] != "call_provider_import" || fidelityItems(wire)[3].(map[string]any)["call_id"] != "call_provider_import" {
-					t.Fatal("provider call identities or pairing changed")
+				assertContentPseudonym(t, fidelityItems(wire)[1].(map[string]any)["id"], "msg_provider_import", "msg_")
+				call := fidelityItems(wire)[2].(map[string]any)
+				assertContentPseudonym(t, call["id"], "fc_provider_import", "fc_")
+				assertContentPseudonym(t, call["call_id"], "call_provider_import", "call_")
+				if fidelityItems(wire)[3].(map[string]any)["call_id"] != call["call_id"] {
+					t.Fatal("full replay tool result lost its mapped call")
 				}
 				body["input"] = append(body["input"].([]any), reply["output"].([]any)[0], fidelityUser())
 				delete(body, "client_metadata")

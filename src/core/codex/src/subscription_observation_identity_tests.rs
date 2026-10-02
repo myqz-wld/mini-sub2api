@@ -260,3 +260,46 @@ async fn code_mode_cell_origin_is_projected_with_its_provider_call() {
         assert!(item[META].get("tool_calls_complete").is_none());
     }
 }
+
+#[tokio::test]
+async fn late_ws_shedding_retains_local_origins_for_detached_replay() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = RequestStateStore::new(temp.path().into());
+    let first = prepare(&store, cell_request()).await;
+    let thread = first.resolved_identity.as_ref().unwrap().thread_id.clone();
+    let mut frame: Value = serde_json::from_slice(&first.body).unwrap();
+    frame["instructions"] = "b".repeat(MESSAGE_BYTES - 8192).into();
+    let encoded = crate::request_state_editor::tool_observations::finalize_frame(
+        &store,
+        NS,
+        OWNER,
+        KEY,
+        &thread,
+        frame,
+        128 * 1024 * 1024,
+    )
+    .await
+    .unwrap();
+    assert!(
+        output(encoded.as_bytes())[META]
+            .get("tool_calls_complete")
+            .is_none()
+    );
+    publish(&store, first).await;
+    drop(store);
+    let store = RequestStateStore::new(temp.path().into());
+    let mut replay = cell_request();
+    replay.as_object_mut().unwrap().remove("client_metadata");
+    for item in replay["input"].as_array_mut().unwrap() {
+        if item.get(META).is_none() {
+            item[META] = json!({});
+        }
+        item[META]["turn_id"] = "source-turn".into();
+    }
+    let next = prepare(&store, replay).await;
+    assert!(
+        output(&next.body)[META]
+            .get("tool_calls_complete")
+            .is_none()
+    );
+}

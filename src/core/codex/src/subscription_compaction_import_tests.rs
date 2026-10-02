@@ -215,14 +215,33 @@ async fn compaction_import_recovers_expired_and_restarted_tool_history() {
 }
 
 #[tokio::test]
-async fn compaction_import_preserves_first_replay_native_output_ids() {
+async fn compaction_import_pseudonymizes_unverified_first_replay_ids() {
     for model in ["gpt-5.4", "gpt-6-astra"] {
         for v2 in [false, true] {
             let (_temp, store) = store();
             let mut body = compact(complete_history(&tool_items()), v2);
             body["model"] = model.into();
             let prepared = prepare(&store, body).await.unwrap();
-            assert_preserved_tools(&serde_json::from_slice(&prepared.body).unwrap());
+            let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
+            let items = wire["input"].as_array().unwrap();
+            for expected in tool_items() {
+                let actual = items
+                    .iter()
+                    .find(|item| item["type"] == expected["type"])
+                    .unwrap();
+                assert_ne!(actual["id"], expected["id"]);
+                if expected.get("call_id").is_some() {
+                    assert_ne!(actual["call_id"], expected["call_id"]);
+                    assert!(items.iter().any(|result| {
+                        result["type"]
+                            .as_str()
+                            .is_some_and(|t| t.ends_with("_output"))
+                            && result["call_id"] == actual["call_id"]
+                    }));
+                } else {
+                    assert_eq!(actual["encrypted_content"], expected["encrypted_content"]);
+                }
+            }
         }
     }
 }
