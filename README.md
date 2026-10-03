@@ -28,10 +28,6 @@ The default listener is `127.0.0.1:8787`. Remote access requires
 
 Use `http://127.0.0.1:8787/v1` as the base URL and your `ms2a_` key for authentication.
 For the Codex CLI, follow the [client setup](docs/OPERATIONS.md#codex-client).
-Subscription routing recognizes native Guardian classifier/reviewer metadata from custom providers;
-clients do not need to add backend Guardian headers.
-Subscription WebSockets preserve native reasoning accounting through a bounded, no-inference
-handshake probe; see the [metadata contract](docs/CODEX_COMPATIBILITY.md#subscription-websocket-upgrade-metadata).
 
 ```bash
 curl --no-buffer http://127.0.0.1:8787/v1/responses \
