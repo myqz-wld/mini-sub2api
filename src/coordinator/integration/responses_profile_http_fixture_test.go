@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
-
 	"mini-sub2api/src/coordinator/internal/adapter"
 	"mini-sub2api/src/coordinator/internal/httpapi"
 	"mini-sub2api/src/coordinator/internal/storage"
@@ -46,20 +44,6 @@ func newResponsesProfileHTTPFixtureWithResponder(t *testing.T, respond func(http
 	coreBinary := findCoreBinary(t)
 	captures := make(chan routingMatrixCapture, 8)
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		// Error tests reject the scoped canonical WS handshake after an auth-only probe.
-		if request.Method == http.MethodGet && request.Header.Get("Chatgpt-Account-Id") != "" && request.Header.Get("Session-Id") == "" {
-			connection, err := websocket.Accept(writer, request, nil)
-			if err != nil {
-				return
-			}
-			defer connection.CloseNow()
-			ctx, cancel := context.WithTimeout(request.Context(), 2*time.Second)
-			defer cancel()
-			if _, _, err := connection.Read(ctx); err == nil {
-				t.Error("auth-only probe sent application data to error fixture")
-			}
-			return
-		}
 		body, err := readCapturedUpstreamBody(request)
 		if err != nil {
 			http.Error(writer, "capture body", http.StatusInternalServerError)

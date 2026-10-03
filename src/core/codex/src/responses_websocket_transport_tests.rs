@@ -94,7 +94,7 @@ async fn bare_api_key_route_relays_byte_exact_turns_and_filters_handshake_header
 }
 
 #[tokio::test]
-async fn subscription_probes_then_defers_canonical_handshake_and_reuses_state_after_reconnect() {
+async fn subscription_defers_provider_handshake_and_reuses_state_after_reconnect() {
     let capture = WebSocketCapture::default();
     let app = Router::new()
         .route("/responses", get(accepting_upstream))
@@ -124,31 +124,7 @@ async fn subscription_probes_then_defers_canonical_handshake_and_reuses_state_af
         .into_websocket()
         .await
         .expect("first internal socket");
-    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
-    assert!(capture.frames.lock().await.is_empty());
-    assert!(
-        !vault
-            .request_state()
-            .state_path_for_test("subscription-ws-test")
-            .exists(),
-        "auth-only probe must not allocate request identity state"
-    );
-    {
-        let headers = capture.headers.lock().await;
-        let probe = headers.as_ref().expect("probe headers");
-        for name in [
-            "session-id",
-            "thread-id",
-            "x-client-request-id",
-            "x-codex-turn-metadata",
-            "x-codex-window-id",
-            "x-codex-installation-id",
-            "x-codex-guardian",
-            "x-codex-routing-hint",
-        ] {
-            assert!(!probe.contains_key(name), "probe carried {name}");
-        }
-    }
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 0);
     first
         .send(DownstreamMessage::Text(create.clone()))
         .await
@@ -167,7 +143,7 @@ async fn subscription_probes_then_defers_canonical_handshake_and_reuses_state_af
         .expect("first response alias")
         .to_string();
     assert_ne!(first_response_id, "resp_provider");
-    assert_eq!(capture.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
     let first_frame: Value =
         serde_json::from_str(&capture.frames.lock().await[0]).expect("first projected frame");
     let first_metadata = &first_frame["client_metadata"];
@@ -214,20 +190,7 @@ async fn subscription_probes_then_defers_canonical_handshake_and_reuses_state_af
         .into_websocket()
         .await
         .expect("second internal socket");
-    assert_eq!(capture.calls.load(Ordering::SeqCst), 3);
-    assert_eq!(capture.frames.lock().await.len(), 1);
-    {
-        let headers = capture.headers.lock().await;
-        let probe = headers.as_ref().expect("reconnect probe headers");
-        for name in [
-            "session-id",
-            "thread-id",
-            "x-codex-turn-metadata",
-            "x-codex-routing-hint",
-        ] {
-            assert!(!probe.contains_key(name), "reconnect probe carried {name}");
-        }
-    }
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
     second
         .send(DownstreamMessage::Text(create))
         .await
@@ -242,7 +205,7 @@ async fn subscription_probes_then_defers_canonical_handshake_and_reuses_state_af
     };
     let second_event: Value = serde_json::from_str(&second_event).expect("second completion JSON");
     assert_eq!(second_event["response"]["id"], first_response_id);
-    assert_eq!(capture.calls.load(Ordering::SeqCst), 4);
+    assert_eq!(capture.calls.load(Ordering::SeqCst), 2);
     let second_frame: Value =
         serde_json::from_str(&capture.frames.lock().await[1]).expect("second projected frame");
     assert_eq!(

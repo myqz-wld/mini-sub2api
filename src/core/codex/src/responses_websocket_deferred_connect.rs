@@ -13,11 +13,10 @@ use axum::extract::ws::WebSocket;
 use http::HeaderMap;
 use http::StatusCode;
 
-pub(crate) struct DeferredConnectFailure {
+pub(super) struct DeferredConnectFailure {
     pub(super) error: CoreFailure,
     pub(super) provider_request_id: Option<String>,
     retry_metadata: Option<http::HeaderValue>,
-    rejection: Option<Box<(StatusCode, HeaderMap)>>,
 }
 
 impl DeferredConnectFailure {
@@ -26,49 +25,7 @@ impl DeferredConnectFailure {
             error,
             provider_request_id: None,
             retry_metadata: None,
-            rejection: None,
         }
-    }
-
-    pub(crate) fn into_probe_response(self, request_id: String) -> axum::response::Response {
-        use axum::response::IntoResponse;
-        // Preserve the rejected HTTP status, especially native 426 fallback and 429 retry.
-        let (status, mut headers) = self.rejection.map_or_else(
-            || (self.error.status(), HeaderMap::new()),
-            |rejected| {
-                (
-                    rejected.0,
-                    crate::response_headers::filtered_provider_headers(&rejected.1, &request_id)
-                        .unwrap_or_default(),
-                )
-            },
-        );
-        // The sanitized envelope has a new content representation.
-        headers.remove(http::header::CONTENT_TYPE);
-        headers.remove(http::header::CONTENT_ENCODING);
-        let body = mini_sub2api_protocol_v1::ErrorEnvelope {
-            error: mini_sub2api_protocol_v1::CoreError {
-                code: self.error.code().into(),
-                message: self.error.public_message().into(),
-                request_id,
-                limit_window_minutes: self.error.limit_window_minutes(),
-                failure: crate::websocket_delivery::failure_before_websocket_delivery(&self.error),
-            },
-        };
-        let mut response = (status, axum::Json(body)).into_response();
-        response.headers_mut().extend(headers);
-        if let Some(value) = self.retry_metadata {
-            response.headers_mut().insert("x-retry-metadata", value);
-        }
-        if let Some(value) = self
-            .provider_request_id
-            .and_then(|value| value.parse().ok())
-        {
-            response
-                .headers_mut()
-                .insert(mini_sub2api_protocol_v1::PROVIDER_REQUEST_ID_HEADER, value);
-        }
-        response
     }
 }
 
@@ -122,7 +79,6 @@ pub(super) async fn connect(
             error,
             provider_request_id: initial_provider_request_id.clone(),
             retry_metadata: None,
-            rejection: None,
         })?;
         drop(guard);
         crate::server::validate_recovery_owner(&context.resolved, &retry)
@@ -139,7 +95,6 @@ pub(super) async fn connect(
             error,
             provider_request_id: initial_provider_request_id,
             retry_metadata: None,
-            rejection: None,
         })?;
         context.resolved = retry;
     }
@@ -148,7 +103,6 @@ pub(super) async fn connect(
             error: CoreFailure::UpstreamAuthFailed,
             provider_request_id: provider_request_id(handshake.headers()),
             retry_metadata: None,
-            rejection: None,
         });
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
@@ -172,7 +126,6 @@ pub(super) async fn connect(
             error,
             provider_request_id: provider_request_id(handshake.headers()),
             retry_metadata,
-            rejection: Some(Box::new((handshake.status(), handshake.headers().clone()))),
         });
     }
     let turn_state = handshake.headers().get("x-codex-turn-state").cloned();
@@ -186,24 +139,8 @@ pub(super) async fn connect(
             error: CoreFailure::Internal,
             provider_request_id: provider_request_id(response.headers()),
             retry_metadata: None,
-            rejection: None,
         }),
     }
-}
-
-pub(crate) async fn probe(
-    context: &mut DeferredCodexContext,
-) -> Result<UpgradeMetadata, DeferredConnectFailure> {
-    // Native doctor also probes the authenticated endpoint without session/role extras or frames.
-    // Bound all recovery attempts below the pinned client's 15-second connect deadline.
-    let (mut socket, _, _, metadata) = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        connect(context, &HeaderMap::new()),
-    )
-    .await
-    .map_err(|_| DeferredConnectFailure::without_response(CoreFailure::UpstreamConnectFailed))??;
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(100), socket.close(None)).await;
-    Ok(metadata)
 }
 
 pub(super) async fn send_protocol_failure(

@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn subscription_missing_previous_response_closes_before_canonical_provider_handshake() {
+async fn subscription_missing_previous_response_closes_before_provider_handshake() {
     let capture = WebSocketCapture::default();
     let app = Router::new()
         .route("/responses", get(accepting_upstream))
@@ -15,8 +15,6 @@ async fn subscription_missing_previous_response_closes_before_canonical_provider
         .send()
         .await
         .expect("internal handshake");
-    std::assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
-    assert!(capture.frames.lock().await.is_empty());
     let mut socket = handshake.into_websocket().await.expect("internal socket");
     socket
         .send(DownstreamMessage::Text(
@@ -52,16 +50,6 @@ async fn subscription_missing_previous_response_closes_before_canonical_provider
             mini_sub2api_protocol_v1::DeliveryState::NotDelivered,
         )
     );
-    std::assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
-    let headers = capture.headers.lock().await;
-    let probe = headers.as_ref().expect("auth-only probe");
-    for name in [
-        "session-id",
-        "thread-id",
-        "x-codex-turn-metadata",
-        "x-codex-routing-hint",
-    ] {
-        assert!(!probe.contains_key(name), "probe carried {name}");
-    }
+    std::assert_eq!(capture.calls.load(Ordering::SeqCst), 0);
     assert!(capture.frames.lock().await.is_empty());
 }

@@ -4,11 +4,9 @@ use serde_json::{Value, json};
 
 async fn startup_upstream(
     AxumState(capture): AxumState<FingerprintCapture>,
-    headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> AxumResponse {
     capture.calls.fetch_add(1, Ordering::SeqCst);
-    capture.handshakes.lock().await.push(headers);
     upgrade.on_upgrade(move |mut socket| async move {
         while let Some(Ok(InternalMessage::Text(frame))) = socket.next().await {
             let value: Value=serde_json::from_str(&frame).unwrap();
@@ -56,8 +54,6 @@ async fn check_startup_handoff(rotate: bool) {
             .upgrade()
     };
     let mut socket = open().send().await.unwrap().into_websocket().await.unwrap();
-    assert_eq!(capture.calls.load(Ordering::SeqCst), 1);
-    assert!(capture.frames.lock().await.is_empty());
     let warm = json!({"type":"response.create","model":"gpt-5.4","generate":false,"input":[],"client_metadata":{"session_id":"refresh-session"}});
     socket
         .send(DownstreamMessage::Text(warm.to_string()))
@@ -122,26 +118,10 @@ async fn check_startup_handoff(rotate: bool) {
             Some("old-startup-token")
         }
     );
-    let handshakes = capture.handshakes.lock().await;
-    let (canonical, probes): (Vec<_>, Vec<_>) = handshakes
-        .iter()
-        .partition(|headers| headers.contains_key("session-id"));
-    let connections = if rotate { 2 } else { 1 };
-    assert_eq!(canonical.len(), connections);
-    assert_eq!(probes.len(), connections);
-    assert_eq!(capture.calls.load(Ordering::SeqCst), handshakes.len());
-    for probe in probes {
-        for name in [
-            "thread-id",
-            "x-codex-installation-id",
-            "x-codex-turn-metadata",
-            "x-codex-window-id",
-            "x-codex-guardian",
-            "x-codex-routing-hint",
-        ] {
-            assert!(!probe.contains_key(name), "probe carried {name}");
-        }
-    }
+    assert_eq!(
+        capture.calls.load(Ordering::SeqCst),
+        if rotate { 2 } else { 1 }
+    );
 }
 
 #[tokio::test]

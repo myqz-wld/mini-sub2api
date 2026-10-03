@@ -3,6 +3,9 @@
 A lightweight Responses API gateway for Codex subscriptions and API keys.
 Supports HTTP/SSE, WebSocket and usage tracking.
 
+Subscription WebSockets connect upstream after the first valid request, without a separate
+handshake probe. See [WebSocket metadata limits](docs/CODEX_COMPATIBILITY.md#subscription-websocket-upgrade-metadata).
+
 ## Quick start
 
 Install the project runtimes with [mise](https://mise.jdx.dev/), then build and start:

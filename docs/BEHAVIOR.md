@@ -15,13 +15,14 @@ switching, Chat Completions or conversation-management API.
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
 
-Subscription WS performs a bounded auth-only upstream handshake before public 101, sends no
-application frames on that probe, and preserves its `x-reasoning-included` header presence/value.
-First-frame admission still selects the actual session, role and model. Actual and replacement
-connections must match the advertised header presence before inference; mismatch rejects without
-public delivery. Each operation exposes the actual connection's model through response metadata,
-after real upstream output arrives, preserving existing event model values. The extra handshake
-and route-dependent mismatch behavior are detailed in the
+Subscription WS upgrades downstream after request authentication and credential resolution. It
+opens its upstream connection only after the first valid create frame selects the session, role
+and model. Idle connections and rejected first frames create no upstream handshake. Inference
+handshake failures and their 401 recovery failures occur within the established WS session.
+There is no auth-only probe or reasoning-header comparison gate.
+Each operation exposes the actual connection's model through response metadata after real upstream
+output arrives, preserving existing event model values. Upgrade-only `x-reasoning-included` cannot
+be forwarded after public 101; its context-accounting limitation is detailed in the
 [upgrade metadata contract](CODEX_COMPATIBILITY.md#subscription-websocket-upgrade-metadata).
 
 | Subscription input | Upstream send |

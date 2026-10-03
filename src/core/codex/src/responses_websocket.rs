@@ -83,7 +83,7 @@ async fn responses_socket_inner(
     drop(_guard);
     let profile = UpstreamProfile::select(caller, resolved.auth.credential_kind());
     if profile.uses_identity_state() {
-        let mut context = DeferredCodexContext {
+        let context = DeferredCodexContext {
             state,
             headers,
             account_ref: identity.account_ref,
@@ -92,14 +92,10 @@ async fn responses_socket_inner(
             caller,
             profile,
             resolved,
-            reasoning_included: false,
         };
-        let metadata = match crate::responses_websocket_deferred::probe(&mut context).await {
-            Ok(metadata) => metadata,
-            Err(failure) => return Ok(failure.into_probe_response(gateway_request_id)),
-        };
-        context.reasoning_included = metadata.reasoning.is_some();
-        let mut response = upgrade
+        // Session, role and model admission require the first create frame. Keep the
+        // public upgrade independent of upstream inference reachability.
+        return Ok(upgrade
             .max_message_size(crate::inference_limits::get().request_bytes)
             .max_frame_size(crate::inference_limits::get().request_bytes)
             .on_upgrade(move |internal| async move {
@@ -110,14 +106,7 @@ async fn responses_socket_inner(
                     ))
                     .await;
             })
-            .into_response();
-        if let Some(value) = metadata.reasoning {
-            response.headers_mut().insert(
-                crate::responses_websocket_upgrade_metadata::REASONING_HEADER,
-                value,
-            );
-        }
-        return Ok(response);
+            .into_response());
     }
     let fingerprint = resolved.fingerprint.clone();
     let upstream_headers = headers;

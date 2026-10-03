@@ -19,8 +19,8 @@ const upgradeRequestedModel = "gpt-5.5"
 const upgradeHandshakeModel = "synthetic-inference-model"
 const upgradeEventModel = "synthetic-event-model"
 
-// The upstream emits models only through handshake/event headers. Zero-frame probes
-// deliberately report a different model, which must never become a client observation.
+// The upstream emits models only through handshake/event headers. Track unexpected
+// auth-only connections so native model checks also enforce deferred admission.
 type nativeUpgradeCapture struct {
 	*nativeCapture
 	subscription    bool
@@ -189,7 +189,7 @@ func (c *nativeUpgradeCapture) assertOperations(t *testing.T, sampling, compacti
 	if requireReuse && len(c.activeSockets) != 1 {
 		t.Fatalf("native upgrade did not reuse an inference socket: sockets=%d", len(c.activeSockets))
 	}
-	if (c.probes > 0) != c.subscription {
+	if c.probes != 0 {
 		t.Fatalf("native upgrade auth probe count=%d subscription=%t", c.probes, c.subscription)
 	}
 }
@@ -313,13 +313,14 @@ func TestNativeWebSocketUpgradeReasoningAccounting(t *testing.T) {
 				thread := client.thread(options)
 				client.turn(thread, "Synthetic accounting seed.")
 				// Core resets the header flag at regular-turn start. The second turn's
-				// tool loop observes the fresh WS flag before checking context usage.
+				// tool loop observes the direct WS flag before checking context usage.
+				// Deferred Subscription upgrades cannot forward a later upstream flag.
 				client.turn(thread, "Synthetic accounting tool turn.")
 				if calls != 1 {
 					t.Fatalf("native accounting tool callbacks=%d", calls)
 				}
 				wantCompactions := 1
-				if present {
+				if present && !subscription {
 					wantCompactions = 0
 				}
 				capture.assertOperations(t, 3, wantCompactions, false)

@@ -1,26 +1,6 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-fn assert_auth_only_probe(headers: &HeaderMap) {
-    assert!(headers.contains_key(http::header::AUTHORIZATION));
-    assert!(headers.contains_key("chatgpt-account-id"));
-    for name in [
-        "session-id",
-        "thread-id",
-        "x-client-request-id",
-        "x-codex-installation-id",
-        "x-codex-turn-metadata",
-        "x-codex-window-id",
-        "x-codex-guardian",
-        "x-openai-subagent",
-        "x-codex-routing-hint",
-        "openai-organization",
-        "x-stainless-lang",
-    ] {
-        assert!(!headers.contains_key(name), "probe carried {name}");
-    }
-}
-
 #[tokio::test]
 async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
     let account_id = "chatgpt-native-prewarm-test";
@@ -62,9 +42,6 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
         .send()
         .await
         .expect("handshake");
-    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 1);
-    assert!(state.frames.lock().await.is_empty());
-    assert_auth_only_probe(state.headers.lock().await.as_ref().expect("probe headers"));
     let mut socket = handshake.into_websocket().await.expect("socket");
     let turn_metadata = format!(
         r#"{{"installation_id":"{installation_id}","session_id":"session-native","thread_id":"thread-native","agent_name":"/root","turn_id":"","window_id":"thread-native:0","request_kind":"prewarm","sandbox":"workspace-write","sandbox_mode":"workspace-write","auto_review_enabled":false,"node_repl_auto_review_required":false,"node_repl_disabled":false}}"#
@@ -96,7 +73,7 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
     assert_ne!(downstream_previous_response_id, "resp_first");
     let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
-    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 1);
     assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 0);
     let frames = state.frames.lock().await;
     assert_eq!(frames.len(), 1);
@@ -153,7 +130,7 @@ async fn oauth_pseudonymizes_native_prewarm_identity_and_preserves_semantics() {
 }
 
 #[tokio::test]
-async fn oauth_probe_401_refreshes_once_then_normalizes_canonical_create_frame() {
+async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     let account_id = "chatgpt-websocket-test";
     let state = OAuthWebSocketState {
         old_access: test_jwt(None, 3600),
@@ -221,11 +198,9 @@ async fn oauth_probe_401_refreshes_once_then_normalizes_canonical_create_frame()
         .await
         .expect("refreshed handshake");
     assert_eq!(handshake.status(), StatusCode::SWITCHING_PROTOCOLS);
-    // Reload and refresh complete on the zero-frame probe, before body admission.
-    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 3);
-    assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 0);
     assert!(state.frames.lock().await.is_empty());
-    assert_auth_only_probe(state.headers.lock().await.as_ref().expect("probe headers"));
     let mut socket = handshake.into_websocket().await.expect("internal socket");
     socket
         .send(DownstreamMessage::Text(
@@ -297,7 +272,7 @@ async fn oauth_probe_401_refreshes_once_then_normalizes_canonical_create_frame()
     assert!(matches!(second_completion, DownstreamMessage::Text(_)));
     let _ = socket.close(DownstreamCloseCode::Normal, None).await;
 
-    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 4);
+    assert_eq!(state.handshake_calls.load(Ordering::SeqCst), 3);
     assert_eq!(state.refresh_calls.load(Ordering::SeqCst), 1);
     let frames = state.frames.lock().await.clone();
     assert_eq!(frames.len(), 2);

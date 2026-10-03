@@ -29,7 +29,6 @@ use crate::websocket_delivery::internal_close;
 use axum::extract::ws::WebSocket;
 use bytes::Bytes;
 use connect_support::connect;
-pub(crate) use connect_support::probe;
 use connect_support::send_provider_request_id_control;
 use http::HeaderMap;
 use std::collections::VecDeque;
@@ -48,7 +47,6 @@ pub(crate) struct DeferredCodexContext {
     pub(crate) caller: CallerKind,
     pub(crate) profile: UpstreamProfile,
     pub(crate) resolved: ResolvedCredential,
-    pub(crate) reasoning_included: bool,
 }
 
 pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexContext) {
@@ -212,14 +210,6 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
     if !send_provider_request_id_control(&mut internal, provider_request_id.as_deref()).await {
         return;
     }
-    if !upgrade_metadata.matches_reasoning(context.reasoning_included) {
-        let _ = internal
-            .send(failure_close(
-                CoreFailure::UpstreamHandshakeRejected.failure(),
-            ))
-            .await;
-        return;
-    }
     if !fingerprint_is_current(
         &context.state.vault,
         &context.account_ref,
@@ -274,14 +264,6 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                     )
                     .await
                     {
-                        return;
-                    }
-                    if !metadata.matches_reasoning(context.reasoning_included) {
-                        let _ = internal
-                            .send(failure_close(
-                                CoreFailure::UpstreamHandshakeRejected.failure(),
-                            ))
-                            .await;
                         return;
                     }
                     upstream = replacement;

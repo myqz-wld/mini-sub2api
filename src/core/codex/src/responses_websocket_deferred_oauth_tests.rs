@@ -13,7 +13,6 @@ struct ReconnectOAuthState {
     authorizations: Arc<Mutex<Vec<String>>>,
     accepted_headers: Arc<Mutex<Vec<HeaderMap>>>,
     accepted: Arc<AtomicUsize>,
-    canonical: Arc<AtomicUsize>,
     refreshes: Arc<AtomicUsize>,
     frames: Arc<Mutex<Vec<String>>>,
 }
@@ -28,7 +27,6 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
         authorizations: Arc::new(Mutex::new(Vec::new())),
         accepted_headers: Arc::new(Mutex::new(Vec::new())),
         accepted: Arc::new(AtomicUsize::new(0)),
-        canonical: Arc::new(AtomicUsize::new(0)),
         refreshes: Arc::new(AtomicUsize::new(0)),
         frames: Arc::new(Mutex::new(Vec::new())),
     };
@@ -73,9 +71,6 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
         .send()
         .await
         .expect("internal handshake");
-    assert_eq!(state.accepted.load(Ordering::SeqCst), 1);
-    assert_eq!(state.canonical.load(Ordering::SeqCst), 0);
-    assert!(state.frames.lock().await.is_empty());
     let mut socket = handshake.into_websocket().await.expect("internal socket");
     socket
         .send(DownstreamMessage::Text(
@@ -108,12 +103,10 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
             format!("Bearer {}", state.old_access),
             format!("Bearer {}", state.new_access),
             format!("Bearer {}", state.new_access),
-            format!("Bearer {}", state.new_access),
         ]
     );
     assert_eq!(state.refreshes.load(Ordering::SeqCst), 1);
-    assert_eq!(state.accepted.load(Ordering::SeqCst), 3);
-    assert_eq!(state.canonical.load(Ordering::SeqCst), 2);
+    assert_eq!(state.accepted.load(Ordering::SeqCst), 2);
     let frames = state.frames.lock().await;
     assert_eq!(frames.len(), 2);
     let hidden: Value = serde_json::from_str(&frames[0]).expect("hidden frame");
@@ -121,27 +114,9 @@ async fn refreshed_oauth_is_reused_for_hidden_setup_reconnect() {
     assert_eq!(hidden["generate"], false);
     assert!(public.get("previous_response_id").is_none());
     let headers = state.accepted_headers.lock().await;
-    assert_eq!(headers.len(), 3);
-    let probe = &headers[0];
-    for name in [
-        "session-id",
-        "thread-id",
-        "x-codex-installation-id",
-        "x-codex-turn-metadata",
-        "x-codex-window-id",
-        "x-codex-guardian",
-        "x-openai-subagent",
-        "x-codex-routing-hint",
-    ] {
-        assert!(!probe.contains_key(name), "probe carried {name}");
-    }
-    let canonical: Vec<_> = headers
-        .iter()
-        .filter(|headers| headers.contains_key("session-id"))
-        .collect();
-    assert_eq!(canonical.len(), 2);
-    let hidden_header = turn_metadata(canonical[0]);
-    let public_header = turn_metadata(canonical[1]);
+    assert_eq!(headers.len(), 2);
+    let hidden_header = turn_metadata(&headers[0]);
+    let public_header = turn_metadata(&headers[1]);
     let hidden_body = turn_metadata_from_body(&hidden);
     let public_body = turn_metadata_from_body(&public);
     assert_eq!(hidden_header["request_kind"], "prewarm");
@@ -187,17 +162,15 @@ async fn reconnect_oauth_upstream(
         )
             .into_response();
     }
-    let is_probe = !headers.contains_key("session-id");
     state.accepted_headers.lock().await.push(headers);
-    state.accepted.fetch_add(1, Ordering::SeqCst);
-    let connection = (!is_probe).then(|| state.canonical.fetch_add(1, Ordering::SeqCst));
+    let connection = state.accepted.fetch_add(1, Ordering::SeqCst);
     upgrade
         .on_upgrade(move |mut socket| async move {
             let Some(Ok(InternalMessage::Text(frame))) = socket.next().await else {
                 return;
             };
             state.frames.lock().await.push(frame.to_string());
-            if connection != Some(1) {
+            if connection == 0 {
                 return;
             }
             for event in [

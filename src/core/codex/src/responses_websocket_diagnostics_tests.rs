@@ -3,65 +3,6 @@ use mini_sub2api_protocol_v1::PROVIDER_REQUEST_ID_EVENT_TYPE;
 use mini_sub2api_protocol_v1::PROVIDER_REQUEST_ID_HEADER;
 use pretty_assertions::assert_eq;
 
-#[derive(Clone, Default)]
-struct ProbeCapture {
-    headers: Arc<Mutex<Vec<HeaderMap>>>,
-    application_frames: Arc<AtomicUsize>,
-    closed: Arc<tokio::sync::Notify>,
-}
-
-impl ProbeCapture {
-    async fn assert_auth_only(&self) {
-        tokio::time::timeout(Duration::from_secs(2), self.closed.notified())
-            .await
-            .expect("auth-only probe closes");
-        assert_eq!(self.application_frames.load(Ordering::SeqCst), 0);
-        let headers = self.headers.lock().await;
-        assert_eq!(headers.len(), 1);
-        assert!(headers[0].contains_key(http::header::AUTHORIZATION));
-        for name in [
-            "session-id",
-            "thread-id",
-            "x-client-request-id",
-            "x-codex-installation-id",
-            "x-codex-turn-metadata",
-            "x-codex-window-id",
-            "x-codex-guardian",
-            "x-openai-subagent",
-            "x-codex-routing-hint",
-        ] {
-            assert!(!headers[0].contains_key(name), "probe carried {name}");
-        }
-    }
-}
-
-async fn accept_probe(
-    capture: ProbeCapture,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> AxumResponse {
-    capture.headers.lock().await.push(headers);
-    let mut response = upgrade
-        .on_upgrade(move |mut socket| async move {
-            while let Some(Ok(message)) = socket.next().await {
-                match message {
-                    InternalMessage::Text(_) | InternalMessage::Binary(_) => {
-                        capture.application_frames.fetch_add(1, Ordering::SeqCst);
-                    }
-                    InternalMessage::Close(_) => break,
-                    _ => {}
-                }
-            }
-            capture.closed.notify_one();
-        })
-        .into_response();
-    response.headers_mut().insert(
-        "x-request-id",
-        HeaderValue::from_static("provider-probe-private"),
-    );
-    response
-}
-
 #[tokio::test]
 async fn deferred_typed_rejection_emits_native_error_before_close_without_replay() {
     for (status, code) in [
@@ -70,15 +11,9 @@ async fn deferred_typed_rejection_emits_native_error_before_close_without_replay
     ] {
         let calls = Arc::new(AtomicUsize::new(0));
         let count = calls.clone();
-        let probe = ProbeCapture::default();
-        let probe_capture = probe.clone();
-        let upstream = spawn_loopback(Router::new().route("/responses", get(move |headers: HeaderMap, upgrade: WebSocketUpgrade| {
+        let upstream = spawn_loopback(Router::new().route("/responses", get(move || {
             let calls = count.clone();
-            let probe = probe_capture.clone();
             async move {
-                if !headers.contains_key("session-id") {
-                    return accept_probe(probe, headers, upgrade).await;
-                }
                 calls.fetch_add(1, Ordering::SeqCst);
                 AxumResponse::builder().status(status).header("content-type", "application/json")
                     .body(Body::from(serde_json::json!({"error":{"code":code,"message":"private-synthetic","detail":"private-synthetic"}}).to_string())).unwrap()
@@ -86,17 +21,15 @@ async fn deferred_typed_rejection_emits_native_error_before_close_without_replay
         }))).await;
         let (state, account, _temp) = subscription_state(&upstream.base_url).await;
         let core = spawn_internal(state).await;
-        let handshake = internal_handshake(&core.base_url, &account)
+        let mut socket = internal_handshake(&core.base_url, &account)
             .header("originator", "codex_exec")
             .upgrade()
             .send()
             .await
+            .unwrap()
+            .into_websocket()
+            .await
             .unwrap();
-        probe.assert_auth_only().await;
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
-        assert!(!handshake.headers().contains_key(PROVIDER_REQUEST_ID_HEADER));
-        assert!(!handshake.headers().contains_key("x-request-id"));
-        let mut socket = handshake.into_websocket().await.unwrap();
         socket
             .send(DownstreamMessage::Text(
                 serde_json::json!({"type":"response.create","model":"gpt-5.5","input":"synthetic"})
@@ -190,19 +123,13 @@ async fn bare_upgrade_aliases_request_headers_and_keeps_one_private_diagnostic()
 #[tokio::test]
 async fn deferred_codex_rejection_sends_private_diagnostic_before_structured_close() {
     let calls = Arc::new(AtomicUsize::new(0));
-    let probe = ProbeCapture::default();
     let upstream = spawn_loopback(Router::new().route(
         "/responses",
         get({
             let calls = Arc::clone(&calls);
-            let probe = probe.clone();
-            move |headers: HeaderMap, upgrade: WebSocketUpgrade| {
+            move || {
                 let calls = Arc::clone(&calls);
-                let probe = probe.clone();
                 async move {
-                    if !headers.contains_key("session-id") {
-                        return accept_probe(probe, headers, upgrade).await;
-                    }
                     calls.fetch_add(1, Ordering::SeqCst);
                     AxumResponse::builder()
                         .status(StatusCode::TOO_MANY_REQUESTS)
@@ -220,17 +147,12 @@ async fn deferred_codex_rejection_sends_private_diagnostic_before_structured_clo
     .await;
     let (state, account_ref, _temp) = subscription_state(&upstream.base_url).await;
     let core = spawn_internal(state).await;
-    let handshake = internal_handshake(&core.base_url, &account_ref)
+    let mut socket = internal_handshake(&core.base_url, &account_ref)
         .header("originator", "codex_exec")
         .upgrade()
         .send()
         .await
-        .expect("deferred internal handshake");
-    probe.assert_auth_only().await;
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert!(!handshake.headers().contains_key(PROVIDER_REQUEST_ID_HEADER));
-    assert!(!handshake.headers().contains_key("x-request-id"));
-    let mut socket = handshake
+        .expect("deferred internal handshake")
         .into_websocket()
         .await
         .expect("deferred internal socket");

@@ -187,34 +187,39 @@ to ordinary OpenCode behavior without request evidence. These checks use loopbac
 
 ## Subscription WebSocket upgrade metadata
 
-Before downstream HTTP 101, Subscription performs an authenticated upstream handshake probe with
-no caller session/role identifiers and no application frames, using the same shape as native
-`codex doctor`. Its connection-local `x-reasoning-included` observation is copied into downstream
-101, including an empty or literal `false` value: native 0.159.2 uses presence, not boolean parsing.
-Connection and auth recovery share a ten-second deadline; probe close is bounded to 100 ms.
-Rejected probes retain the upstream HTTP status (including native 426 fallback), filtered retry
-headers and typed usage-window fields, with sanitized errors and not-delivered evidence.
+Subscription returns downstream HTTP 101 after request authentication and credential resolution,
+then waits for the first valid create frame to determine scoped admission, Guardian role, model
+and upstream identity.
+It performs no separate authenticated handshake probe. Idle sockets and rejected first frames
+do not connect to the inference endpoint; ordinary admitted connections use one upstream socket.
+Existing OAuth recovery and hidden-setup replacement connections remain available when needed.
+Upstream connection failures and handshake rejections are reported within the established WS
+session. Unclassified failures close with not-delivered evidence; recognized categories retain
+sanitized native error events, retry metadata and the existing response-observed accounting.
+An upstream HTTP 426 is therefore a WS failure on Subscription, not a downstream HTTP 426 that
+automatically selects native HTTP fallback. API-key forwarding retains its direct upgrade path.
 
-The first create frame still determines scoped admission, Guardian role, model and canonical
-upstream identity. Before any hidden setup/public create, its actual handshake must agree with the
-advertised reasoning-header presence. Hidden-setup replacement sockets undergo the same check.
-Disagreement closes with not-delivered evidence; no public inference is replayed. This costs an
-extra handshake per downstream connection and requires an endpoint that accepts auth-only probes.
-Role-dependent or changing reasoning flags may reject an otherwise usable connection. No global
-cache or assumed flag value replaces this check: the pinned client freezes the flag before it sends
-its first body, so arbitrary route-dependent flags cannot be preserved with universal availability.
+Subscription omits `x-reasoning-included` from downstream 101. The actual upstream header arrives
+after that response, so it cannot be forwarded truthfully or added retroactively through events.
+Pinned native 0.159.2 freezes header presence at upgrade, including empty or literal `false` values.
+If the upstream supplies this header, a Subscription client retains absent-header reasoning
+accounting and may compact earlier than a direct client. Actual/replacement reasoning-header
+changes do not reject inference. This limitation avoids per-connection probes and route-dependent
+availability failures; support should be reassessed if real traffic demonstrates a need for it.
 
-The probe model is discarded. Each sampling operation carries the actual inference connection's
+Each sampling operation carries the actual inference connection's
 `openai-model` in its first eligible response event, including after connection replacement. Existing
 event-level model values take precedence, with case-insensitive `openai-model`/`x-openai-model` and
 native first-element array handling. Rate-limit events cannot consume this projection; wrapped
 errors receive a preceding model metadata event only after actual upstream error output arrives.
 This preserves response/usage/TTFB ordering. API-key forwarding keeps its direct upgrade behavior.
 
-Loopback tests ran the pinned CLI itself with race detection: two turns observed the correct model
-before completion on a reused socket, without leaking the probe model. A same-turn tool follow-up
-after historical encrypted reasoning produced one automatic compaction with the header absent and
-zero with the header present as `false`, identically through direct and Subscription routes.
+Loopback tests cover zero upstream handshakes before admission, idle close, cancellation of a pending
+actual handshake, post-upgrade rejections, optional model headers and changing reasoning presence
+across hidden-setup replacement. The pinned CLI model tests check two turns on a reused socket,
+event precedence and first-error model ordering without auth-only connections. Its accounting
+oracle expects one automatic compaction on Subscription whether the upstream reasoning header is
+absent or present as `false`; direct access expects one when absent and zero when present.
 
 ## Earlier 0.156.0 alignment
 

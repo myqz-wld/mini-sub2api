@@ -1,29 +1,20 @@
 //! Connection-only native metadata and its projection onto admitted response streams.
-use http::{HeaderMap, HeaderValue};
+use http::HeaderMap;
 use serde_json::{Value, json};
-
-pub(crate) const REASONING_HEADER: &str = "x-reasoning-included";
 
 #[derive(Clone, Default)]
 pub(crate) struct UpgradeMetadata {
-    pub(crate) reasoning: Option<HeaderValue>,
     pub(crate) model: Option<String>,
 }
 
 impl UpgradeMetadata {
     pub(crate) fn read(headers: &HeaderMap) -> Self {
         Self {
-            reasoning: headers.get(REASONING_HEADER).cloned(),
             model: headers
                 .get("openai-model")
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned),
         }
-    }
-
-    pub(crate) fn matches_reasoning(&self, advertised: bool) -> bool {
-        // The pinned client tests presence, including an empty or literal "false" value.
-        self.reasoning.is_some() == advertised
     }
 }
 
@@ -125,21 +116,6 @@ fn native_header_string(value: &Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reasoning_contract_uses_presence_not_boolean_value() {
-        let absent = UpgradeMetadata::read(&HeaderMap::new());
-        assert!(absent.matches_reasoning(false));
-        assert!(!absent.matches_reasoning(true));
-        for value in ["", "false", "true"] {
-            let mut headers = HeaderMap::new();
-            headers.insert(REASONING_HEADER, value.parse().unwrap());
-            let present = UpgradeMetadata::read(&headers);
-            assert!(present.matches_reasoning(true));
-            assert!(!present.matches_reasoning(false));
-            assert_eq!(present.reasoning.unwrap(), value);
-        }
-    }
 
     #[test]
     fn model_projects_per_operation_and_preserves_newer_event_metadata() {
