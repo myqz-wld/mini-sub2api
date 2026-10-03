@@ -10,15 +10,15 @@ pub(crate) const TURN: &str = "x-codex-turn-metadata";
 pub(crate) const SOURCE: &str = "guardian_classifier_source_thread_id";
 pub(crate) const LITE: &str = "ws_request_header_x_openai_internal_codex_responses_lite";
 
+// Prepared outbound transport only; ingress role detection also reads native metadata.
 pub(crate) fn selected(headers: &HeaderMap) -> bool {
     headers
         .get("x-codex-guardian")
         .is_some_and(|v| v == "classifier")
 }
 
-pub(crate) fn source(object: &Map<String, Value>) -> Option<String> {
-    let metadata = object.get("client_metadata")?;
-    let turn: Value = serde_json::from_str(metadata.get(TURN)?.as_str()?).ok()?;
+pub(crate) fn source(object: &Map<String, Value>, headers: &HeaderMap) -> Option<String> {
+    let turn = crate::native_request_policy::role::turn_metadata(object, headers)?;
     turn.get(SOURCE)?.as_str().map(str::to_owned)
 }
 
@@ -75,9 +75,10 @@ pub(crate) fn overlay(object: &mut Map<String, Value>, headers: &mut HeaderMap) 
 }
 
 pub(crate) fn normalize_model(object: &mut Map<String, Value>) {
-    if object.get("model").and_then(Value::as_str) != Some("gpt-5.6-luna") {
+    let model = crate::native_request_policy::role::CLASSIFIER_MODEL;
+    if object.get("model").and_then(Value::as_str) != Some(model) {
         crate::ignored_fields::record("request", "model", "role_policy");
-        object.insert("model".into(), "gpt-5.6-luna".into());
+        object.insert("model".into(), model.into());
     }
     crate::ignored_fields::remove(object, "tools", "request", "role_policy");
     if let Some(first) = object

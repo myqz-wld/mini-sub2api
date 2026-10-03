@@ -245,6 +245,23 @@ fn validate_turn_relationships(scope: &ScopeState) -> Result<()> {
     for turn in scope.turns.values() {
         let session = thread_belongs_to_session(scope, &turn.thread_id)
             .ok_or_else(|| anyhow::anyhow!("turn thread is dangling"))?;
+        if turn.classifier {
+            let source = scope
+                .child_threads
+                .values()
+                .find(|thread| thread.id == turn.thread_id)
+                .and_then(|thread| thread.parent_thread_id.as_deref())
+                .ok_or_else(|| anyhow::anyhow!("classifier canonical source is missing"))?;
+            if let Some(parent) = &turn.parent_turn_id {
+                anyhow::ensure!(
+                    scope
+                        .turns
+                        .values()
+                        .any(|turn| turn.id == *parent && turn.thread_id == source),
+                    "classifier parent belongs to another source"
+                );
+            }
+        }
         let root = scope
             .turns
             .values()

@@ -18,9 +18,21 @@ pub(super) struct Inbound {
     failed: Option<FailedResponse>,
     response_id: Option<String>,
     retired: bool,
+    model: crate::responses_websocket_upgrade_metadata::ResponseModel,
 }
 
 impl Inbound {
+    pub(super) fn with_model(model: Option<String>) -> Self {
+        Self {
+            model: crate::responses_websocket_upgrade_metadata::ResponseModel::new(model),
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn take_model_notice(&mut self) -> Option<String> {
+        self.model.take_notice()
+    }
+
     pub(super) async fn next<S: futures_util::Stream + Unpin>(
         &mut self,
         stream: &mut S,
@@ -167,7 +179,7 @@ impl Inbound {
             translated
         };
         Ok(Some((
-            translated,
+            self.model.project(translated, generation)?,
             (terminal && !wait_for_footer).then_some(generation),
         )))
     }

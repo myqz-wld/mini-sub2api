@@ -227,6 +227,9 @@ func TestUsageWindow1592WebSocketErrors(t *testing.T) {
 					connection := dialResponsesProfileWebSocket(t, fixture.public, key, http.Header{"Originator": {"codex_exec"}})
 					defer connection.CloseNow()
 					writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.5","input":[]}`)
+					if subscription && wrapped {
+						readResponsesProfileModelNotice(t, connection)
+					}
 					data := []byte(readE2EWebSocketText(t, connection))
 					waitForResponsesProfileWebSocketCaptures(t, fixture.captures, 1)
 					if !subscription {

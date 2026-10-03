@@ -15,6 +15,15 @@ switching, Chat Completions or conversation-management API.
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
 
+Subscription WS performs a bounded auth-only upstream handshake before public 101, sends no
+application frames on that probe, and preserves its `x-reasoning-included` header presence/value.
+First-frame admission still selects the actual session, role and model. Actual and replacement
+connections must match the advertised header presence before inference; mismatch rejects without
+public delivery. Each operation exposes the actual connection's model through response metadata,
+after real upstream output arrives, preserving existing event model values. The extra handshake
+and route-dependent mismatch behavior are detailed in the
+[upgrade metadata contract](CODEX_COMPATIBILITY.md#subscription-websocket-upgrade-metadata).
+
 | Subscription input | Upstream send |
 |---|---|
 | Full HTTP | Full HTTP; public SSE or aggregated JSON follows caller preference. |
@@ -142,13 +151,23 @@ provides no JavaScript bridge or claim of complete default-native code-mode equi
 Codex 0.158.0 `configuration_update` input items retain their reasoning effort and history position
 in stored history, without item IDs or turn stamps. The fixed native feature policy disables effort
 updates, so all roles omit those items from the sending copy after identity/admission checks. Native analytics flags survive normalization; optional tool observations follow the budgets below.
-Guardian requests retain `x-codex-guardian`; backend reviewer requests with that header omit ordinary
-service-tier/routing hints, use the native late HTTP/WS header merge position, and their parent
-response IDs require an existing mapping in the same Key.
+Guardian roles are recognized from explicit `x-codex-guardian` headers or exact
+`guardian_classifier` / `guardian_review` markers in serialized `x-codex-turn-metadata`
+(body first, then compatibility header). Conflicting classifier/reviewer body markers fail before
+inference. Subscription classifier output receives `x-codex-guardian: classifier`; reviewer output
+receives `x-codex-guardian: reviewer` only for the exact `codex-auto-review` model. A supplied reviewer
+header identifies the role but does not override that model condition. Backend reviewers omit ordinary
+service-tier/routing hints and use the native late HTTP/WS header merge position. Supplied parent
+response IDs require an existing mapping in the same Key; absent optional IDs remain absent.
 Ordinary Subscription callers receive the backend Guardian credit metadata flag. Classifiers use
 the source thread's scoped `guardian-v2:` cache key, separate request thread/turn and validated
-parent linkage, without ModelClient installation/credits/input timing metadata. Classifier HTTP
-is uncompressed with its own header order; WS retains its Lite handshake header. Memory keeps
+parent linkage, without ModelClient installation/credits/input timing metadata. Known ancestry is
+recovered when Guardian root metadata is absent, without adding an omitted root to the wire.
+Classifier retries retain their logical turn across transport lease threads only with the same
+scoped source, parent and root. The first turn owner and each response's actual thread owner remain
+stable; classifier leases do not acquire ordinary current-turn pointers. Child threads can start
+self-rooted turns, and their descendants resolve those roots on the owning ancestor thread.
+Classifier HTTP is uncompressed with its own header order; WS retains its Lite handshake header. Memory keeps
 flat identity and supplied turn/root fields but omits installation/session/thread/window from
 the inner turn metadata. WS delta
 reuse compares late executed-tool result metadata and its call binding; changed evidence requires
@@ -161,12 +180,13 @@ lower `const` to a one-element `enum` and keep the native subset. Both paths use
 ordering and omit null optional schema fields. Search actions place `query` before `queries`. Enum
 business objects and free output schemas keep their content/order. JSON numbers retain arbitrary
 precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
-strictness is false for basic Guardian. Basic review is also recognized by exact `guardian_review`
-values in `thread_source` or `turn_trigger` within serialized `x-codex-turn-metadata` (body first,
-then header). This covers custom providers and review model overrides without the backend reviewer
-header, preserving optional assessment fields such as `risk_level`. Metadata alone does not select
-backend reviewer routing or remove a supported service tier. Explicit reviewer/classifier headers
-retain precedence; a generic `x-openai-subagent: guardian` does not identify a basic review.
+strictness is false for basic Guardian, preserving optional assessment fields such as `risk_level`.
+Reviewer model overrides retain their selected model and supported service tier, including
+`gpt-5.6-luna`; their metadata does not select backend reviewer routing. Model names and a generic
+`x-openai-subagent: guardian` alone do not identify either Guardian role. Guardian requests with no
+usable explicit effort default to `low` for known catalog models; ordinary requests keep catalog
+defaults. Classifiers preserve native `ultra`/`persistent` effort strings, while ModelClient roles
+resolve those aliases as below. Numeric effort serialization is shared by both producers.
 Invalid optional container/value types are logged and
 ignored before defaults; unknown nonempty string efforts and opaque business values remain valid.
 Unsigned 64-bit effort strings serialize as JSON numbers; numeric native values are accepted,

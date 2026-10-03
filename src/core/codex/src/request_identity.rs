@@ -36,6 +36,7 @@ pub(crate) struct IdentityContext {
     pub(crate) responses_lite: bool,
     pub(crate) transport: CodexTransport,
     pub(crate) tool_namespaces_info: Option<Value>,
+    pub(crate) reviewer: bool,
 }
 
 struct RequestIdentity {
@@ -327,13 +328,13 @@ fn apply_client_metadata(
             insert_string_if_invalid(metadata, WS_RESPONSES_LITE_METADATA, "true");
         }
     }
+    if context.reviewer {
+        metadata.remove("guardian_credits_requested");
+    }
     if !preserve_native_order {
         // Bare Subscription callers emulate the built-in ChatGPT backend session. A complete
         // native carrier retains its provider/session-specific optional fields instead.
-        if headers
-            .get("x-codex-guardian")
-            .is_none_or(|value| value != "reviewer")
-        {
+        if !context.reviewer {
             metadata.insert(
                 "guardian_credits_requested".into(),
                 Value::String("true".into()),

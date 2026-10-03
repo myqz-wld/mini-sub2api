@@ -22,12 +22,9 @@ use items::turn_key_for_raw;
 mod threads;
 use threads::{resolve_conversation, resolve_thread};
 
-struct ResolvedTurn {
-    turn_id: Option<String>,
-    root_turn_id: Option<String>,
-    parent_turn_id: Option<String>,
-    started_at_unix_ms: Option<i64>,
-}
+#[path = "request_state_resolution_turn.rs"]
+mod turn;
+use turn::resolve_turn;
 
 pub(crate) struct ResolvedProjection {
     pub(crate) identity: ResolvedRequestIdentity,
@@ -163,7 +160,9 @@ pub(crate) fn resolve_and_project(
     if let (Some(raw), Some(projected)) = (current_turn_raw.as_deref(), turn_id.as_deref()) {
         editor.bind_wire_pair(WireIdDomain::Turn, raw, projected)?;
     }
-    if let Some(projected) = turn_id.as_deref().filter(|turn| !turn.is_empty()) {
+    if !evidence.is_classifier()
+        && let Some(projected) = turn_id.as_deref().filter(|turn| !turn.is_empty())
+    {
         editor.set_current_turn(&thread_id, projected)?;
     }
     if let Some(raw) = evidence.thread.as_deref() {
@@ -273,108 +272,6 @@ pub(crate) fn resolve_and_project(
         synthesized_item_ids: Vec::new(),
         pending_compaction,
         wire_bindings,
-    })
-}
-
-fn resolve_turn(
-    editor: &mut RequestStateEditor<'_>,
-    evidence: &RequestIdentityEvidence,
-    turn_key: &str,
-    thread_id: &str,
-    root_thread_id: &str,
-    reserved_turn: Option<&str>,
-) -> Result<ResolvedTurn> {
-    if evidence.is_memory() && evidence.turn.is_none() {
-        return Ok(ResolvedTurn {
-            turn_id: None,
-            root_turn_id: None,
-            parent_turn_id: None,
-            started_at_unix_ms: None,
-        });
-    }
-    if evidence.is_prewarm() {
-        return Ok(ResolvedTurn {
-            turn_id: Some(String::new()),
-            root_turn_id: None,
-            parent_turn_id: None,
-            started_at_unix_ms: None,
-        });
-    }
-    let child_lineage = evidence.parent_turn.is_some()
-        || (evidence.explicit_thread_lineage && evidence.root_turn.is_some());
-    if !child_lineage {
-        let turn = editor.turn_with_id(turn_key, thread_id, None, None, reserved_turn)?;
-        return Ok(ResolvedTurn {
-            turn_id: Some(turn.id.clone()),
-            root_turn_id: Some(turn.id),
-            parent_turn_id: None,
-            started_at_unix_ms: Some(turn.started_at_unix_ms),
-        });
-    }
-
-    // Classifier root metadata is optional even when its source is a child thread. Recover
-    // the known internal ancestry without inventing a root field in its outbound metadata.
-    let inherited_root = if evidence.is_classifier()
-        && evidence.root_turn.is_none()
-        && let Some(parent) = evidence.parent_turn.as_deref()
-    {
-        let key = turn_key_for_raw(editor, parent)?;
-        editor.existing_turn(&key).map(|turn| turn.root_turn_id)
-    } else {
-        None
-    };
-    let root_raw = evidence
-        .root_turn
-        .as_deref()
-        .or(inherited_root.as_deref())
-        .or(evidence.parent_turn.as_deref())
-        .unwrap_or(turn_key);
-    let root_key = turn_key_for_raw(editor, root_raw)?;
-    let root_alias = editor.existing_wire_from_downstream(WireIdDomain::Turn, root_raw)?;
-    let root = editor.turn_with_id(&root_key, root_thread_id, None, None, root_alias.as_deref())?;
-    let parent = evidence
-        .parent_turn
-        .as_deref()
-        .map(|raw| {
-            let key = turn_key_for_raw(editor, raw)?;
-            if key == root_key {
-                Ok(root.id.clone())
-            } else if let Some(existing) = editor.existing_turn(&key) {
-                Ok(existing.id)
-            } else {
-                let alias = editor.existing_wire_from_downstream(WireIdDomain::Turn, raw)?;
-                editor
-                    .turn_with_id(
-                        &key,
-                        root_thread_id,
-                        Some(&root.id),
-                        Some(&root.id),
-                        alias.as_deref(),
-                    )
-                    .map(|turn| turn.id)
-            }
-        })
-        .transpose()?;
-    if turn_key == root_key {
-        return Ok(ResolvedTurn {
-            turn_id: Some(root.id.clone()),
-            root_turn_id: Some(root.id),
-            parent_turn_id: parent,
-            started_at_unix_ms: Some(root.started_at_unix_ms),
-        });
-    }
-    let turn = editor.turn_with_id(
-        turn_key,
-        thread_id,
-        Some(&root.id),
-        parent.as_deref(),
-        reserved_turn,
-    )?;
-    Ok(ResolvedTurn {
-        turn_id: Some(turn.id),
-        root_turn_id: Some(root.id),
-        parent_turn_id: parent,
-        started_at_unix_ms: Some(turn.started_at_unix_ms),
     })
 }
 

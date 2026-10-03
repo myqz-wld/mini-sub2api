@@ -28,6 +28,7 @@ pub(crate) struct RequestIdentityEvidence {
     pub(crate) window_number: Option<u64>,
     pub(crate) request_kind: String,
     classifier: bool,
+    reviewer: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -77,11 +78,12 @@ impl RequestIdentityEvidence {
         )
         .ok()
         .flatten();
-        let classifier = crate::request_classifier::selected(headers);
+        let role = crate::native_request_policy::Role::read(object, headers);
+        let classifier = role == crate::native_request_policy::Role::Classifier;
         let parent_thread =
             evidence_text(RelationshipCarrier::ParentThread, &sources).or_else(|| {
                 classifier
-                    .then(|| crate::request_classifier::source(object))
+                    .then(|| crate::request_classifier::source(object, headers))
                     .flatten()
             });
         let forked_from_thread = evidence_text(RelationshipCarrier::ForkedFromThread, &sources);
@@ -133,6 +135,7 @@ impl RequestIdentityEvidence {
             window_number: window.as_deref().and_then(window_number),
             request_kind,
             classifier,
+            reviewer: role.is_reviewer(),
         }
         .with_lineage()
     }
@@ -154,6 +157,10 @@ impl RequestIdentityEvidence {
 
     pub(crate) fn is_classifier(&self) -> bool {
         self.classifier
+    }
+
+    pub(crate) fn is_reviewer(&self) -> bool {
+        self.reviewer
     }
 }
 

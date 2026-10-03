@@ -104,16 +104,27 @@ fn filter_headers(value: &mut Value, request_id: &str) {
         return;
     };
     headers.retain(|name, value| match response_header_action(name) {
-        CarrierAction::Opaque => header_value(value, None, 0),
+        CarrierAction::Opaque => header_value(value, None, 0, true),
         CarrierAction::GatewayRequestAlias if !request_id.is_empty() => {
-            header_value(value, Some(request_id), 0)
+            header_value(value, Some(request_id), 0, true)
         }
         _ => false,
     });
 }
 
-fn header_value(value: &mut Value, alias: Option<&str>, depth: usize) -> bool {
+fn header_value(
+    value: &mut Value,
+    alias: Option<&str>,
+    depth: usize,
+    native_scalars: bool,
+) -> bool {
     match value {
+        Value::Number(_) | Value::Bool(_) if native_scalars => {
+            // Native Responses metadata accepts scalar JSON header values. Apply the
+            // same length/syntax/alias boundary after their native string conversion.
+            *value = Value::String(value.to_string());
+            header_value(value, alias, depth, native_scalars)
+        }
         Value::String(text) => {
             if text.len() > crate::subscription_routing::MAX_ROUTING_TOKEN_BYTES
                 || http::HeaderValue::from_str(text).is_err()
@@ -127,7 +138,7 @@ fn header_value(value: &mut Value, alias: Option<&str>, depth: usize) -> bool {
         }
         Value::Array(values) if depth < 8 => values
             .iter_mut()
-            .all(|value| header_value(value, alias, depth + 1)),
+            .all(|value| header_value(value, alias, depth + 1, native_scalars)),
         _ => false,
     }
 }
@@ -176,7 +187,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
             .filter(|(name, _)| name.eq_ignore_ascii_case("x-retry-metadata"))
             .filter_map(|(name, value)| {
                 let mut value = value.clone();
-                header_value(&mut value, None, 0).then(|| (name.clone(), value))
+                header_value(&mut value, None, 0, false).then(|| (name.clone(), value))
             })
             .collect();
         if !headers.is_empty() {
@@ -257,6 +268,26 @@ fn retry_delay(message: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_scalar_metadata_headers_keep_allowlists_and_request_aliases() {
+        let mut value = json!({"type":"codex.response.metadata","headers":{
+            "x-models-etag":123,
+            "x-codex-safety-buffering-enabled":true,
+            "x-request-id":456,
+            "openai-model":["synthetic-model",42,false],
+            "X-OpenAI-Model":[["synthetic-alias-model"]],
+            "authorization":123,"future-private":true,"retry-after":null}});
+        filter_response(&mut value, "req_gateway");
+        assert_eq!(
+            value["headers"],
+            json!({
+                "x-models-etag":"123", "x-codex-safety-buffering-enabled":"true",
+                "x-request-id":"req_gateway", "openai-model":["synthetic-model","42","false"],
+                "X-OpenAI-Model":[["synthetic-alias-model"]]
+            })
+        );
+    }
 
     #[test]
     fn nullable_flat_errors_remain_sanitized_and_invalid_correlation_shapes_are_removed() {

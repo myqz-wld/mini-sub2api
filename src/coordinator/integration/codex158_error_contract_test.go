@@ -111,6 +111,9 @@ func TestNativeWrappedWebSocketErrorPreservesBothCredentialRoutes(t *testing.T) 
 			c := dialResponsesProfileWebSocket(t, fixture.public, key, http.Header{"Originator": []string{"codex_exec"}})
 			defer c.CloseNow()
 			writeE2EWebSocketText(t, c, `{"type":"response.create","model":"gpt-5.5","input":[]}`)
+			if subscription {
+				readResponsesProfileModelNotice(t, c)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			_, got, err := c.Read(ctx)

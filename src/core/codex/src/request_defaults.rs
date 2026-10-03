@@ -178,7 +178,13 @@ pub(crate) fn merge_for_role(
             .entry("parallel_tool_calls".to_string())
             .or_insert(Value::Bool(true));
     }
-    merge_reasoning(object, profile);
+    let mut reasoning_profile = profile;
+    if (role == crate::native_request_policy::Role::Classifier || role.is_reviewer())
+        && profile.reasoning_effort.is_some()
+    {
+        reasoning_profile.reasoning_effort = Some("low");
+    }
+    merge_reasoning(object, reasoning_profile);
     if role != crate::native_request_policy::Role::Classifier {
         merge_text(object, profile);
     }

@@ -19,6 +19,7 @@ pub(crate) async fn relay(
         auth_binding,
         mut identity,
         operation,
+        server_model,
     } = context;
     let (mut internal_write, mut internal_read) = internal.split();
     let (mut upstream_write, mut upstream_read) = upstream.split();
@@ -248,7 +249,7 @@ pub(crate) async fn relay(
         };
         let server_continuation = Arc::clone(&continuation);
         let upstream_to_client = async {
-            let mut inbound = inbound::Inbound::default();
+            let mut inbound = inbound::Inbound::with_model(server_model);
             while let Some(message) = inbound.next(&mut upstream_read).await {
                 let (outbound, terminal_event) = match message {
                     Ok(UpstreamMessage::Text(text)) => {
@@ -266,6 +267,14 @@ pub(crate) async fn relay(
                             Ok(None) => continue,
                             Err(_) => return RelayExit::Failure(delivery.failure()),
                         };
+                        if let Some(notice) = inbound.take_model_notice()
+                            && internal_write
+                                .send(InternalMessage::Text(notice.into()))
+                                .await
+                                .is_err()
+                        {
+                            return RelayExit::Complete;
+                        }
                         (InternalMessage::Text(text.into()), terminal)
                     }
                     Ok(UpstreamMessage::Binary(_)) | Ok(UpstreamMessage::Frame(_)) => {

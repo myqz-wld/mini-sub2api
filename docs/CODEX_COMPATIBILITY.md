@@ -185,6 +185,37 @@ resume complete history after Core restart. In these two cases OpenCode omitted 
 even when the synthetic upstream returned it; the specific old-turn failure must not be attributed
 to ordinary OpenCode behavior without request evidence. These checks use loopback endpoints only.
 
+## Subscription WebSocket upgrade metadata
+
+Before downstream HTTP 101, Subscription performs an authenticated upstream handshake probe with
+no caller session/role identifiers and no application frames, using the same shape as native
+`codex doctor`. Its connection-local `x-reasoning-included` observation is copied into downstream
+101, including an empty or literal `false` value: native 0.159.2 uses presence, not boolean parsing.
+Connection and auth recovery share a ten-second deadline; probe close is bounded to 100 ms.
+Rejected probes retain the upstream HTTP status (including native 426 fallback), filtered retry
+headers and typed usage-window fields, with sanitized errors and not-delivered evidence.
+
+The first create frame still determines scoped admission, Guardian role, model and canonical
+upstream identity. Before any hidden setup/public create, its actual handshake must agree with the
+advertised reasoning-header presence. Hidden-setup replacement sockets undergo the same check.
+Disagreement closes with not-delivered evidence; no public inference is replayed. This costs an
+extra handshake per downstream connection and requires an endpoint that accepts auth-only probes.
+Role-dependent or changing reasoning flags may reject an otherwise usable connection. No global
+cache or assumed flag value replaces this check: the pinned client freezes the flag before it sends
+its first body, so arbitrary route-dependent flags cannot be preserved with universal availability.
+
+The probe model is discarded. Each sampling operation carries the actual inference connection's
+`openai-model` in its first eligible response event, including after connection replacement. Existing
+event-level model values take precedence, with case-insensitive `openai-model`/`x-openai-model` and
+native first-element array handling. Rate-limit events cannot consume this projection; wrapped
+errors receive a preceding model metadata event only after actual upstream error output arrives.
+This preserves response/usage/TTFB ordering. API-key forwarding keeps its direct upgrade behavior.
+
+Loopback tests ran the pinned CLI itself with race detection: two turns observed the correct model
+before completion on a reused socket, without leaking the probe model. A same-turn tool follow-up
+after historical encrypted reasoning produced one automatic compaction with the header absent and
+zero with the header present as `false`, identically through direct and Subscription routes.
+
 ## Earlier 0.156.0 alignment
 
 | Native change | Gateway behavior |
@@ -192,7 +223,7 @@ to ordinary OpenCode behavior without request evidence. These checks use loopbac
 | `configuration_update` history items | Preserve `reasoning.effort`, order and repetition; add no item ID or turn stamp. |
 | Turn analytics and execution metadata | Preserve `analytics_enabled`, model and effort; synthesized metadata reports analytics disabled. |
 | Root fork cache affinity in `session-id` | Keep explicit body session ownership separate from the shared cache key, with scoped aliases. |
-| Guardian inference uses `/responses` with `x-codex-guardian` | Retain the header, omit reviewer service-tier/routing hints and restore known parent response aliases. Missing/cross-Key references fail before inference. |
+| Guardian inference uses `/responses` with role metadata and optional backend headers | Recognize headerless classifier/reviewer metadata. Subscription emits the classifier header or the exact-model `codex-auto-review` reviewer header; supplied parent response references remain Key-scoped. |
 | Executed-tool result evidence | Preserve source lists and opaque result metadata without recursively interpreting IDs inside tool data. |
 | Memory consolidation turn IDs | Preserve and project explicit turn/root-turn IDs while leaving absent memory turns absent. |
 | Model catalog/personality changes | Use nine catalog profiles and literal upstream prompt fixtures; preserve caller instructions. Removed catalog entries follow normal prefix/fallback selection. |

@@ -29,6 +29,7 @@ use crate::websocket_delivery::internal_close;
 use axum::extract::ws::WebSocket;
 use bytes::Bytes;
 use connect_support::connect;
+pub(crate) use connect_support::probe;
 use connect_support::send_provider_request_id_control;
 use http::HeaderMap;
 use std::collections::VecDeque;
@@ -47,6 +48,7 @@ pub(crate) struct DeferredCodexContext {
     pub(crate) caller: CallerKind,
     pub(crate) profile: UpstreamProfile,
     pub(crate) resolved: ResolvedCredential,
+    pub(crate) reasoning_included: bool,
 }
 
 pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexContext) {
@@ -187,26 +189,35 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
     else {
         return;
     };
-    let (mut upstream, _handshake_turn_state, provider_request_id) = match connected {
-        Ok(connected) => connected,
-        Err(failure) => {
-            if !send_provider_request_id_control(
-                &mut internal,
-                failure.provider_request_id.as_deref(),
-            )
-            .await
-            {
+    let (mut upstream, _handshake_turn_state, provider_request_id, mut upgrade_metadata) =
+        match connected {
+            Ok(connected) => connected,
+            Err(failure) => {
+                if !send_provider_request_id_control(
+                    &mut internal,
+                    failure.provider_request_id.as_deref(),
+                )
+                .await
+                {
+                    return;
+                }
+                let metadata = failure_before_websocket_delivery(&failure.error);
+                if !connect_support::send_protocol_failure(&mut internal, &failure).await {
+                    return;
+                }
+                let _ = internal.send(failure_close(metadata)).await;
                 return;
             }
-            let metadata = failure_before_websocket_delivery(&failure.error);
-            if !connect_support::send_protocol_failure(&mut internal, &failure).await {
-                return;
-            }
-            let _ = internal.send(failure_close(metadata)).await;
-            return;
-        }
-    };
+        };
     if !send_provider_request_id_control(&mut internal, provider_request_id.as_deref()).await {
+        return;
+    }
+    if !upgrade_metadata.matches_reasoning(context.reasoning_included) {
+        let _ = internal
+            .send(failure_close(
+                CoreFailure::UpstreamHandshakeRejected.failure(),
+            ))
+            .await;
         return;
     }
     if !fingerprint_is_current(
@@ -256,8 +267,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                 return;
             };
             match reconnected {
-                Ok((replacement, _replacement_turn_state, replacement_request_id)) => {
-                    upstream = replacement;
+                Ok((replacement, _replacement_turn_state, replacement_request_id, metadata)) => {
                     if !send_provider_request_id_control(
                         &mut internal,
                         replacement_request_id.as_deref(),
@@ -266,6 +276,16 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                     {
                         return;
                     }
+                    if !metadata.matches_reasoning(context.reasoning_included) {
+                        let _ = internal
+                            .send(failure_close(
+                                CoreFailure::UpstreamHandshakeRejected.failure(),
+                            ))
+                            .await;
+                        return;
+                    }
+                    upstream = replacement;
+                    upgrade_metadata = metadata;
                 }
                 Err(failure) => {
                     if !send_provider_request_id_control(
@@ -405,6 +425,7 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         ),
         identity: Some(resolved_identity),
         operation,
+        server_model: upgrade_metadata.model,
     };
     relay(
         internal,

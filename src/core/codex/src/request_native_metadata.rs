@@ -16,8 +16,10 @@ pub(crate) struct NativeMetadata {
     cache_header: bool,
     parent_response: Option<String>,
     classifier: bool,
+    reviewer: bool,
+    backend_reviewer: bool,
     classifier_source: Option<String>,
-    classifier_has_root: bool,
+    has_root: bool,
     mcp_attribution: Option<crate::request_mcp_attribution::Attribution>,
 }
 
@@ -127,13 +129,15 @@ impl NativeMetadata {
             })
             .transpose()?
             .map(str::to_string);
-        let classifier = crate::request_classifier::selected(headers);
+        let role = crate::native_request_policy::Role::resolve(object, headers)
+            .map_err(|_| anyhow::anyhow!("conflicting Guardian roles"))?;
+        let classifier = role == crate::native_request_policy::Role::Classifier;
         let classifier_source = if classifier {
             text(crate::request_classifier::SOURCE)?
         } else {
             None
         };
-        let classifier_has_root = values
+        let has_root = values
             .get("root_turn_id")
             .or_else(|| flat.and_then(|m| m.get("root_turn_id")))
             .is_some_and(Value::is_string);
@@ -149,8 +153,11 @@ impl NativeMetadata {
         Ok(Self {
             mcp_attribution: crate::request_mcp_attribution::read(object),
             classifier,
+            reviewer: role.is_reviewer(),
+            backend_reviewer: role
+                == crate::native_request_policy::Role::Reviewer { backend: true },
             classifier_source,
-            classifier_has_root,
+            has_root,
             window_number,
             context_window_id,
             fork_ordinal,
@@ -195,7 +202,11 @@ impl NativeMetadata {
         if let Some(parent) = &self.parent_response {
             let projected =
                 editor.required_wire_from_downstream(WireIdDomain::Response, parent, true)?;
-            metadata.insert("parent_response_id".into(), Value::String(projected));
+            if self.reviewer && !self.backend_reviewer {
+                metadata.remove("parent_response_id");
+            } else {
+                metadata.insert("parent_response_id".into(), Value::String(projected));
+            }
         }
         if self.classifier {
             return crate::request_classifier::project(
@@ -204,7 +215,7 @@ impl NativeMetadata {
                 headers,
                 identity,
                 self.classifier_source.as_deref(),
-                self.classifier_has_root,
+                self.has_root,
             );
         }
         crate::request_mcp_attribution::project(editor, self.mcp_attribution.as_ref(), metadata);
@@ -214,6 +225,10 @@ impl NativeMetadata {
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow::anyhow!("turn metadata missing"))?,
         )?;
+        if self.reviewer && !self.has_root {
+            metadata.remove("root_turn_id");
+            turn.remove("root_turn_id");
+        }
         if self.window_number.is_some() {
             turn.insert("window_number".into(), Value::from(identity.window_number));
         }

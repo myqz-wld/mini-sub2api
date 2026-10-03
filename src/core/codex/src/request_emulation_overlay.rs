@@ -38,7 +38,8 @@ pub(super) fn apply(
     profile: UpstreamProfile,
     force_lite: bool,
 ) -> Result<(Vec<String>, Vec<usize>), ()> {
-    let role = crate::native_request_policy::Role::read(object, headers);
+    let role = crate::native_request_policy::Role::resolve(object, headers)?;
+    role.project_backend_headers(headers);
     let model = request_defaults::diagnostic_model(
         object
             .get("model")
@@ -143,6 +144,7 @@ fn apply_inner(
                 responses_lite: model_profile.responses_lite,
                 transport,
                 tool_namespaces_info: None,
+                reviewer: role.is_reviewer(),
             },
         );
     }

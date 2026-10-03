@@ -1,57 +1,10 @@
 //! Codex 0.159.2 ModelClient and Guardian policies, separate from public API passthrough.
 use crate::ignored_fields as log;
-use http::HeaderMap;
 use serde_json::{Map, Value, json};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Role {
-    Model,
-    // The backend header selects special routing independently of basic review semantics.
-    Reviewer { backend: bool },
-    Classifier,
-    Memory,
-}
-impl Role {
-    pub(crate) fn read(object: &Map<String, Value>, headers: &HeaderMap) -> Self {
-        match headers
-            .get("x-codex-guardian")
-            .and_then(|v| v.to_str().ok())
-        {
-            Some("classifier") => return Self::Classifier,
-            Some("reviewer") => return Self::Reviewer { backend: true },
-            _ => {}
-        }
-        let raw = object
-            .get("client_metadata")
-            .and_then(|m| m.get("x-codex-turn-metadata"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                headers
-                    .get("x-codex-turn-metadata")
-                    .and_then(|v| v.to_str().ok())
-            });
-        let turn = raw.and_then(|s| serde_json::from_str::<Value>(s).ok());
-        if turn.as_ref().is_some_and(|v| v["request_kind"] == "memory") {
-            Self::Memory
-        } else if turn.as_ref().is_some_and(|v| {
-            v["thread_source"] == "guardian_review" || v["turn_trigger"] == "guardian_review"
-        }) {
-            // Codex omits the backend reviewer header for custom providers/model overrides,
-            // but those basic Guardian sessions still use a non-strict output schema.
-            Self::Reviewer { backend: false }
-        } else {
-            Self::Model
-        }
-    }
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Model => "model",
-            Self::Reviewer { .. } => "reviewer",
-            Self::Classifier => "classifier",
-            Self::Memory => "memory",
-        }
-    }
-}
+#[path = "native_request_role.rs"]
+pub(crate) mod role;
+pub(crate) use role::Role;
 
 // These types are distinct from ToolSpec. item_reference is a local, ownership-checked control.
 pub(crate) fn supported_item(kind: &str) -> bool {
@@ -178,9 +131,10 @@ pub(crate) fn apply_controls(
     if let Some(reasoning) = object.get_mut("reasoning").and_then(Value::as_object_mut) {
         log::retain(reasoning, &["effort", "summary", "context"], "reasoning");
         if let Some(effort) = reasoning.get("effort").and_then(Value::as_str) {
-            let resolved = match effort {
-                "persistent" => Some("disabled"),
-                "ultra" => Some(profile.ultra_effort),
+            let resolved = match (role, effort) {
+                (Role::Classifier, _) => None,
+                (_, "persistent") => Some("disabled"),
+                (_, "ultra") => Some(profile.ultra_effort),
                 _ => None,
             };
             if let Some(resolved) = resolved {

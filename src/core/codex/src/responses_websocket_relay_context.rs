@@ -13,6 +13,7 @@ pub(crate) struct RelayContext {
     pub(crate) auth_binding: [u8; 32],
     pub(crate) identity: Option<ResolvedRequestIdentity>,
     pub(crate) operation: Option<crate::subscription_context::Operation>,
+    pub(crate) server_model: Option<String>,
 }
 
 #[derive(Clone, Copy)]

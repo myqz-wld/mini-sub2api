@@ -105,9 +105,9 @@ func (h *Handler) writeWebSocketDialError(
 			if coreError.Code == "credential_requires_login" {
 				_ = h.store.MarkCredentialRequiresLogin(context.Background(), route.CredentialID)
 			}
-			writeOpenAIErrorWithFailure(
+			writeOpenAIErrorWithUsageWindow(
 				writer, response.StatusCode, coreError.Code, coreError.Message, connectionID,
-				coreError.FailureMetadata,
+				coreError.FailureMetadata, coreError.LimitWindowMinutes,
 			)
 			return
 		}

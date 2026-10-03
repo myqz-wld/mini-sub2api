@@ -14,6 +14,8 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 	source["x-retry-metadata"] = []string{"NO_MORE_RETRY"}
 	source.Set("X-Request-Id", "provider-raw")
 	source.Set("X-Codex-Turn-State", "opaque")
+	source.Set("X-Openai-Model", "synthetic-model")
+	source.Set("X-Reasoning-Included", "")
 	source["x-codex-safety-buffering-enabled"] = []string{"true", "false"}
 	source.Set("X-Codex-Safety-Buffering-Faster-Model", "synthetic-fast-model")
 	source.Set("X-Codex-Safety-Buffering-Private", "must-not-cross")
@@ -28,6 +30,8 @@ func TestResponseHeaderBoundaryIsExactAndDefaultDeny(t *testing.T) {
 		destination.Get("X-Retry-Metadata") != "NO_MORE_RETRY" ||
 		destination.Get("X-Request-Id") != "req_gateway" ||
 		destination.Get("X-Codex-Turn-State") != "opaque" ||
+		destination.Get("X-Openai-Model") != "synthetic-model" ||
+		len(destination.Values("X-Reasoning-Included")) != 1 ||
 		strings.Join(destination.Values("X-Codex-Safety-Buffering-Enabled"), ",") != "true,false" ||
 		destination.Get("X-Codex-Safety-Buffering-Faster-Model") != "synthetic-fast-model" ||
 		destination.Get("Server-Timing") != "upstream_ttfb;dur=6" ||

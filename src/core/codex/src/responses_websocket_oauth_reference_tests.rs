@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn missing_subscription_previous_response_closes_before_provider_connect() {
+async fn missing_subscription_previous_response_closes_before_canonical_provider_connect() {
     let fixture = holding_oauth_fixture(
         "chatgpt-websocket-missing-reference",
         HoldingProviderEvent::None,
@@ -13,6 +13,8 @@ async fn missing_subscription_previous_response_closes_before_provider_connect()
         .send()
         .await
         .expect("handshake");
+    std::assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 1);
+    assert!(fixture.state.frames.lock().await.is_empty());
     let mut socket = handshake.into_websocket().await.expect("socket");
     socket
         .send(DownstreamMessage::Text(
@@ -39,6 +41,7 @@ async fn missing_subscription_previous_response_closes_before_provider_connect()
             mini_sub2api_protocol_v1::DeliveryState::NotDelivered,
         )
     );
-    std::assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 0);
+    // Admission rejected the frame after the auth-only probe, without a canonical connection.
+    std::assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 1);
     assert!(fixture.state.frames.lock().await.is_empty());
 }

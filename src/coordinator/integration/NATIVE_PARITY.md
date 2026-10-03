@@ -62,6 +62,7 @@ Counts describe overlapping matrices, not additive independent cases.
 | WS controls: 24 cases | Inject/append/generic ownership, stale-history rejection and full replacement |
 | Cache/completion | Publication order, item/footer proof, failure/expiry/pressure, interning and tool consumption |
 | WS/compaction | Reuse/reconnect, first routing token, prewarm, uncertain sends, V2 item-done and window commit |
+| WS upgrade metadata: 16 native cases | Direct/Subscription model observations across reused sockets, event overrides/arrays/aliases, leading rate-limit/error events, probe isolation and header-presence effects on actual compaction decisions |
 | Compaction continuation: 36 cases | Explicit/in-band windows, two HTTP deltas, full WS recovery, Lite setup and missing-window errors |
 | Compaction message rebuild: 8 native cases | Actual pinned CLI media removal/text truncation with retained message IDs; HTTP/WS ordinary/Lite replacement and later continuation |
 | Anonymous checkpoints: 36 four-call cases | Configuration/context changes, stable session/thread/window, new turn and exact checkpoint across credentials/transports/formats |

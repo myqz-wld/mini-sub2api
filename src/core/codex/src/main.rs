@@ -68,6 +68,7 @@ mod responses_websocket_prewarm;
 mod responses_websocket_projection;
 mod responses_websocket_reuse;
 mod responses_websocket_state;
+mod responses_websocket_upgrade_metadata;
 mod sandbox_projection;
 mod server;
 mod subscription_aliases;

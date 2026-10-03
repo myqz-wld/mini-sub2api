@@ -70,6 +70,9 @@ func TestCodexProfilesTranslateTerminalFailuresAndSanitizeErrors(t *testing.T) {
 					},
 				})
 				writeE2EWebSocketText(t, connection, string(request))
+				if profile.subscription && eventType == "error" {
+					readResponsesProfileModelNotice(t, connection)
+				}
 				publicText := readE2EWebSocketText(t, connection)
 				var public map[string]any
 				if json.Unmarshal([]byte(publicText), &public) != nil || public["type"] != eventType {

@@ -91,7 +91,11 @@ func TestRetryMetadataThroughPublicSSEAndWebSocket(t *testing.T) {
 				}
 				waitForRoutingCapture(t, fixture.captures)
 				c := dialResponsesProfileWebSocket(t, wsFixture.public, wsKey, http.Header{"Originator": {"codex_exec"}})
+				defer c.CloseNow()
 				writeE2EWebSocketText(t, c, `{"type":"response.create","model":"gpt-5.5","input":[]}`)
+				if subscription && kind != "response.failed" {
+					readResponsesProfileModelNotice(t, c)
+				}
 				assertRetryMetadata(t, decodeRequestObject(t, []byte(readE2EWebSocketText(t, c))), subscription)
 				_ = c.CloseNow()
 			}

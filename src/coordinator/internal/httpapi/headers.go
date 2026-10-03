@@ -60,6 +60,7 @@ var publicResponseHeaders = map[string]bool{
 	"X-Retry-Metadata":                      true,
 	"Server-Timing":                         true,
 	"Openai-Model":                          true,
+	"X-Openai-Model":                        true,
 	"Openai-Processing-Ms":                  true,
 	"Openai-Version":                        true,
 	"X-Models-Etag":                         true,

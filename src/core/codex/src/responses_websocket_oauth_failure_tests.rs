@@ -99,7 +99,7 @@ async fn established_subscription_socket_reports_retryable_state_unavailable_fai
 }
 
 #[tokio::test]
-async fn first_subscription_create_reports_state_unavailable_before_provider_connect() {
+async fn first_subscription_create_reports_state_unavailable_before_canonical_provider_connect() {
     let fixture = holding_oauth_fixture(
         "chatgpt-websocket-first-state-unavailable",
         HoldingProviderEvent::None,
@@ -132,6 +132,8 @@ async fn first_subscription_create_reports_state_unavailable_before_provider_con
         .send()
         .await
         .expect("handshake");
+    assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 1);
+    assert!(fixture.state.frames.lock().await.is_empty());
     let mut socket = handshake.into_websocket().await.expect("socket");
     socket
         .send(DownstreamMessage::Text(stateful_create("first")))
@@ -150,7 +152,8 @@ async fn first_subscription_create_reports_state_unavailable_before_provider_con
             mini_sub2api_protocol_v1::DeliveryState::NotDelivered,
         )
     );
-    assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 0);
+    // State admission still happens before the canonical connection and every create frame.
+    assert_eq!(fixture.state.handshake_calls.load(Ordering::SeqCst), 1);
     assert!(fixture.state.frames.lock().await.is_empty());
 }
 

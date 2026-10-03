@@ -103,6 +103,9 @@ pub(crate) struct TurnEntry {
     // Inventory provenance survives copying a historical turn to a new execution owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) inventory_source_thread_id: Option<String>,
+    // Classifier retries keep this canonical owner while transport leases can change.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) classifier: bool,
     pub(crate) root_turn_id: String,
     pub(crate) parent_turn_id: Option<String>,
     pub(crate) started_at_unix_ms: i64,

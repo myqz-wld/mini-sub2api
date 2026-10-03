@@ -31,7 +31,8 @@ pub(crate) async fn prepare_stateful_codex_request(
     }
     let mut object = serde_json::from_slice::<serde_json::Map<String, Value>>(&body)
         .map_err(|_| Error::InvalidRequest)?;
-    let role = crate::native_request_policy::Role::read(&object, headers);
+    let role = crate::native_request_policy::Role::resolve(&object, headers)
+        .map_err(|_| Error::InvalidRequest)?;
     let model = crate::request_defaults::diagnostic_model(
         object
             .get("model")

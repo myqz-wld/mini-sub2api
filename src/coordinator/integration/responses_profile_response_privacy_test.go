@@ -17,7 +17,8 @@ func privacyMetadata(eventType string) map[string]any {
 		"X-Codex-Installation-Id": "synthetic-private-installation", "X-Future-Private": "synthetic-private-extension",
 		"X-Request-Id": []any{"synthetic-provider-id"}, "retry-after": "5",
 		"x-codex-turn-state":                    []any{"synthetic-routing-state"},
-		"x-codex-safety-buffering-enabled":      "true",
+		"x-codex-safety-buffering-enabled":      true,
+		"x-models-etag":                         123,
 		"X-Codex-Safety-Buffering-Faster-Model": []any{"synthetic-fast-model"},
 		"x-codex-safety-buffering-private":      "synthetic-private-extension",
 	}}
@@ -37,8 +38,12 @@ func assertPublicMetadataPrivacy(t *testing.T, event map[string]any, requestID s
 	if !ok {
 		t.Fatal("metadata header container missing")
 	}
+	var safety, etag any = "true", "123"
+	if !subscription {
+		safety, etag = true, float64(123)
+	}
 	models, ok := headers["X-Codex-Safety-Buffering-Faster-Model"].([]any)
-	if headers["x-codex-safety-buffering-enabled"] != "true" || !ok || len(models) != 1 || models[0] != "synthetic-fast-model" {
+	if headers["x-codex-safety-buffering-enabled"] != safety || headers["x-models-etag"] != etag || !ok || len(models) != 1 || models[0] != "synthetic-fast-model" {
 		t.Fatal("safety buffering metadata changed")
 	}
 	if !subscription {
