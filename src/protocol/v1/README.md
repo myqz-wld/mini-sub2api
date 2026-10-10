@@ -106,7 +106,7 @@ selects the request and response profile:
 | Credential kind | Profile for every caller |
 | --- | --- |
 | OpenAI API key | `ApiKeyPassthrough` |
-| Codex subscription | `CodexSubscription1592` |
+| Codex subscription | `CodexSubscription1620` |
 
 Caller markers never grant permissions or change the selected credential. API-key bodies, valid WS
 application frames and response bodies remain byte-transparent, including Codex-marked callers;

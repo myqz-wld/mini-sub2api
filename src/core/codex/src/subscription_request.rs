@@ -13,6 +13,7 @@ pub(crate) enum Format {
 
 #[derive(Clone)]
 pub(crate) struct Evidence {
+    pub(crate) role: crate::native_request_policy::Role,
     pub(crate) reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility,
     pub(crate) transport: EmulationTransport,
     pub(crate) session: Option<String>,
@@ -230,6 +231,8 @@ impl Evidence {
             turn = one(header_turns)?;
         }
         Ok(Self {
+            role: crate::native_request_policy::Role::resolve(object, headers)
+                .map_err(|_| Error::InvalidRequest)?,
             reasoning_visibility: crate::reasoning_visibility::ReasoningVisibility::read(object)?,
             transport,
             session: selected_session(object, headers)?,

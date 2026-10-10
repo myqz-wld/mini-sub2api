@@ -356,14 +356,20 @@ pub(crate) fn settings_for_format(
     object: &Map<String, Value>,
     format: crate::subscription_request::Format,
     transport: crate::request_normalizer::EmulationTransport,
+    role: crate::native_request_policy::Role,
 ) -> Value {
     let mut result = object.clone();
     crate::request_normalizer::filter_subscription_fields(&mut result, transport);
-    let lite = format == crate::subscription_request::Format::Lite;
-    let model = object.get("model").and_then(Value::as_str).unwrap_or("");
+    let classifier = role == crate::native_request_policy::Role::Classifier;
+    if classifier {
+        crate::request_classifier::normalize_model(&mut result);
+    }
+    let lite = format == crate::subscription_request::Format::Lite || classifier;
+    let model = result.get("model").and_then(Value::as_str).unwrap_or("");
     let mut profile = crate::request_defaults::model_profile(model);
     profile.responses_lite |= lite;
-    crate::request_defaults::merge_request_defaults(&mut result, profile, false);
+    // Reconstructed settings must use the same producer defaults as the first request.
+    crate::request_defaults::merge_for_role(&mut result, profile, false, role);
     crate::codex_instructions::normalize_base(&mut result);
     if !lite {
         result

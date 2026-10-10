@@ -1,4 +1,5 @@
 use super::*;
+use crate::native_request_policy::Role;
 use serde_json::json;
 
 #[test]
@@ -9,7 +10,12 @@ fn absent_bases_share_effective_settings_without_matching_catalog_text() {
         for model in ["gpt-5.4", "gpt-5.6-sol"] {
             for format in [Format::Responses, Format::Lite] {
                 let request = json!({"model":model,"tools":[]});
-                let expected = settings_for_format(request.as_object().unwrap(), format, transport);
+                let expected = settings_for_format(
+                    request.as_object().unwrap(),
+                    format,
+                    transport,
+                    Role::Model,
+                );
                 assert!(expected.get("instructions").is_none());
                 for invalid in [
                     Value::Null,
@@ -22,14 +28,22 @@ fn absent_bases_share_effective_settings_without_matching_catalog_text() {
                     let mut request = request.clone();
                     request["instructions"] = invalid;
                     assert!(
-                        settings_for_format(request.as_object().unwrap(), format, transport)
-                            == expected
+                        settings_for_format(
+                            request.as_object().unwrap(),
+                            format,
+                            transport,
+                            Role::Model
+                        ) == expected
                     );
                 }
                 let mut supplied = request.clone();
                 supplied["instructions"] = crate::codex_instructions::for_model(model).into();
-                let explicit =
-                    settings_for_format(supplied.as_object().unwrap(), format, transport);
+                let explicit = settings_for_format(
+                    supplied.as_object().unwrap(),
+                    format,
+                    transport,
+                    Role::Model,
+                );
                 assert!(
                     explicit != expected,
                     "omitted base matched explicit catalog text"

@@ -34,6 +34,9 @@ be forwarded after public 101; its context-accounting limitation is detailed in 
 
 A previous ID selects that response and appends all input, including repetitions. Prefix association
 alone does not authorize WS reuse; compare actual settings, input/output, thread and connection.
+Classifier references always require complete local reconstruction, including on the same WS socket;
+unavailable history fails with `state_unavailable` before inference. Reconstructed settings use the
+current producer role, preserving its defaults and explicit caller effort across transports.
 
 ## Sessions and matching
 
@@ -403,7 +406,8 @@ For `usage_limit_reached`, optional integer `limit_window_minutes` survives only
 
 Public response headers and JSON/SSE/WebSocket event header containers preserve
 `x-retry-metadata` verbatim, including `NO_MORE_RETRY`. Nested error headers retain
-only this retry field; other error extensions remain private. JSON header names are
+this field and valid bounded `Retry-After` advice; other error extensions remain private.
+Advice never schedules a gateway retry. JSON header names are
 matched case-insensitively, with existing header value, size and nesting checks.
 
 V2 compaction requires matching completion and exactly one valid encrypted item-done; a final array
@@ -417,7 +421,9 @@ matching observed output and capacity, publish a replacement window under the re
   The estimate includes UTF-8 author/recipient/text bytes and the native opaque-ciphertext size
   estimate. Invalid agent shapes require a complete client replacement. Client-wide truncation
   choices remain caller-owned.
-- In-band compaction retains that item and later output, plus formed Lite's leading setup.
+- In-band compaction retains that item and later output, plus Lite's ordered tool declarations
+  and developer/system context, including later updates and opaque removal notices.
+  Complete tool-free Lite history needs no generated setup.
   Ordinary-to-Lite setup still comes from each request's settings.
 
 Full reconstruction uses this exact window and cannot revive removed references. Explicit-reference

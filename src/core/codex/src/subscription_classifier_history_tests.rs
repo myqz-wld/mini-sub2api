@@ -1,6 +1,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+#[path = "subscription_classifier_reference_tests.rs"]
+mod reference_tests;
+
 const META: &str = "internal_chat_message_metadata_passthrough";
 
 fn source(session: &str, thread: &str, turn: &str) -> Value {

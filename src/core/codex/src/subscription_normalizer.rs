@@ -87,7 +87,11 @@ pub(crate) async fn prepare_stateful_codex_request(
     let mut full_send = transport == EmulationTransport::Http;
     if explicit_delta && transport == EmulationTransport::WebSocket {
         let base = plan.baseline.as_ref().expect("validated baseline");
-        full_send = base.socket.as_deref() != context.socket_id || context.socket_id.is_none();
+        // Classifier projection consumes references locally; its upstream producer only sends
+        // full input. A live socket cannot replace the local history needed for that expansion.
+        full_send = role == crate::native_request_policy::Role::Classifier
+            || base.socket.as_deref() != context.socket_id
+            || context.socket_id.is_none();
         if base.upstream_format != upstream_format {
             full_send = true;
         }

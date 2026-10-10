@@ -197,6 +197,7 @@ impl ContextStore {
             object,
             caller_format,
             evidence.transport,
+            evidence.role,
         );
         // Native Lite setup belongs to its input prefix. Ordinary callers keep their own format
         // and apply current caller-first defaults, even if the earlier upstream format was Lite.

@@ -175,7 +175,7 @@ gateway decision is a Codex requirement or a separately selected user policy.
 | User-selected caller semantics | Preserve supplied instructions/tools/environment; omit absent or invalid bases; do not insert model-default prompts or discover client AGENTS/Skills. | Avoids changing the caller's task. Native CLI prompt/environment construction remains client-owned. |
 | User-selected isolation | Scoped reversible session/thread/turn/item/response IDs; account-level installation convergence in device mode. | Separates callers and preserves correlation. UUID formats follow native conventions, but the aliasing and convergence policy is gateway-specific. |
 | User-selected continuation | Keep the caller's transport; resolve eligible anonymous histories and referenced continuations; rebuild HTTP full context; expire local history after three business-idle hours. | Supports ordinary clients. These ownership, matching and retention rules extend native client behavior. |
-| User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests, filter public visibility by include; classifier requests keep their native empty include. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
+| User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests and filter public visibility by include. Classifiers default to empty include and preserve explicitly requested encrypted reasoning. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
 | Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and the pinned 0.162.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
 | Gateway implementation defaults | Pin a Codex TUI identity using the Core runtime; synthesize missing root-agent/timing/analytics metadata and model catalog flags; choose backend Guardian metadata for bare non-reviewer requests. | Supplies a consistent emulated session. Individual fallback values are not all explicit user choices or evidence of the caller's real execution environment. |
 | Gateway implementation mechanisms | Infer omitted turns; suppress additional gateway prewarm/incrementality for callers with Originator; choose bounded storage, admission, retry and timeout mechanisms. | Prevents duplicated client automation and bounds resource use. Exact budgets/mechanisms are implementation choices, distinct from native wire behavior. |
@@ -248,8 +248,10 @@ It performs no separate authenticated handshake probe. Idle sockets and rejected
 do not connect to the inference endpoint; ordinary admitted connections use one upstream socket.
 Existing OAuth recovery and hidden-setup replacement connections remain available when needed.
 Upstream connection failures and handshake rejections are reported within the established WS
-session. Unclassified failures close with not-delivered evidence; recognized categories retain
-sanitized native error events, retry metadata and the existing response-observed accounting.
+session. HTTP upgrade rejections, including generic categories, emit a sanitized error with the
+actual status and safe retry advice before close, with response-observed accounting. Connection
+failures without an HTTP response and the existing OAuth recovery failure path retain their
+close/not-delivered behavior.
 An upstream HTTP 426 is therefore a WS failure on Subscription, not a downstream HTTP 426 that
 automatically selects native HTTP fallback. API-key forwarding retains its direct upgrade path.
 

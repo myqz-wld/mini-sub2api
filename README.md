@@ -3,6 +3,8 @@
 A lightweight Responses API gateway for Codex subscriptions and API keys.
 Supports HTTP/SSE, WebSocket and usage tracking. Subscription emulation is pinned to
 Codex 0.162.0, including caller-enabled incremental tools and bounded Guardian history retention.
+Classifier response references require complete local history and preserve role-specific defaults
+across HTTP, WebSocket and reconnects.
 
 Subscription WebSockets connect upstream after the first valid request, without a separate
 handshake probe. See [WebSocket metadata limits](docs/CODEX_COMPATIBILITY.md#subscription-websocket-upgrade-metadata).

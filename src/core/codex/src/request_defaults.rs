@@ -139,6 +139,7 @@ impl ModelProfile {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn merge_request_defaults(
     object: &mut Map<String, Value>,
     profile: ModelProfile,
