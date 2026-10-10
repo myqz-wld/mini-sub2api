@@ -117,10 +117,14 @@ async fn history_prewarm_preserves_known_turns_without_changing_active_turn() {
         let items = wire["input"].as_array().unwrap();
         let prefix = items.len() - 3;
         for item in &items[..prefix] {
-            assert!(
-                item.get(META).is_none(),
-                "generated native setup stays unstamped"
-            );
+            if item["type"] == "message" {
+                assert_eq!(
+                    item[META],
+                    json!({"content_item_kinds":["model.base_instructions"]})
+                );
+            } else {
+                assert!(item.get(META).is_none(), "tool setup stays unstamped");
+            }
         }
         for (item, expected) in items[prefix..]
             .iter()

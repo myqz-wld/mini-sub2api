@@ -192,11 +192,15 @@ async fn ordinary_and_tool_free_lite_base_ids_use_exact_native_thread_and_text_p
                 );
                 assert_eq!(first["input"][0], repeated["input"][0]);
                 assert!(first.get("instructions").is_none());
-                assert!(
-                    first["input"][0]
-                        .get("internal_chat_message_metadata_passthrough")
-                        .is_none()
-                );
+                let metadata = first["input"][0].get("internal_chat_message_metadata_passthrough");
+                if native {
+                    assert!(metadata.is_none());
+                } else {
+                    assert_eq!(
+                        metadata,
+                        Some(&json!({"content_item_kinds":["model.base_instructions"]}))
+                    );
+                }
                 assert_eq!(first["input"].as_array().unwrap().len(), 3);
                 // Equal caller developer text is a distinct item, never collapsed into setup.
                 assert_eq!(first["input"][1]["content"], developer["content"]);
@@ -210,5 +214,33 @@ async fn ordinary_and_tool_free_lite_base_ids_use_exact_native_thread_and_text_p
                 );
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn native_base_classification_survives_prefix_projection_without_turn_stamps() {
+    for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
+        let harness = CodexStateTestHarness::new();
+        let mut body = native_request("native-thread", "synthetic base", json!([]));
+        let metadata =
+            json!({"content_item_kinds":["model.base_instructions"],"opaque":{"keep":true}});
+        body["input"][1]["internal_chat_message_metadata_passthrough"] = metadata.clone();
+        let prepared = harness
+            .prepare(
+                UpstreamProfile::CodexSubscription1620,
+                transport,
+                &HeaderMap::new(),
+                Bytes::from(serde_json::to_vec(&body).unwrap()),
+                1024 * 1024,
+                ACCOUNT_REF,
+                NAMESPACE,
+                SCOPE,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            value(&prepared)["input"][1]["internal_chat_message_metadata_passthrough"],
+            metadata
+        );
     }
 }

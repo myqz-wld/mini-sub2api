@@ -37,7 +37,7 @@ async fn final_http_peer_observes_role_and_schema_policy() {
     assert!(props["x"].get("const").is_none());
     assert_eq!(props["enum_value"]["enum"][0]["const"], "business");
     assert_eq!(value["text"]["format"]["name"], "codex_output_schema");
-    assert_eq!(value["text"]["format"]["strict"], true);
+    assert_eq!(value["text"]["format"]["strict"], false);
     assert_eq!(
         serde_json::to_string(&value["text"]["format"]["schema"]).unwrap(),
         serde_json::to_string(&schema).unwrap()

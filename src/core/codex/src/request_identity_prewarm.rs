@@ -57,7 +57,10 @@ pub(super) fn apply(object: &mut Map<String, Value>, headers: &mut HeaderMap) ->
             else {
                 continue;
             };
-            item_metadata.insert(TURN_ID.to_string(), Value::String(String::new()));
+            // Setup classification alone does not imply per-turn attribution.
+            if let Some(turn_id) = item_metadata.get_mut(TURN_ID) {
+                *turn_id = Value::String(String::new());
+            }
         }
     }
 

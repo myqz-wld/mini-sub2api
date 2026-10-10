@@ -82,10 +82,10 @@ func TestFidelityFollowupRolesAndExplicitReplay(t *testing.T) {
 			}
 			for _, strict := range []bool{true, false} {
 				body := fidelityBody(fidelityUser())
-				body["text"] = map[string]any{"format": map[string]any{"type": "json_schema", "strict": strict, "schema": map[string]any{"type": "object"}}}
+				body["text"] = map[string]any{"format": map[string]any{"type": "json_schema", "strict": strict, "schema": map[string]any{"type": "object", "properties": map[string]any{}, "required": []any{}, "additionalProperties": false}}}
 				wire, _, _ := peer.send(body, http.Header{"X-Codex-Guardian": []string{"reviewer"}})
-				if wire["text"].(map[string]any)["format"].(map[string]any)["strict"] != false {
-					t.Fatal("basic reviewer strictness not fixed")
+				if wire["text"].(map[string]any)["format"].(map[string]any)["strict"] != strict {
+					t.Fatal("explicit reviewer strictness changed")
 				}
 			}
 			memory := fidelityBody(fidelityUser())

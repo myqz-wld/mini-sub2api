@@ -144,6 +144,7 @@ func assertCallerWireContract(t *testing.T, incoming nativePacket, wire nativeWi
 	assertCallerHeaderContract(t, baseline, sent)
 	assertCallerRootPresence(t, caller, output, baseline.shape, wire)
 	assertCallerMetadataWire(t, output, baseline.shape)
+	assertCallerBaseMetadata(t, caller, output, baseline.baseMetadata)
 	for _, name := range []string{"reasoning", "text", "stream_options"} {
 		node := output.fields[name]
 		if node == nil || node.kind != "object" {
@@ -165,6 +166,39 @@ func assertCallerWireContract(t *testing.T, incoming nativePacket, wire nativeWi
 		for i, tool := range tools.items {
 			assertCallerToolWire(t, tool, values[i], fmt.Sprintf("$.tools[%d]", i))
 		}
+	}
+}
+
+func assertCallerBaseMetadata(t *testing.T, caller, output, expected *nativeJSONShape) {
+	t.Helper()
+	// A WS delta reuses the setup already checked in its hidden prewarm frame.
+	if output.fields["previous_response_id"] != nil {
+		return
+	}
+	instructions := caller.fields["instructions"]
+	if instructions == nil {
+		return
+	}
+	if text, _ := instructions.scalar.(string); text == "" {
+		return
+	}
+	baseMetadata := func(request *nativeJSONShape) *nativeJSONShape {
+		input := request.fields["input"]
+		if input == nil {
+			return nil
+		}
+		for _, item := range input.items {
+			if role := item.fields["role"]; role != nil && role.scalar == "developer" && item.fields["content"] != nil {
+				return item.fields["internal_chat_message_metadata_passthrough"]
+			}
+		}
+		return nil
+	}
+	if expected == nil || expected.fields["content_item_kinds"] == nil {
+		t.Fatal("native default base classification missing from baseline")
+	}
+	if !reflect.DeepEqual(baseMetadata(output), expected) {
+		t.Error("generated base metadata differs from native default classification")
 	}
 }
 
@@ -304,7 +338,7 @@ func assertCallerItemWire(t *testing.T, node *nativeJSONShape, value map[string]
 	required := map[string][]string{"message": {"type", "role", "content"}, "additional_tools": {"type", "role", "tools"}, "function_call": {"type", "name", "arguments", "call_id"}, "function_call_output": {"type", "output"}, "reasoning": {"type", "summary", "encrypted_content"}}[kind]
 	assertCallerObject(t, node, order, required, path)
 	if metadata := node.fields["internal_chat_message_metadata_passthrough"]; metadata != nil && metadata.kind == "object" {
-		assertCallerObject(t, metadata, []string{"turn_id", "create_time", "executed_tool_calls"}, nil, path+".internal_chat_message_metadata_passthrough")
+		assertCallerObject(t, metadata, callerNativeFieldOrder(t, "protocol/src/models.rs", "pub struct InternalChatMessageMetadataPassthrough {"), nil, path+".internal_chat_message_metadata_passthrough")
 	}
 	for _, name := range []string{"content", "summary"} {
 		if parts := node.fields[name]; parts != nil && parts.kind == "array" {

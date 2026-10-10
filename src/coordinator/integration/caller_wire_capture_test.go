@@ -13,6 +13,7 @@ import (
 
 type callerWireBaseline struct {
 	shape                 *nativeJSONShape
+	baseMetadata          *nativeJSONShape
 	headerSpellings       []string
 	headers               http.Header
 	routedHeaderSpellings []string
@@ -51,8 +52,12 @@ func callerWireBaselineFor(t *testing.T, model string, ws bool) callerWireBaseli
 	}
 	var first *nativePacket
 	var shape *nativeJSONShape
+	var baseMetadata *nativeJSONShape
 	var routedHeaders []string
 	for i, wire := range wires {
+		if baseMetadata == nil {
+			baseMetadata = capturedBaseMetadata(readNativeJSONShape(t, wire.body))
+		}
 		if wire.value["generate"] == false {
 			continue
 		}
@@ -81,14 +86,36 @@ func callerWireBaselineFor(t *testing.T, model string, ws bool) callerWireBaseli
 	if first == nil {
 		t.Fatal("native caller baseline lacks a business request")
 	}
+	if baseMetadata == nil {
+		t.Fatal("native caller baseline lacks base instruction classification")
+	}
 	// Retain shape/header metadata only. Raw request bodies remain owned by this test fixture.
 	headers := make(http.Header)
 	for _, name := range []string{"Originator", "Version", "Accept", "Content-Type", "Content-Encoding", "Openai-Beta", "Upgrade", "Connection", "Sec-Websocket-Version", "Sec-Websocket-Extensions", "X-OpenAI-Internal-Codex-Responses-Lite"} {
 		headers[name] = first.headers.Values(name)
 	}
-	baseline := callerWireBaseline{shape: shape, headerSpellings: append([]string(nil), first.headerSpellings...), headers: headers, routedHeaderSpellings: routedHeaders}
+	baseline := callerWireBaseline{shape: shape, baseMetadata: baseMetadata, headerSpellings: append([]string(nil), first.headerSpellings...), headers: headers, routedHeaderSpellings: routedHeaders}
 	callerWireBaselines.values[key] = baseline
 	return baseline
+}
+
+func capturedBaseMetadata(request *nativeJSONShape) *nativeJSONShape {
+	input := request.fields["input"]
+	if input == nil {
+		return nil
+	}
+	for _, item := range input.items {
+		metadata := item.fields["internal_chat_message_metadata_passthrough"]
+		if metadata == nil || metadata.fields["content_item_kinds"] == nil {
+			continue
+		}
+		for _, kind := range metadata.fields["content_item_kinds"].items {
+			if kind.scalar == "model.base_instructions" {
+				return metadata
+			}
+		}
+	}
+	return nil
 }
 
 func assertCallerHeaderContract(t *testing.T, baseline callerWireBaseline, sent nativePacket) {
@@ -141,6 +168,7 @@ func TestNativeOrdinaryWireShapeCapture(t *testing.T) {
 					business := 0
 					for i, wire := range wires {
 						if wire.value["generate"] == false {
+							assertCallerBaseMetadata(t, readNativeJSONShape(t, nativePacketJSON(t, packets[0])), readNativeJSONShape(t, wire.body), callerWireBaselineFor(t, model, ws).baseMetadata)
 							continue
 						}
 						assertCallerWireContract(t, packets[0], wire, sent[i])

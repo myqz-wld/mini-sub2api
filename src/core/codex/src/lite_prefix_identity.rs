@@ -13,9 +13,18 @@ pub(crate) fn apply_generated(
         let item = object["input"][*index]
             .as_object_mut()
             .expect("generated prefix");
-        // Classification is disabled in the fixed emulation feature policy. Native
-        // skips empty metadata; the base has neither a turn stamp nor a creation time.
-        item.shift_remove("internal_chat_message_metadata_passthrough");
+        // Generated setup has no per-turn attribution. Keep the native base classification;
+        // tool declarations still omit their empty metadata.
+        if let Some(metadata) = item
+            .get_mut("internal_chat_message_metadata_passthrough")
+            .and_then(Value::as_object_mut)
+        {
+            metadata.shift_remove("turn_id");
+            metadata.shift_remove("create_time");
+            if metadata.is_empty() {
+                item.shift_remove("internal_chat_message_metadata_passthrough");
+            }
+        }
     }
     Ok(ids)
 }

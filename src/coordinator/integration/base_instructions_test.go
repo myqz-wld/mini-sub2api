@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -171,6 +172,10 @@ func assertCallerOnlyBase(t *testing.T, value map[string]any, test baseInstructi
 		}
 		assertDeveloperMessageText(t, input[0], test.expected)
 		base, _ := input[0].(map[string]any)
+		metadata, _ := base["internal_chat_message_metadata_passthrough"].(map[string]any)
+		if !reflect.DeepEqual(metadata, map[string]any{"content_item_kinds": []any{"model.base_instructions"}}) {
+			t.Fatalf("generated base classification mismatch: prewarm=%t classification=%t turn=%t time=%t fields=%d", value["generate"] == false, reflect.DeepEqual(metadata["content_item_kinds"], []any{"model.base_instructions"}), metadata["turn_id"] != nil, metadata["create_time"] != nil, len(metadata))
+		}
 		toolID, _ = base["id"].(string)
 		if !isUUIDVersion(strings.TrimPrefix(toolID, "msg_"), '5') {
 			t.Fatal("base ID is not content derived")
@@ -206,6 +211,10 @@ func assertCallerOnlyBase(t *testing.T, value map[string]any, test baseInstructi
 			t.Fatal("duplicate Lite prefix")
 		}
 		if item["role"] == "developer" {
+			metadata, _ := item["internal_chat_message_metadata_passthrough"].(map[string]any)
+			if _, present := metadata["content_item_kinds"]; present {
+				t.Fatal("ordinary caller instructions acquired base classification")
+			}
 			text, ok := developerMessageText(item)
 			if !ok || (text != "caller rule" && text != "caller system") {
 				t.Fatal("unrequested developer instructions inserted")

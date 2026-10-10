@@ -96,6 +96,8 @@ func TestGuardianOutputSchemaRoleBoundaries(t *testing.T) {
 			t.Run(fmt.Sprintf("ws=%t/%s", ws, tc.name), func(t *testing.T) {
 				peer := newFidelityPeer(t, ws)
 				body := guardianSchemaRequest()
+				// This matrix checks role defaults; explicit booleans have their own regression.
+				delete(body["text"].(map[string]any)["format"].(map[string]any), "strict")
 				if tc.name == "backend_reviewer" {
 					body["model"] = "codex-auto-review"
 				}

@@ -5,6 +5,8 @@ Supports HTTP/SSE, WebSocket and usage tracking. Subscription emulation is pinne
 Codex 0.162.0, including caller-enabled incremental tools and bounded Guardian history retention.
 Classifier response references require complete local history and preserve role-specific defaults
 across HTTP, WebSocket and reconnects.
+Subscription requests preserve explicit output-schema `strict` booleans and attach the native
+base-instruction classification to messages generated from caller `instructions`.
 
 Subscription WebSockets connect upstream after the first valid request, without a separate
 handshake probe. See [WebSocket metadata limits](docs/CODEX_COMPATIBILITY.md#subscription-websocket-upgrade-metadata).

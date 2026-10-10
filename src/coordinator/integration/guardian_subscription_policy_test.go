@@ -74,8 +74,8 @@ func TestGuardianRoleModelAndEffortPolicy(t *testing.T) {
 						t.Fatalf("case %d: chosen model was replaced", index)
 					}
 					strict := wire["text"].(map[string]any)["format"].(map[string]any)["strict"]
-					if strict != !isReview {
-						t.Fatalf("case %d: review schema policy conflated with model identity", index)
+					if strict != false {
+						t.Fatalf("case %d: explicit schema strictness changed with role/model identity", index)
 					}
 				}
 			}

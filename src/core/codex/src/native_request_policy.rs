@@ -190,11 +190,9 @@ pub(crate) fn apply_controls(
                     log::record("text.format", "name", "role_policy");
                 }
                 format.insert("name".into(), "codex_output_schema".into());
-                let strict = Value::Bool(!matches!(role, Role::Reviewer { .. }));
-                if format.get("strict").is_some_and(|value| value != &strict) {
-                    log::record("text.format", "strict", "role_policy");
-                }
-                format.insert("strict".into(), strict);
+                format
+                    .entry("strict")
+                    .or_insert(Value::Bool(!role.is_reviewer()));
             } else {
                 log::remove(text, "format", "text", "unsupported_variant");
             }

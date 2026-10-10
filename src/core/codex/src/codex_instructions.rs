@@ -52,5 +52,8 @@ fn developer_message(text: String) -> Value {
         "type": "message",
         "role": "developer",
         "content": [{"type": "input_text", "text": text}],
+        "internal_chat_message_metadata_passthrough": {
+            "content_item_kinds": ["model.base_instructions"]
+        },
     })
 }

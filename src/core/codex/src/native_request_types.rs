@@ -25,6 +25,9 @@ pub(crate) fn normalize(object: &mut Map<String, Value>) {
             matches!(v.as_str(), Some("low" | "medium" | "high"))
         });
         keep(text, "format", "text", Value::is_object);
+        if let Some(format) = text.get_mut("format").and_then(Value::as_object_mut) {
+            keep(format, "strict", "text.format", Value::is_boolean);
+        }
     }
     if let Some(options) = object
         .get_mut("stream_options")

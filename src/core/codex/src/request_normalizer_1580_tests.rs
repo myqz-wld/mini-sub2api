@@ -16,10 +16,9 @@ async fn codex1580_generated_lite_setup_has_no_invented_turn_attribution() {
             .await
             .unwrap();
         let body = value(&prepared);
-        assert!(
-            body["input"][0]
-                .get("internal_chat_message_metadata_passthrough")
-                .is_none()
+        assert_eq!(
+            body["input"][0]["internal_chat_message_metadata_passthrough"],
+            json!({"content_item_kinds":["model.base_instructions"]})
         );
         assert!(
             body["input"][1]["internal_chat_message_metadata_passthrough"]["create_time"]

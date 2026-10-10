@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -126,8 +127,9 @@ func TestResponsesHistoryPrewarm1592(t *testing.T) {
 				}
 				for _, raw := range items[:prefix] {
 					item := raw.(map[string]any)
-					if _, ok := item[prewarm1592Metadata]; ok {
-						t.Fatal("generated native Lite setup acquired item turn metadata")
+					metadata, _ := item[prewarm1592Metadata].(map[string]any)
+					if !reflect.DeepEqual(metadata, map[string]any{"content_item_kinds": []any{"model.base_instructions"}}) {
+						t.Fatal("generated base must retain classification without turn/time metadata")
 					}
 				}
 				projected := map[string]string{}

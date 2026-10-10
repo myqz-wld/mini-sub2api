@@ -134,7 +134,8 @@ and `ultra` mapped to its native multi-agent effort `xhigh`. The separate `gpt-6
 Generated ordinary base and Lite setup UUIDv5 use OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
 base text (`msg_`). Regenerate only Core-owned/proven native prefixes; retain durable aliases.
 Generated setup carries no turn/time attribution: the tool prefix omits message metadata and the
-base prefix also omits metadata when classification is disabled. Proven native setup preserves the caller's supplied fields.
+base prefix carries `content_item_kinds:["model.base_instructions"]`, matching the pinned native
+default. Proven native setup preserves the caller's supplied fields, including an omitted marker.
 Client-enabled incremental declarations retain additions, modifications and opaque removal notices in
 original order through full requests, deltas and compaction. Core neither enables this mode nor
 parses notice text to infer a catalog. Proven tool-free Lite compaction needs no artificial setup.
@@ -192,8 +193,9 @@ tool schemas keep type-free enums, description-only nodes and unused definitions
 lower `const` to a one-element `enum` and keep the native subset. Both paths use native field/property
 ordering and omit null optional schema fields. Search actions place `query` before `queries`. Enum
 business objects and free output schemas keep their content/order. JSON numbers retain arbitrary
-precision. Output format names are `codex_output_schema`; ordinary strictness is true and reviewer
-strictness is false for basic Guardian, preserving optional assessment fields such as `risk_level`.
+precision. Output format names are `codex_output_schema`; explicit `text.format.strict` booleans
+are preserved. Missing or invalid strictness defaults to true for ordinary requests and false for
+basic Guardian reviewers, preserving optional assessment fields such as `risk_level`.
 Reviewer model overrides retain their selected model and supported service tier, including
 `gpt-5.6-luna`; their metadata does not select backend reviewer routing. Model names and a generic
 `x-openai-subagent: guardian` alone do not identify either Guardian role. Guardian requests with no
