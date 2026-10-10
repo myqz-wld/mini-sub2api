@@ -32,6 +32,7 @@ type liveWireRelay struct {
 	wg          sync.WaitGroup
 	httpOnly    bool
 	dial        func() (net.Conn, error)
+	observeHTTP func(int, []byte)
 }
 
 func newLiveWireRelay(t *testing.T, httpOnly bool) *liveWireRelay {
@@ -159,7 +160,18 @@ func (r *liveWireRelay) serve(client net.Conn, auth liveAccessCredentials) {
 			return
 		}
 		if err == nil {
-			_, err = io.Copy(io.Discard, response.Body)
+			r.mu.Lock()
+			observe := r.observeHTTP
+			r.mu.Unlock()
+			if observe == nil {
+				_, err = io.Copy(io.Discard, response.Body)
+			} else {
+				// Diagnostic payloads stay memory-only and bounded; TeeReader above
+				// still forwards the original HTTP bytes without reserialization.
+				var prefix liveResponsePrefix
+				_, err = io.Copy(&prefix, response.Body)
+				observe(response.StatusCode, prefix.body)
+			}
 			_ = response.Body.Close()
 		}
 		_ = remote.Close()
@@ -168,6 +180,15 @@ func (r *liveWireRelay) serve(client net.Conn, auth liveAccessCredentials) {
 			return
 		}
 	}
+}
+
+type liveResponsePrefix struct{ body []byte }
+
+func (p *liveResponsePrefix) Write(body []byte) (int, error) {
+	if remaining := 64*1024 - len(p.body); remaining > 0 {
+		p.body = append(p.body, body[:min(remaining, len(body))]...)
+	}
+	return len(body), nil
 }
 
 func (r *liveWireRelay) remove(connection net.Conn) {

@@ -116,8 +116,13 @@ func TestNativePrewarmThreadIntervention(t *testing.T) {
 					t.Error("thread isolation relationship changed")
 				}
 			}
-			if transportMetadata(t, last.value)["x-codex-turn-state"] != "transport-prewarm-token" {
-				t.Error("owning thread lost startup token before its first business admission")
+			var wantToken any = "transport-prewarm-token"
+			if intervene {
+				// Other work invalidates an unused startup handoff on this socket.
+				wantToken = nil
+			}
+			if transportMetadata(t, last.value)["x-codex-turn-state"] != wantToken {
+				t.Error("startup token did not respect intervening-work invalidation")
 			}
 			t.Logf("thread startup probe: business=%d", len(wires))
 		})

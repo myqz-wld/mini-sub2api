@@ -51,22 +51,18 @@ async fn explicit_ws_delta_budgets_known_full_prefix_and_preserves_remote_only_h
                     .await
                     .unwrap();
             let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
-            let rebuild = cached && suffix_bytes == 1024 * 1024;
-            assert_eq!(prepared.rebuilt_reference, rebuild);
-            assert_eq!(wire.get("previous_response_id").is_none(), rebuild);
+            assert!(!prepared.rebuilt_reference);
+            assert!(wire.get("previous_response_id").is_some());
             let items = wire["input"].as_array().unwrap();
-            assert_eq!(items.len(), if rebuild { 2 } else { 1 });
-            assert!(
-                items.iter().map(budget::observation_bytes).sum::<usize>() <= budget::PROMPT_BYTES
+            assert_eq!(items.len(), 1);
+            assert_eq!(
+                items[0][META]["executed_tool_calls"][0]["tool_result_metadata"]["large"]
+                    .as_str()
+                    .unwrap()
+                    .len(),
+                suffix_bytes
             );
-            if rebuild {
-                assert!(
-                    items[0][META]["executed_tool_calls"][0]
-                        .pointer("/tool_result_metadata/large")
-                        .is_none()
-                );
-                assert_eq!(items[0][META]["tool_calls_complete"], true);
-            }
+            assert_eq!(items[0][META]["tool_calls_complete"], true);
         }
     }
 }
@@ -83,10 +79,10 @@ async fn http_message_budget_ignores_removed_configuration_bytes() {
     let prepared = prepare(&store, body).await.unwrap();
     let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
     let items = wire["input"].as_array().unwrap();
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0][META]["tool_calls_complete"], true);
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[1][META]["tool_calls_complete"], true);
     assert_eq!(
-        items[0][META]["executed_tool_calls"][0]["arguments"]["data"]
+        items[1][META]["executed_tool_calls"][0]["arguments"]["data"]
             .as_str()
             .unwrap()
             .len(),

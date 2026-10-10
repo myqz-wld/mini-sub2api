@@ -87,9 +87,13 @@ fn apply_inner(
             normalize_input(object)
         };
     codex_instructions::apply(object, model_profile.responses_lite)?;
+    let mut generated_tools = false;
     if model_profile.responses_lite {
         if !already_lite {
-            relocate_lite_tools(object);
+            generated_tools = relocate_lite_tools(
+                object,
+                role == crate::native_request_policy::Role::Classifier,
+            );
         }
     } else {
         canonicalize_top_level_tools(object);
@@ -189,17 +193,16 @@ fn apply_inner(
     );
     canonicalize_request_order(object, transport);
     let mut prefixes = Vec::new();
-    if model_profile.responses_lite
-        && let Some(input) = object.get("input").and_then(Value::as_array)
-        && input.first().is_some_and(|item| {
-            item.get("type").and_then(Value::as_str) == Some("additional_tools")
-        })
-    {
-        if input[0].get("id").is_none() {
+    if let Some(input) = object.get("input").and_then(Value::as_array) {
+        let tools_prefix = model_profile.responses_lite
+            && input.first().is_some_and(|item| {
+                item.get("type").and_then(Value::as_str) == Some("additional_tools")
+            });
+        if generated_tools {
             prefixes.push(0);
         }
         if caller_base {
-            prefixes.push(1);
+            prefixes.push(usize::from(tools_prefix));
         }
     }
     Ok((synthesized_item_ids, prefixes))
@@ -233,16 +236,20 @@ fn enforce_upstream_transport_controls(
     object.insert("stream".to_string(), Value::Bool(true));
 }
 
-fn relocate_lite_tools(object: &mut Map<String, Value>) {
+fn relocate_lite_tools(object: &mut Map<String, Value>, classifier: bool) -> bool {
     let Some(mut input) = object.get("input").and_then(Value::as_array).cloned() else {
-        return;
+        return false;
     };
     let tools = match object.get("tools") {
         Some(Value::Array(tools)) => tools.clone(),
         None => Vec::new(),
-        Some(_) => return,
+        Some(_) => return false,
     };
     object.remove("tools");
+    // The classifier is a separate producer; its explicit empty declaration is native.
+    if tools.is_empty() && !classifier {
+        return false;
+    }
     let mut relocated = vec![serde_json::json!({
         "type": "additional_tools",
         "role": "developer",
@@ -250,6 +257,7 @@ fn relocate_lite_tools(object: &mut Map<String, Value>) {
     })];
     relocated.append(&mut input);
     object.insert("input".to_string(), Value::Array(relocated));
+    true
 }
 
 fn canonicalize_top_level_tools(object: &mut Map<String, Value>) {
@@ -364,11 +372,11 @@ fn responses_lite_requested(object: &Map<String, Value>) -> bool {
     object
         .get("input")
         .and_then(Value::as_array)
-        .and_then(|items| items.first())
-        .and_then(Value::as_object)
-        .and_then(|item| item.get("type"))
-        .and_then(Value::as_str)
-        == Some("additional_tools")
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        })
 }
 
 fn user_message(text: String) -> Value {
@@ -385,7 +393,8 @@ pub(super) fn canonicalize_request_order(
 ) {
     const HTTP_ORDER: &[&str] = &[
         "model",
-        "instructions",
+        "stream",
+        "service_tier",
         "previous_response_id",
         "input",
         "tools",
@@ -393,10 +402,8 @@ pub(super) fn canonicalize_request_order(
         "parallel_tool_calls",
         "reasoning",
         "store",
-        "stream",
         "stream_options",
         "include",
-        "service_tier",
         "prompt_cache_key",
         "text",
         "client_metadata",
@@ -405,7 +412,8 @@ pub(super) fn canonicalize_request_order(
     const WEBSOCKET_ORDER: &[&str] = &[
         "type",
         "model",
-        "instructions",
+        "stream",
+        "service_tier",
         "previous_response_id",
         "input",
         "tools",
@@ -413,10 +421,8 @@ pub(super) fn canonicalize_request_order(
         "parallel_tool_calls",
         "reasoning",
         "store",
-        "stream",
         "stream_options",
         "include",
-        "service_tier",
         "prompt_cache_key",
         "text",
         "generate",

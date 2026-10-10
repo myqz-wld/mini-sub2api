@@ -56,23 +56,16 @@ fn prompt_bounds_arguments_and_invalidates_every_output_in_the_cell() {
 }
 
 #[test]
-fn prompt_sheds_large_generic_results_before_small_results_or_inventory() {
+fn prompt_preserves_observations_above_the_retired_two_mib_cap() {
     let resource =
-        json!({"openai/resource_access":[{"id":"opaque"}],"large":"x".repeat(PROMPT_BYTES)});
+        json!({"openai/resource_access":[{"id":"opaque"}],"large":"x".repeat(2 * 1024 * 1024)});
     let mut request = json!({"input":[output("one","same",json!({}),resource),
         output("two","same",json!({}),json!({"small":true}))]});
+    let original = request.clone();
     assert!(prompt(&mut request).is_empty());
-    let items = request["input"].as_array().unwrap();
-    assert!(total(items) <= PROMPT_BYTES);
-    assert_eq!(
-        items[0][META][CALLS][0]["tool_result_metadata"],
-        json!({"openai/resource_access":[{"id":"opaque"}]})
-    );
-    assert_eq!(
-        items[1][META][CALLS][0]["tool_result_metadata"],
-        json!({"small":true})
-    );
-    assert_eq!(items[0][META][COMPLETE], true);
+    assert!(message(&mut request).is_empty());
+    assert_eq!(request, original);
+    assert!(total(request["input"].as_array().unwrap()) > 2 * 1024 * 1024);
 }
 
 #[test]
@@ -124,7 +117,7 @@ fn tiny_budgets_remove_only_observations_and_names_remain_utf8() {
 #[test]
 fn malformed_optional_calls_are_removed_without_panicking_or_losing_business_output() {
     for invalid in [
-        json!(["x".repeat(PROMPT_BYTES + 1)]),
+        json!(["x".repeat((2 * 1024 * 1024) + 1)]),
         json!([null]),
         json!([17]),
         json!([[]]),

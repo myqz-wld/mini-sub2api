@@ -27,6 +27,9 @@ mod input_metadata;
 mod history_import;
 pub(crate) use history_import::HistoryImport;
 
+#[path = "subscription_classifier_history.rs"]
+mod classifier_history;
+
 pub(crate) struct ContextPlan {
     pub(crate) evidence: Evidence,
     pub(crate) restored_input: Option<Vec<Value>>,
@@ -139,14 +142,6 @@ impl ContextStore {
             return Err(Error::InvalidRequest);
         }
         let explicit_delta = evidence.previous.is_some();
-        if explicit_delta
-            && evidence
-                .input
-                .iter()
-                .any(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
-        {
-            return Err(Error::InvalidRequest);
-        }
         let suffix = if explicit_delta {
             &evidence.input[..]
         } else {

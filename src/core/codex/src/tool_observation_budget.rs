@@ -1,4 +1,4 @@
-//! Codex 0.159.2 observation budgets; model-visible content is never trimmed.
+//! Codex 0.162.0 observation budgets; model-visible content is never trimmed.
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
@@ -12,7 +12,6 @@ const CALLS: &str = "executed_tool_calls";
 const COMPLETE: &str = "tool_calls_complete";
 const TRUNCATED: &str = "_codex_executed_tool_call_truncated";
 const ARGUMENT_BYTES: usize = 8 * 1024;
-pub(crate) const PROMPT_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MESSAGE_BYTES: usize = 15 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -144,7 +143,6 @@ pub(crate) fn prompt(value: &mut Value) -> Vec<Origin> {
     let mut losses = Vec::new();
     sanitize_calls(items, &mut losses);
     bound_arguments(items, &mut losses);
-    bound(items, PROMPT_BYTES, false, &mut losses);
     losses
 }
 

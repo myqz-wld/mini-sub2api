@@ -110,7 +110,7 @@ func TestNativeCodexThroughGateway(t *testing.T) {
 							}
 							continue
 						}
-						if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.159.2" {
+						if wire.headers.Get("Originator") != "codex-tui" || wire.headers.Get("Version") != "0.162.0" {
 							t.Fatal("Subscription fingerprint identity mismatch")
 						}
 						if !ws && wire.value["previous_response_id"] != nil {
@@ -123,7 +123,7 @@ func TestNativeCodexThroughGateway(t *testing.T) {
 								assertNativeLiteIDs(t, wire)
 							}
 						}
-						if model == "gpt-5.4" && wire.value["instructions"] != options.base {
+						if model == "gpt-5.4" && wire.value["previous_response_id"] == nil && capturedBase(t, wire) != options.base {
 							t.Fatal("native caller base instructions changed")
 						}
 					}

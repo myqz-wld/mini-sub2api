@@ -146,24 +146,21 @@ func TestFidelityFollowupWhitespaceInstructions(t *testing.T) {
 					body["model"] = model
 					body["instructions"] = base
 					wire, _, _ := peer.send(body, nil)
-					if model == "gpt-5.4" {
-						got, ok := wire["instructions"]
-						if (base == "" && ok) || (base != "" && got != base) {
-							t.Fatal("ordinary base changed")
-						}
-					} else {
-						items := fidelityItems(wire)
-						want := 2
-						if base != "" {
-							want = 3
-						}
-						if len(items) != want {
-							t.Fatal("Lite base missing")
-						}
-						if base != "" && items[1].(map[string]any)["content"].([]any)[0].(map[string]any)["text"] != base {
-							t.Fatal("Lite base changed")
-						}
+					if _, present := wire["instructions"]; present {
+						t.Fatal("obsolete root base")
 					}
+					items := fidelityItems(wire)
+					want := 1
+					if base != "" {
+						want++
+					}
+					if len(items) != want {
+						t.Fatal("caller base carrier count changed")
+					}
+					if base != "" {
+						assertDeveloperMessageText(t, items[0], base)
+					}
+
 				}
 			}
 		})

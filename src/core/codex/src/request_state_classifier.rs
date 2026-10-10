@@ -3,6 +3,25 @@ use super::{RequestStateEditor, TurnAssignment};
 use anyhow::Result;
 
 impl RequestStateEditor<'_> {
+    pub(crate) fn classifier_history_origin(
+        &self,
+        turn: &str,
+        session: &str,
+        source: &str,
+    ) -> bool {
+        self.scope()
+            .turns
+            .values()
+            .find(|entry| entry.id == turn && entry.classifier)
+            .is_some_and(|turn| {
+                self.scope().child_threads.values().any(|lease| {
+                    lease.id == turn.thread_id
+                        && lease.session_id == session
+                        && lease.parent_thread_id.as_deref() == Some(source)
+                })
+            })
+    }
+
     pub(crate) fn classifier_turn_with_id(
         &mut self,
         key: &str,

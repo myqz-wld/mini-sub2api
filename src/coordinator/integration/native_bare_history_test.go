@@ -4,7 +4,6 @@ package integration
 
 import (
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -108,11 +107,9 @@ func assertBareFormedLitePrefix(t *testing.T, wire nativeWire) {
 	if json.Unmarshal(wire.body, &body) != nil || len(body.Input) < 2 {
 		t.Fatal("bare formed Lite prefix missing")
 	}
-	metadata, _ := wire.value["client_metadata"].(map[string]any)
-	thread, _ := metadata["thread_id"].(string)
-	oid, _ := hex.DecodeString("6ba7b8129dad11d180b400c04fd430c8")
-	if thread == "" || body.Input[0].ID != "at_"+uuidText(uuid5(uuid5(oid, []byte(thread)), body.Input[0].Tools)) {
-		t.Fatal("bare formed Lite tools ID differs from its exact thread/schema bytes")
+	// Caller declarations without an ID are not proven ModelClient prompt prefixes.
+	if body.Input[0].ID != "" {
+		t.Fatal("explicit caller tools acquired an invented prompt-prefix ID")
 	}
 	// This fixture's existing developer instruction has no claimed native-base ID/provenance.
 	// Only a Core-generated base or proven native prefix is eligible for a regenerated base ID.

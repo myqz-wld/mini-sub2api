@@ -1,4 +1,4 @@
-//! Stable native Lite prefix identity, generated after the scoped thread has been resolved.
+//! Stable native ModelClient setup identity, generated after the scoped thread is resolved.
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -76,19 +76,18 @@ pub(crate) fn capture_native(object: &Map<String, Value>) -> Vec<NativePrefix> {
     let Some(input) = object.get("input").and_then(Value::as_array) else {
         return Vec::new();
     };
-    if input
+    let has_tools = input
         .first()
         .and_then(|i| i.get("type"))
         .and_then(Value::as_str)
-        != Some("additional_tools")
-    {
-        return Vec::new();
-    }
+        == Some("additional_tools");
     let mut prefixes = Vec::new();
-    if let (Some(id), Some(tools)) = (
-        input[0].get("id").and_then(Value::as_str),
-        input[0].get("tools"),
-    ) && let Ok(payload) = serde_json::to_vec(tools)
+    if has_tools
+        && let (Some(id), Some(tools)) = (
+            input[0].get("id").and_then(Value::as_str),
+            input[0].get("tools"),
+        )
+        && let Ok(payload) = serde_json::to_vec(tools)
     {
         prefixes.push(NativePrefix {
             id: id.to_string(),
@@ -97,7 +96,7 @@ pub(crate) fn capture_native(object: &Map<String, Value>) -> Vec<NativePrefix> {
             metadata_fields: metadata_fields(&input[0]),
         });
     }
-    if let Some(base) = input.get(1)
+    if let Some(base) = input.get(usize::from(has_tools))
         && base.get("type").and_then(Value::as_str) == Some("message")
         && base.get("role").and_then(Value::as_str) == Some("developer")
         && let (Some(id), Some(content)) = (

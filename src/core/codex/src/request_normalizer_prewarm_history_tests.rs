@@ -31,7 +31,7 @@ async fn prepare(
     body: Value,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_identity_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::WebSocket,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -297,8 +297,8 @@ async fn history_prewarm_keeps_key_aliases_separate_and_rejects_foreign_response
         .await
         .unwrap();
     assert_ne!(
-        value(&first)["input"][0][META]["turn_id"],
-        value(&second)["input"][0][META]["turn_id"]
+        value(&first)["input"][1][META]["turn_id"],
+        value(&second)["input"][1][META]["turn_id"]
     );
     let identity = first.resolved_identity.unwrap();
     let previous = harness

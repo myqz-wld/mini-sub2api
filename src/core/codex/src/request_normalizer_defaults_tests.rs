@@ -18,7 +18,7 @@ fn memory_request_preserves_sparse_turn_metadata_without_turn_identity() {
         .expect("memory request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -60,7 +60,7 @@ fn gpt_5_2_projects_optional_null_controls() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -110,7 +110,7 @@ fn unknown_model_uses_codex_fallback_reasoning_without_verbosity() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -139,7 +139,7 @@ fn derived_and_namespaced_models_use_catalog_profile_shape() {
             .expect("request"),
         );
         let prepared = prepare_codex_overlay_for_test(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body,
@@ -150,10 +150,7 @@ fn derived_and_namespaced_models_use_catalog_profile_shape() {
 
         assert_eq!(value["text"]["verbosity"], expected_verbosity);
         assert_eq!(value["parallel_tool_calls"], !expected_lite);
-        assert_eq!(
-            value["input"][0]["type"] == "additional_tools",
-            expected_lite
-        );
+        assert_eq!(value.get("tools").is_none(), expected_lite);
         assert_eq!(value["reasoning"].get("context").is_some(), expected_lite);
     }
 }
@@ -183,7 +180,7 @@ fn reused_lite_websocket_frame_keeps_incremental_input_without_prefix() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::WebSocket,
         &HeaderMap::new(),
         body,

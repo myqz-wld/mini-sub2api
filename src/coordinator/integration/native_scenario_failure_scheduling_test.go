@@ -12,8 +12,22 @@ func TestNativeScenarioFailureSameThreadScheduling(t *testing.T) {
 			capture := newNativeFailureCapture(t, "overlap", 0, 1)
 			client, options, gateway := failureNativeRoute(t, capture, route, "gpt-5.4", false)
 			thread := client.thread(options)
+			observed := false
+			client.observe = func(event map[string]any) {
+				params, _ := event["params"].(map[string]any)
+				item, _ := params["item"].(map[string]any)
+				observed = observed || (event["method"] == "item/completed" && item["type"] == "agentMessage")
+			}
 			first := failureStartTurn(t, client, thread, "synthetic first same-thread submission")
 			capture.waitStarted(t)
+			// Wait for the client to consume item-done; an upstream flush alone does
+			// not prove delivery through a proxy before steering cancels its read.
+			for attempts := 0; !observed && attempts < 128; attempts++ {
+				client.handle(client.read())
+			}
+			if !observed {
+				t.Fatal("native did not consume the first completed item before steering")
+			}
 			second := failureStartTurn(t, client, thread, "synthetic second same-thread submission")
 			if second != first || len(businessWires(capture.snapshot())) != 1 {
 				t.Fatal("native public turn/start no longer steers the active thread turn")

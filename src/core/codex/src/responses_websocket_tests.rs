@@ -107,7 +107,7 @@ async fn subscription_create_normalization_preserves_websocket_fields() {
         &mut headers,
         ACCOUNT_REF,
         Some(ACCOUNT_NAMESPACE),
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
         &store,
@@ -124,7 +124,8 @@ async fn subscription_create_normalization_preserves_websocket_fields() {
     assert_eq!(value["stream"], true);
     assert!(value.get("previous_response_id").is_none());
     assert_eq!(value["client_metadata"]["custom"], "kept");
-    assert_eq!(value["input"][0]["type"], "additional_tools");
+    assert_eq!(value["input"][0]["type"], "message");
+    assert_eq!(value["input"][0]["role"], "user");
     assert_eq!(value["store"], false);
 }
 
@@ -162,7 +163,7 @@ async fn bind_control_test_operation(
         &mut HeaderMap::new(),
         ACCOUNT_REF,
         Some(ACCOUNT_NAMESPACE),
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
         store,
@@ -219,7 +220,7 @@ async fn subscription_control_frame_ids_are_stable_and_pseudonymized() {
         &mut first_headers,
         ACCOUNT_REF,
         Some(ACCOUNT_NAMESPACE),
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
         &store,
@@ -233,7 +234,7 @@ async fn subscription_control_frame_ids_are_stable_and_pseudonymized() {
         &mut second_headers,
         ACCOUNT_REF,
         Some(ACCOUNT_NAMESPACE),
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         PSEUDONYM_SCOPE,
         &device_fingerprint(),
         &store,

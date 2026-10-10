@@ -4,7 +4,7 @@ fn project(mut caller: Value, transport: EmulationTransport) -> (Value, Value) {
     caller["input"] = "Translate this synthetic sentence.".into();
     caller["instructions"] = "Only translate the supplied text.".into();
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&caller).unwrap()),
@@ -46,16 +46,16 @@ fn bare_model_defaults_do_not_invent_environment_or_tools() {
             assert!(turn.get("workspaces").is_none());
             assert!(turn.get("tool_namespaces_info").is_none());
             let input = value["input"].as_array().unwrap();
-            if input[0]["type"] == "additional_tools" {
-                assert_eq!(input.len(), 3);
-                assert_eq!(input[0]["tools"], serde_json::json!([]));
-                assert_eq!(
-                    input[1]["content"][0]["text"],
-                    "Only translate the supplied text."
-                );
+            assert_eq!(input.len(), 2);
+            assert!(value.get("instructions").is_none());
+            assert_eq!(input[0]["role"], "developer");
+            assert_eq!(
+                input[0]["content"][0]["text"],
+                "Only translate the supplied text."
+            );
+            if crate::request_defaults::model_profile(model).responses_lite {
+                assert!(value.get("tools").is_none());
             } else {
-                assert_eq!(input.len(), 1);
-                assert_eq!(value["instructions"], "Only translate the supplied text.");
                 assert_eq!(value["tools"], serde_json::json!([]));
             }
             assert_eq!(input.last().unwrap()["role"], "user");
@@ -117,7 +117,7 @@ fn sol_61_uses_lite_defaults_without_inserting_model_instructions() {
                 "tools": [{"type": "function", "name": "probe", "parameters": {"type": "object"}}]
             });
             let prepared = prepare_codex_overlay_for_test(
-                UpstreamProfile::CodexSubscription1592,
+                UpstreamProfile::CodexSubscription1620,
                 transport,
                 &HeaderMap::new(),
                 Bytes::from(serde_json::to_vec(&caller).unwrap()),
@@ -169,7 +169,7 @@ fn sol_61_maps_ultra_to_xhigh_and_preserves_priority_and_explicit_verbosity() {
             assert_eq!(value["service_tier"], "priority");
             assert_eq!(value["text"]["verbosity"], "high");
             assert_eq!(
-                value["input"][1]["content"][0]["text"],
+                value["input"][0]["content"][0]["text"],
                 "Only translate the supplied text."
             );
         }

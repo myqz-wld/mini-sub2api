@@ -310,14 +310,19 @@ func assertResponsesProfileSurface(t *testing.T, value map[string]any, lite, web
 		assertDeveloperMessageText(t, input[1], "unit instruction")
 		return
 	}
-	for _, field := range []string{"instructions", "tools", "prompt_cache_key", "client_metadata"} {
+	for _, field := range []string{"tools", "prompt_cache_key", "client_metadata"} {
 		if _, exists := value[field]; !exists {
 			t.Fatalf("native field %q missing", field)
 		}
 	}
-	if value["instructions"] != "unit instruction" {
-		t.Fatal("caller base changed")
+	if _, present := value["instructions"]; present {
+		t.Fatal("obsolete root instructions")
 	}
+	input, _ := value["input"].([]any)
+	if len(input) == 0 {
+		t.Fatal("caller base missing")
+	}
+	assertDeveloperMessageText(t, input[0], "unit instruction")
 }
 
 func responsesProfileToolBoundariesValid(value any) bool {

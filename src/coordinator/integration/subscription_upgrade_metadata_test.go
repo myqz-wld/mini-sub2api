@@ -35,7 +35,7 @@ func TestSubscriptionWebSocketUpgradeMetadata(t *testing.T) {
 						}
 						return true
 					})
-				headers := codexScenarioHeaders("synthetic-metadata-session", "codex-loopback/0.159.2")
+				headers := codexScenarioHeaders("synthetic-metadata-session", "codex-loopback/0.162.0")
 				connection, response := dialResponsesProfileWebSocketWithResponse(t, fixture.public, fixture.subscriptionKey, headers)
 				defer connection.CloseNow()
 				for _, name := range []string{"X-Reasoning-Included", "OpenAI-Model"} {
@@ -164,7 +164,7 @@ func TestSubscriptionWebSocketHandshakeFailureAfterUpgrade(t *testing.T) {
 			}
 			assertProfileStateFileCount(t, fixture.coreStateDir, 0)
 			writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.5","input":[]}`)
-			if test.usageWindow {
+			if test.status != http.StatusUnauthorized {
 				event := readE2EWebSocketText(t, connection)
 				var value struct {
 					Type   string `json:"type"`
@@ -176,14 +176,14 @@ func TestSubscriptionWebSocketHandshakeFailureAfterUpgrade(t *testing.T) {
 					} `json:"error"`
 				}
 				if json.Unmarshal([]byte(event), &value) != nil || value.Type != "error" ||
-					value.Status != 429 || value.Error.Type != "usage_limit_reached" ||
-					value.Error.LimitWindowMinutes != 5 || value.Error.Headers["x-retry-metadata"] != "NO_MORE_RETRY" ||
+					value.Status != test.status || (test.usageWindow && (value.Error.Type != "usage_limit_reached" ||
+					value.Error.LimitWindowMinutes != 5)) || value.Error.Headers["x-retry-metadata"] != "NO_MORE_RETRY" ||
 					strings.Contains(event, "synthetic-private") {
 					t.Fatal("deferred rejection lost typed retry metadata or exposed provider text")
 				}
 			}
 			wantDelivery := protocolv1.DeliveryNotDelivered
-			if test.usageWindow {
+			if test.status != http.StatusUnauthorized {
 				// The public session has observed a terminal native error event.
 				wantDelivery = protocolv1.DeliveryDelivered
 			}
@@ -289,7 +289,7 @@ func TestSubscriptionWebSocketModelNoticeWaitsForActualError(t *testing.T) {
 			_ = connection.Write(context.Background(), websocket.MessageText,
 				[]byte(`{"type":"error","status":429,"error":{"code":"flex_unavailable"}}`))
 		})
-	headers := codexScenarioHeaders("synthetic-error-session", "codex-loopback/0.159.2")
+	headers := codexScenarioHeaders("synthetic-error-session", "codex-loopback/0.162.0")
 	connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.subscriptionKey, headers)
 	defer connection.CloseNow()
 	writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.5","input":[]}`)

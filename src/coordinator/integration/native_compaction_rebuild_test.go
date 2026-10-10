@@ -51,9 +51,32 @@ func TestNativeCompactionRebuiltMessageIDs(t *testing.T) {
 						t.Fatal("compaction rebuild added or lost a business request")
 					}
 					var rebuiltContent any
-					for _, wires := range [][]nativeWire{caller, upstream} {
+					var rebuiltID any
+					for side, wires := range [][]nativeWire{caller, upstream} {
 						before := compactionUserWithText(t, wires[0], text)
-						after := compactionMessageWithID(t, wires[2], before["id"])
+						var after map[string]any
+						if side == 0 {
+							after = compactionMessageWithID(t, wires[2], before["id"])
+						} else {
+							for _, raw := range wires[2].value["input"].([]any) {
+								item := raw.(map[string]any)
+								if item["role"] == "user" && reflect.DeepEqual(item["content"], rebuiltContent) {
+									if after != nil {
+										t.Fatal("rebuilt caller content was duplicated")
+									}
+									after = item
+								}
+							}
+							if after == nil {
+								t.Fatal("gateway lost rebuilt native content")
+							}
+							// Current policy scopes local IDs to content; retained native raw IDs
+							// stay unchanged at ingress, while changed contents receive a new alias.
+							if after["id"] == before["id"] {
+								t.Fatal("changed caller content retained its old local alias")
+							}
+							rebuiltID = after["id"]
+						}
 						if wires[2].value["previous_response_id"] != nil {
 							t.Fatal("rebuilt history reused the old response baseline")
 						}
@@ -75,8 +98,7 @@ func TestNativeCompactionRebuiltMessageIDs(t *testing.T) {
 						}
 						rebuiltContent = after["content"]
 					}
-					before := compactionUserWithText(t, upstream[0], text)
-					later := compactionMessageWithID(t, upstream[3], before["id"])
+					later := compactionMessageWithID(t, upstream[3], rebuiltID)
 					if !reflect.DeepEqual(later["content"], rebuiltContent) {
 						t.Fatal("later continuation revived discarded message content")
 					}

@@ -180,36 +180,32 @@ func assertAnonymousCurrentConfiguration(t *testing.T, wire nativeWire, format s
 	}
 	items := wire.value["input"].([]any)
 	wantItems := 4 + 2*step
-	if format != "ordinary" {
-		wantItems += 2
-		if format == "converted-lite" && step == 3 {
-			wantItems--
-		}
+	if base != "" {
+		wantItems++
+	}
+	if format != "ordinary" && len(names) > 0 {
+		wantItems++
 	}
 	if len(items) != wantItems {
 		t.Fatal("configuration association added or lost full input items")
 	}
+	if wire.value["instructions"] != nil {
+		t.Fatal("configuration retained obsolete root base")
+	}
 	tools, _ := wire.value["tools"].([]any)
-	if format == "ordinary" {
-		if base == "" {
-			if wire.value["instructions"] != nil || !reflect.DeepEqual(wire.value["tools"], []any{}) {
-				t.Fatal("omitted ordinary setup inherited prior values")
-			}
-		} else if wire.value["instructions"] != base {
-			t.Fatal("ordinary current base changed")
+	baseIndex := 0
+	if format != "ordinary" {
+		if wire.value["tools"] != nil {
+			t.Fatal("Lite configuration retained root tools")
 		}
-	} else {
-		if wire.value["instructions"] != nil || wire.value["tools"] != nil {
-			t.Fatal("Lite current setup retained top-level carriers")
+		tools = nil
+		if items[0].(map[string]any)["type"] == "additional_tools" {
+			tools, _ = items[0].(map[string]any)["tools"].([]any)
+			baseIndex = 1
 		}
-		tools = items[0].(map[string]any)["tools"].([]any)
-		if base != "" {
-			instruction := items[1].(map[string]any)
-			content, _ := instruction["content"].([]any)
-			if instruction["role"] != "developer" || len(content) != 1 || content[0].(map[string]any)["text"] != base {
-				t.Fatal("Lite current base content or position changed")
-			}
-		}
+	}
+	if base != "" {
+		assertDeveloperMessageText(t, items[baseIndex], base)
 	}
 	got := []string{}
 	for _, raw := range tools {
@@ -228,7 +224,7 @@ func assertAnonymousCurrentConfiguration(t *testing.T, wire nativeWire, format s
 	_, texts := compactionItemCounts(wire)
 	for _, candidate := range []string{"  基础 {{literal}}  ", "  current base {{caller}}  "} {
 		want := 0
-		if format != "ordinary" && candidate == base {
+		if candidate == base {
 			want = 1
 		}
 		if texts[candidate] != want {
@@ -259,7 +255,7 @@ func assertAnonymousConfigurationIDs(t *testing.T, wire nativeWire, format strin
 	thread, _ := metadata["thread_id"].(string)
 	oid, _ := hex.DecodeString("6ba7b8129dad11d180b400c04fd430c8")
 	namespace := uuid5(oid, []byte(thread))
-	if thread == "" || body.Input[0].ID != "at_"+uuidText(uuid5(namespace, body.Input[0].Tools)) {
+	if thread == "" || (format == "native-lite" && body.Input[0].ID != "") || (format != "native-lite" && body.Input[0].ID != "at_"+uuidText(uuid5(namespace, body.Input[0].Tools))) {
 		t.Fatal("configuration tools ID differs from current thread and raw schema")
 	}
 	if len(body.Input) < 2 {

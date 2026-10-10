@@ -48,7 +48,7 @@ async fn baseless_anonymous_history_and_explicit_reconstruction_stay_baseless() 
         let prepared = prepare(&store, first.clone()).await.unwrap();
         let identity = prepared.resolved_identity.as_ref().unwrap().clone();
         let emitted: Value = serde_json::from_slice(&prepared.body).unwrap();
-        let prefix = usize::from(model == "gpt-5.6-sol");
+        let prefix = 0;
         assert_eq!(emitted["input"].as_array().unwrap().len(), 1 + prefix);
         assert!(emitted["input"][prefix]["role"] == "user");
         let response = publish(
@@ -360,7 +360,7 @@ fn simplified_caller_history_does_not_expand_ws_automatic_reuse_eligibility() {
     use crate::responses_websocket_state::{PublicCreateMode, ResponsesWebSocketState};
     for reduced in [false, true] {
         let mut state =
-            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1592);
+            ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1620);
         let user = json!({"type":"message","role":"user","content":[{"type":"input_text","text":"first"}]});
         let mut first = request(json!([user]));
         first["type"] = "response.create".into();

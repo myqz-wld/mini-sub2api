@@ -72,3 +72,70 @@ fn malformed_retry_metadata_cannot_open_the_error_header_boundary() {
         assert!(value["error"].get("headers").is_none());
     }
 }
+
+#[test]
+fn nested_retry_after_uses_native_scalar_and_case_insensitive_last_value_rules() {
+    let cases = [
+        (json!({"Retry-After":"7"}), Some("7")),
+        (json!({"Retry-After":7}), Some("7")),
+        (
+            json!({"retry-after":" Wed, 21 Oct 2015 07:28:00 GMT "}),
+            Some(" Wed, 21 Oct 2015 07:28:00 GMT "),
+        ),
+        (json!({"Retry-After":"7","retry-after":"2"}), Some("2")),
+        (json!({"Retry-After":"7","retry-after":false}), None),
+        (json!({"Retry-After":"7","retry-after":["2"]}), Some("7")),
+        (json!({"retry-after":true}), None),
+        (json!({"retry-after":7.5}), None),
+        (json!({"retry-after":null}), None),
+        (json!({"retry-after":{"value":"7"}}), None),
+        (
+            json!({"retry-after":"7\r\nAuthorization: synthetic-private"}),
+            None,
+        ),
+        (
+            json!({"retry-after":"9".repeat(crate::subscription_routing::MAX_ROUTING_TOKEN_BYTES + 1)}),
+            None,
+        ),
+        (json!({"retry-after":"18446744073709551616"}), None),
+    ];
+    for (headers, expected) in cases {
+        for code in [
+            "rate_limit_exceeded",
+            "server_is_overloaded",
+            "flex_unavailable",
+            "insufficient_quota",
+            "unknown-private-code",
+        ] {
+            let error = json!({"code":code,"message":"synthetic-private. Try again in 35s", "headers":headers});
+            for mut event in [
+                json!({"error":error}),
+                json!({"type":"response.failed","response":{"error":error}}),
+                json!({"type":"error","status":503,"headers":{"Retry-After":"30"},"error":error}),
+            ] {
+                filter_response(&mut event, "req_test");
+                let error = event.pointer("/response/error").unwrap_or(&event["error"]);
+                assert_eq!(
+                    error
+                        .pointer("/headers/retry-after")
+                        .and_then(Value::as_str),
+                    expected
+                );
+                assert!(!event.to_string().contains("synthetic-private"));
+                if event["type"] == "error" {
+                    assert_eq!(event["headers"]["retry-after"], "30");
+                    // The pinned caller selects nested advice before top-level, then text.
+                    assert_eq!(
+                        error
+                            .pointer("/headers/retry-after")
+                            .and_then(Value::as_str)
+                            .or(event
+                                .pointer("/headers/retry-after")
+                                .and_then(Value::as_str)),
+                        expected.or(Some("30"))
+                    );
+                }
+            }
+        }
+    }
+}

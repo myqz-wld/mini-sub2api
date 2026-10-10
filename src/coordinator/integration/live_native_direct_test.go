@@ -111,20 +111,25 @@ code_mode = false
 code_mode_host = false
 `, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"))
 	if !options.ws {
-		// 0.159.2 selects WS by provider capability. Its old feature toggles are removed.
+		// 0.162.0 selects WS by provider capability. Its old feature toggles are removed.
 		config = strings.Replace(config, `model_provider = "openai"`, `model_provider = "live_http"`, 1)
-		config += `
+		endpoint := "https://chatgpt.com/backend-api/codex"
+		if options.endpoint != "" {
+			assertLoopbackURL(t, options.endpoint)
+			endpoint = options.endpoint + "/v1"
+		}
+		config += fmt.Sprintf(`
 [model_providers.live_http]
 name = "OpenAI"
-base_url = "https://chatgpt.com/backend-api/codex"
+base_url = %q
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
-http_headers = { version = "0.159.2" }
+http_headers = { version = "0.162.0" }
 request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 90000
-`
+`, endpoint)
 	}
 	if os.WriteFile(filepath.Join(isolated, "config.toml"), []byte(config), 0600) != nil {
 		t.Fatal("write isolated native config")

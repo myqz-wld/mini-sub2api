@@ -9,6 +9,10 @@ pub(crate) const FAILURE_MESSAGE: &str = "The upstream request failed.";
 #[path = "response_retry_metadata_tests.rs"]
 mod retry_metadata_tests;
 
+#[path = "response_retry_advice.rs"]
+mod retry_advice;
+pub(crate) use retry_advice::retry_after_header;
+
 pub(crate) fn filter_response(value: &mut Value, request_id: &str) {
     let Some(object) = value.as_object_mut() else {
         return;
@@ -103,6 +107,7 @@ fn filter_headers(value: &mut Value, request_id: &str) {
         *value = json!({});
         return;
     };
+    let retry_after = retry_advice::from_json(headers);
     headers.retain(|name, value| match response_header_action(name) {
         CarrierAction::Opaque => header_value(value, None, 0, true),
         CarrierAction::GatewayRequestAlias if !request_id.is_empty() => {
@@ -110,6 +115,7 @@ fn filter_headers(value: &mut Value, request_id: &str) {
         }
         _ => false,
     });
+    retry_advice::replace(headers, retry_after);
 }
 
 fn header_value(
@@ -182,7 +188,8 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
         .unwrap_or("upstream_response_failed");
     let mut error = json!({"code": code, "message": FAILURE_MESSAGE});
     if let Some(headers) = field("headers").and_then(Value::as_object) {
-        let headers: Map<String, Value> = headers
+        let retry_after = retry_advice::from_json(headers);
+        let mut headers: Map<String, Value> = headers
             .iter()
             .filter(|(name, _)| name.eq_ignore_ascii_case("x-retry-metadata"))
             .filter_map(|(name, value)| {
@@ -190,6 +197,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
                 header_value(&mut value, None, 0, false).then(|| (name.clone(), value))
             })
             .collect();
+        retry_advice::replace(&mut headers, retry_after);
         if !headers.is_empty() {
             error["headers"] = headers.into();
         }
@@ -199,7 +207,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
             .and_then(Value::as_str)
             .and_then(retry_delay)
     {
-        // Native 0.159.2 extracts this delay from text. Retain only the bounded numeric
+        // Native 0.162.0 extracts this delay from text. Retain only the bounded numeric
         // control, never the surrounding provider message or identifying quota details.
         error["message"] = format!("{FAILURE_MESSAGE} Try again in {delay}.").into();
     }

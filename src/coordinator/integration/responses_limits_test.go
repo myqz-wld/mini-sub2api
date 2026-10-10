@@ -35,10 +35,10 @@ func TestResponsesAcceptsActualFramesAboveFormer16MiBLimit(t *testing.T) {
 		capture := waitForRoutingCapture(t, fixture.captures)
 		value := decodeRequestObject(t, capture.Body)
 		items, _ := value["input"].([]any)
-		if len(items) != 1 {
+		if len(items) != 2 {
 			t.Fatal("large Subscription input structure changed")
 		}
-		content, _ := items[0].(map[string]any)["content"].([]any)
+		content, _ := items[1].(map[string]any)["content"].([]any)
 		if content[0].(map[string]any)["text"] != large {
 			t.Fatal("large Subscription input changed")
 		}

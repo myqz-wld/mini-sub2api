@@ -22,13 +22,13 @@ pub(crate) enum HiddenSetupOutcome {
 
 pub(crate) fn prewarm_mode(request: &Value) -> PrewarmMode {
     let responses_lite = request
-        .get("input")
-        .and_then(Value::as_array)
-        .and_then(|input| input.first())
-        .and_then(Value::as_object)
-        .and_then(|item| item.get("type"))
+        .get("model")
         .and_then(Value::as_str)
-        == Some("additional_tools");
+        .is_some_and(|model| crate::request_defaults::model_profile(model).responses_lite)
+        || request
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|input| input.iter().any(|item| item["type"] == "additional_tools"));
     if responses_lite {
         PrewarmMode::ResponsesLite
     } else {

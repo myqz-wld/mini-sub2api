@@ -307,7 +307,7 @@ func assertResponsesProfilePrewarm(t *testing.T, capture responsesProfileWebSock
 		t.Fatal("synthetic prewarm did not use response.create generate=false")
 	}
 	input, ok := value["input"].([]any)
-	if !ok || (!lite && len(input) != 0) || (lite && len(input) == 0) {
+	if !ok || (!lite && len(input) != 1) || (lite && len(input) == 0) {
 		t.Fatal("synthetic prewarm input did not match the profile")
 	}
 	metadata, ok := value["client_metadata"].(map[string]any)

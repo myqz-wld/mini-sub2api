@@ -173,8 +173,12 @@ func assertCompactionHistory(t *testing.T, wires []nativeWire, mode string) {
 			input := wires[1].value["input"].([]any)
 			tools, _ = input[0].(map[string]any)["tools"].([]any)
 		}
-		if tools == nil || len(tools) != 0 {
-			t.Fatal("local compact must emit an explicit empty tool inventory")
+		if wires[1].value["model"] == "gpt-5.6-sol" {
+			if tools != nil || compactTypes["additional_tools"] != 0 {
+				t.Fatal("native Lite local compaction must omit empty tool declarations")
+			}
+		} else if tools == nil || len(tools) != 0 {
+			t.Fatal("ordinary local compact must emit an explicit empty tool inventory")
 		}
 	}
 	if wires[2].value["previous_response_id"] != nil {

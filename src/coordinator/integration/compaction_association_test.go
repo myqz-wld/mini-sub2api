@@ -168,21 +168,24 @@ func assertCheckpointIdentity(t *testing.T, business, all []nativeWire, ws bool)
 func assertCheckpointCurrentInput(t *testing.T, wire nativeWire, format string) {
 	t.Helper()
 	items := wire.value["input"].([]any)
-	offset := 0
-	if format != "ordinary" {
-		offset = 2
-		if wire.value["instructions"] != nil || wire.value["tools"] != nil {
-			t.Fatal("checkpoint Lite context retained top-level setup")
-		}
+	offset := 1
+	if wire.value["instructions"] != nil {
+		t.Fatal("obsolete checkpoint root base")
+	}
+	if format == "native-lite" {
 		prefix := items[0].(map[string]any)
-		base := items[1].(map[string]any)
-		content, _ := base["content"].([]any)
-		if prefix["type"] != "additional_tools" || len(prefix["tools"].([]any)) != 0 ||
-			base["role"] != "developer" || len(content) != 1 || content[0].(map[string]any)["text"] != "current checkpoint base" {
-			t.Fatal("checkpoint Lite setup content or order changed")
+		if prefix["type"] != "additional_tools" || len(prefix["tools"].([]any)) != 0 {
+			t.Fatal("caller checkpoint declaration changed")
 		}
-	} else if wire.value["instructions"] != "current checkpoint base" || len(wire.value["tools"].([]any)) != 0 {
-		t.Fatal("checkpoint ordinary current setup changed")
+		offset = 2
+	}
+	assertDeveloperMessageText(t, items[offset-1], "current checkpoint base")
+	if format == "ordinary" {
+		if tools, ok := wire.value["tools"].([]any); !ok || len(tools) != 0 {
+			t.Fatal("ordinary checkpoint tools changed")
+		}
+	} else if wire.value["tools"] != nil {
+		t.Fatal("Lite checkpoint root tools")
 	}
 	checkpoint := items[offset+1].(map[string]any)
 	if items[offset].(map[string]any)["role"] != "developer" || items[offset+2].(map[string]any)["role"] != "user" ||

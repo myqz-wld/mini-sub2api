@@ -159,6 +159,30 @@ fn empty_output_decoration_is_schema_bounded_and_does_not_change_exact_storage()
 }
 
 #[test]
+fn native_reasoning_optional_content_lookup_keeps_nonempty_and_completion_evidence_strict() {
+    let absent =
+        json!({"type":"reasoning","id":"rs_synthetic","summary":[],"encrypted_content":"cipher"});
+    for content in [Value::Null, json!([])] {
+        let mut reserialized = absent.clone();
+        reserialized["content"] = content;
+        assert_eq!(candidate_key(&absent), candidate_key(&reserialized));
+        assert!(!completion_items_compatible(&absent, &reserialized));
+    }
+    for content in [
+        json!([{"type":"reasoning_text","text":"reasoning"}]),
+        json!({}),
+        json!(false),
+    ] {
+        let mut different = absent.clone();
+        different["content"] = content;
+        assert_ne!(candidate_key(&absent), candidate_key(&different));
+    }
+    let mut changed = absent.clone();
+    changed["encrypted_content"] = "different-cipher".into();
+    assert!(!hidden_ciphertext_compatible(&changed, &absent, false));
+}
+
+#[test]
 fn digest_bucket_hits_always_verify_exact_bytes() {
     let mut pool = Interner::default();
     let a = pool.intern(json!({"type":"message","role":"user","content":[]}));

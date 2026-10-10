@@ -93,7 +93,7 @@ async fn agent_led_expired_history_import_still_enforces_ownership_and_content_s
                 old.thread_id
             );
             let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
-            assert_eq!(wire["input"][0]["content"], agent("NEW_TASK")["content"]);
+            assert_eq!(wire["input"][1]["content"], agent("NEW_TASK")["content"]);
         } else {
             assert!(result.is_err(), "agent import unexpectedly accepted {case}");
             assert_eq!(

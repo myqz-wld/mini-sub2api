@@ -19,6 +19,7 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 	var catalog struct {
 		Models []struct {
 			Slug     string `json:"slug"`
+			Lite     bool   `json:"use_responses_lite"`
 			Review   bool   `json:"node_repl_auto_review_required"`
 			Disabled bool   `json:"node_repl_disabled"`
 		} `json:"models"`
@@ -84,16 +85,15 @@ func TestNativeOrdinaryModelMetadataCatalog(t *testing.T) {
 						t.Fatal("ordinary input lost")
 					}
 					first, _ := input[0].(map[string]any)
-					if first["type"] == "additional_tools" {
-						tools, ok := first["tools"].([]any)
-						if !ok || len(tools) != 0 || len(input) != 3 {
-							t.Fatal("minimal Lite caller acquired tools or instructions")
+					if len(input) != 2 || first["role"] != "developer" || capturedBase(t, ordinaryResolvedFirst(t, wires)) != request["instructions"] {
+						t.Fatal("minimal caller setup differs")
+					}
+					if model.Lite {
+						if _, present := value["tools"]; present {
+							t.Fatal("minimal Lite added root tools")
 						}
-						if capturedBase(t, ordinaryResolvedFirst(t, wires)) != request["instructions"] {
-							t.Fatal("minimal Lite base changed")
-						}
-					} else if tools, ok := value["tools"].([]any); len(input) != 1 || value["instructions"] != request["instructions"] || !ok || len(tools) != 0 {
-						t.Fatal("minimal Responses caller lost the native empty-tools carrier or changed instructions")
+					} else if tools, ok := value["tools"].([]any); !ok || len(tools) != 0 {
+						t.Fatal("ordinary empty tools absent")
 					}
 					last, _ := input[len(input)-1].(map[string]any)
 					content, _ := last["content"].([]any)

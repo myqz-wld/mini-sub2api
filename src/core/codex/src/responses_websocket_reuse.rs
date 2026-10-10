@@ -58,25 +58,39 @@ pub(crate) fn request_snapshot(
 }
 
 pub(crate) fn lite_prewarm_prefix(input: &[Value]) -> Option<Vec<Value>> {
-    let first = input.first()?;
-    if first
-        .as_object()
-        .and_then(|object| object.get("type"))
-        .and_then(Value::as_str)
-        != Some("additional_tools")
-    {
-        return None;
-    }
-    let prefix_len = 1 + input[1..]
-        .iter()
-        .take_while(|item| {
-            item.as_object().is_some_and(|object| {
-                object.get("type").and_then(Value::as_str) == Some("message")
-                    && object.get("role").and_then(Value::as_str) == Some("developer")
+    let tools = usize::from(
+        input
+            .first()
+            .is_some_and(|item| item["type"] == "additional_tools"),
+    );
+    let prefix_len = tools
+        + input[tools..]
+            .iter()
+            .take_while(|item| {
+                item.as_object().is_some_and(|object| {
+                    object.get("type").and_then(Value::as_str) == Some("message")
+                        && object.get("role").and_then(Value::as_str) == Some("developer")
+                })
             })
-        })
-        .count();
+            .count();
     Some(input[..prefix_len].to_vec())
+}
+
+pub(crate) fn ordinary_prewarm_prefix(request: &Value) -> Vec<Value> {
+    let Some(thread) = request["client_metadata"]["thread_id"].as_str() else {
+        return Vec::new();
+    };
+    let base = &request["input"][0];
+    let Some(text) = base["content"][0]["text"].as_str() else {
+        return Vec::new();
+    };
+    let namespace = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, thread.as_bytes());
+    let expected = format!("msg_{}", uuid::Uuid::new_v5(&namespace, text.as_bytes()));
+    if base["type"] == "message" && base["role"] == "developer" && base["id"] == expected {
+        vec![base.clone()]
+    } else {
+        Vec::new()
+    }
 }
 
 pub(crate) fn incremental_input(

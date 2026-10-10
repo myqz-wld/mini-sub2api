@@ -104,7 +104,7 @@ async fn timed_out_hidden_setup_requests_reconnect_and_clears_reuse_state() {
 }
 
 fn automatic_subscription_state() -> ResponsesWebSocketState {
-    ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1592)
+    ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1620)
 }
 
 fn public_request() -> Value {

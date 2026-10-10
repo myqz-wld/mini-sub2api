@@ -121,7 +121,7 @@ func TestResponsesHistoryPrewarm1592(t *testing.T) {
 				assertPrewarm1592Identity(t, warm)
 				items, _ := warm["input"].([]any)
 				prefix := len(items) - len(history)
-				if (model == "gpt-6-sol" && prefix != 2) || (model == "gpt-5.5" && prefix != 0) {
+				if prefix != 1 {
 					t.Fatal("prewarm changed the ordinary/Lite base setup")
 				}
 				for _, raw := range items[:prefix] {

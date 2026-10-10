@@ -41,9 +41,10 @@ pub(crate) fn candidate_key(item: &Value) -> Vec<u8> {
         }
         if object
             .get("content")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty)
+            .is_some_and(|value| value.is_null() || value.as_array().is_some_and(Vec::is_empty))
         {
+            // Native Reasoning reserialization can turn an omitted optional content into null.
+            // This lookup-only equivalence never discards nonempty reasoning or ciphertext.
             object.shift_remove("content");
         }
     }

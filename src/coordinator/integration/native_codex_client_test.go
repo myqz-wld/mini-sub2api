@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const nativeVersion = "codex-cli 0.159.2"
+const nativeVersion = "codex-cli 0.162.0"
 
 type nativeClient struct {
 	t           *testing.T
@@ -49,6 +49,7 @@ type nativeOptions struct {
 	traceEndpoint          string
 	deadline               time.Duration
 	observe                func(map[string]any)
+	catalogTransform       func(map[string]any)
 	reasoningEffortUpdates bool
 	builtinOpenAI          bool
 }
@@ -70,14 +71,14 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 	}
 	binary := os.Getenv("MINI_SUB2API_NATIVE_CODEX_BINARY")
 	if binary == "" {
-		binary = filepath.Join(nativeRepository(), "ref", "tools", "codex-v0.159.2", "codex")
+		binary = filepath.Join(nativeRepository(), "ref", "tools", "codex-v0.162.0", "codex")
 		if _, err := os.Stat(binary); os.IsNotExist(err) {
 			binary = "codex"
 		}
 	}
 	binary, err := exec.LookPath(binary)
 	if err != nil {
-		t.Fatal("native parity requires Codex v0.159.2")
+		t.Fatal("native parity requires Codex v0.162.0")
 	}
 	binary, err = filepath.Abs(binary)
 	if err != nil {
@@ -89,7 +90,7 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 	}
 	isolated := t.TempDir()
 	catalogPath := filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json")
-	if options.reasoningEffortUpdates {
+	if options.reasoningEffortUpdates || options.catalogTransform != nil {
 		data, err := os.ReadFile(catalogPath)
 		var catalog map[string]any
 		if err != nil || json.Unmarshal(data, &catalog) != nil {
@@ -97,9 +98,12 @@ func startNativeClient(t *testing.T, options nativeOptions) *nativeClient {
 		}
 		for _, raw := range catalog["models"].([]any) {
 			entry := raw.(map[string]any)
-			if entry["slug"] == options.model {
+			if options.reasoningEffortUpdates && entry["slug"] == options.model {
 				entry["supports_reasoning_effort_updates"] = true
 			}
+		}
+		if options.catalogTransform != nil {
+			options.catalogTransform(catalog)
 		}
 		catalogPath = filepath.Join(isolated, "models.json")
 		if os.WriteFile(catalogPath, mustRequestJSON(t, catalog), 0600) != nil {
@@ -242,7 +246,7 @@ func startNativeProcess(t *testing.T, options nativeOptions, ctx context.Context
 		}
 	}()
 	t.Cleanup(func() { _ = input.Close(); cancel(); _ = command.Wait(); reader.Wait() })
-	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.159.2"}, "capabilities": map[string]any{"experimentalApi": true}})
+	client.call("initialize", map[string]any{"clientInfo": map[string]any{"name": "codex-tui", "version": "0.162.0"}, "capabilities": map[string]any{"experimentalApi": true}})
 	client.send(map[string]any{"method": "initialized"})
 	return client
 }

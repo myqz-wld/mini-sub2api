@@ -85,7 +85,7 @@ func TestCompactionResponseHTTPContinuationMatrix(t *testing.T) {
 								t.Fatal("compaction ciphertext changed")
 							}
 						}
-						if format == "ordinary" && wire.value["instructions"] != first["instructions"] {
+						if format == "ordinary" && capturedBase(t, wire) != first["instructions"] {
 							t.Fatal("current ordinary instructions changed after compaction")
 						}
 						if format == "converted-lite" {
@@ -149,10 +149,10 @@ func TestCompactionResponseUnavailableWindows(t *testing.T) {
 					}
 					last := wires[len(wires)-1]
 					full := last.value["input"].([]any)
-					if last.value["previous_response_id"] != nil || len(full) != 3 || full[0].(map[string]any)["role"] != "user" || full[1].(map[string]any)["type"] != "compaction" || full[2].(map[string]any)["role"] != "user" {
+					if last.value["previous_response_id"] != nil || len(full) != 4 || full[0].(map[string]any)["role"] != "developer" || full[1].(map[string]any)["role"] != "user" || full[2].(map[string]any)["type"] != "compaction" || full[3].(map[string]any)["role"] != "user" {
 						t.Fatal("proven V2 window lost its retained user, checkpoint or continuation")
 					}
-					if full[1].(map[string]any)["encrypted_content"] != "synthetic_compacted_state" {
+					if full[2].(map[string]any)["encrypted_content"] != "synthetic_compacted_state" {
 						t.Fatal("proven compaction ciphertext changed")
 					}
 					return

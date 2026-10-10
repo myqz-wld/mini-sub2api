@@ -50,6 +50,9 @@ async fn current_settings_do_not_split_verified_anonymous_history() {
             assert_eq!(emitted[field].as_array().unwrap().len(), 1);
             assert!(emitted[field][0]["name"] == "current_tool");
             assert!(emitted[field][0]["parameters"]["type"] == "object");
+        } else if field == "instructions" {
+            assert!(emitted.get("instructions").is_none());
+            assert_eq!(emitted["input"][0]["content"][0]["text"], value);
         } else if field == "tool_choice" {
             assert_eq!(emitted[field], "auto");
         } else if field == "include" {
@@ -92,7 +95,11 @@ async fn model_and_setup_changes_keep_current_format_without_inheriting_old_base
             assert!(selected.baseline.is_some());
             assert_eq!(
                 selected.caller_format,
-                crate::subscription_request::Format::Responses
+                if model == "gpt-5.6-sol" && base.is_none() {
+                    crate::subscription_request::Format::Lite
+                } else {
+                    crate::subscription_request::Format::Responses
+                }
             );
             drop(selected);
             let prepared = prepare(&store, next).await.unwrap();
@@ -107,19 +114,14 @@ async fn model_and_setup_changes_keep_current_format_without_inheriting_old_base
                 .filter(|s| !s.is_empty());
             let has_base = current_base.is_some();
             let items = emitted["input"].as_array().unwrap();
+            assert!(emitted.get("instructions").is_none());
+            assert_eq!(items.len(), 3 + usize::from(has_base));
+            if has_base {
+                assert_eq!(items[0]["content"][0]["text"].as_str(), current_base);
+            }
             if model == "gpt-5.6-sol" {
-                assert!(emitted.get("instructions").is_none());
-                assert!(items[0]["tools"] == json!([]));
-                assert_eq!(items.len(), 4 + usize::from(has_base));
-                if has_base {
-                    assert_eq!(items[1]["content"][0]["text"].as_str(), current_base);
-                }
+                assert!(emitted.get("tools").is_none());
             } else {
-                assert_eq!(items.len(), 3);
-                assert_eq!(
-                    emitted.get("instructions").and_then(Value::as_str),
-                    current_base
-                );
                 assert_eq!(emitted["tools"], json!([]));
             }
             assert!(
@@ -390,4 +392,47 @@ async fn disabled_configuration_updates_remain_in_stored_history_only() {
             .iter()
             .all(|i| i["type"] != "configuration_update")
     );
+}
+
+#[tokio::test]
+async fn base_input_continuation_reuses_unchanged_setup_and_rebuilds_changes_or_omission() {
+    for model in ["gpt-5.5", "gpt-6-astra"] {
+        for base in [Some("base"), Some("changed base"), None] {
+            let (_temp, store) = store();
+            let socket = store.contexts.open_socket().unwrap();
+            let mut body = request(json!([input("first")]));
+            body["model"] = model.into();
+            let first = repair_tests::websocket_request(&store, body, &socket.id, None)
+                .await
+                .unwrap();
+            let identity = first.resolved_identity.clone().unwrap();
+            let response = publish(&store, first, "resp_base", json!([assistant()])).await;
+            let mut next = json!({"model":model,"previous_response_id":response["id"],
+                "input":[input("second")]});
+            if let Some(base) = base {
+                next["instructions"] = base.into();
+            }
+            let prepared =
+                repair_tests::websocket_request(&store, next, &socket.id, Some(&identity))
+                    .await
+                    .unwrap();
+            let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
+            assert!(wire.get("instructions").is_none());
+            let items = wire["input"].as_array().unwrap();
+            if base == Some("base") {
+                assert!(!prepared.rebuilt_reference);
+                assert!(wire.get("previous_response_id").is_some());
+                assert_eq!(items.len(), 1);
+                assert_eq!(items[0]["content"][0]["text"], "second");
+            } else {
+                assert!(prepared.rebuilt_reference);
+                assert!(wire.get("previous_response_id").is_none());
+                assert_eq!(items.len(), 3 + usize::from(base.is_some()));
+                if let Some(base) = base {
+                    assert_eq!(items[0]["content"][0]["text"], base);
+                }
+                assert!(!items.iter().any(|v| v["content"][0]["text"] == "base"));
+            }
+        }
+    }
 }

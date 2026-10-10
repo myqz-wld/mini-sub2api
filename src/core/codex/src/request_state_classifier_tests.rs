@@ -30,7 +30,7 @@ async fn prepare(
     key: &str,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_identity_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

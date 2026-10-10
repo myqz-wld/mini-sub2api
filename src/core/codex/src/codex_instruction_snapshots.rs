@@ -1,15 +1,15 @@
 //! Pinned native instruction fixtures; never linked into production request normalization.
-const GPT_6_ASTRA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6-astra.md");
-const GPT_6_1_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6.1-sol.md");
-const GPT_6_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6-sol.md");
-const GPT_6_LUNA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-6-luna.md");
+const GPT_6_ASTRA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/gpt-6-astra.md");
+const GPT_6_1_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/gpt-6.1-sol.md");
+const GPT_6_SOL_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/gpt-6-sol.md");
+const GPT_6_LUNA_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/gpt-6-luna.md");
 const DAYBREAK_BLUE_INSTRUCTIONS: &str =
-    include_str!("../prompts/codex-0.159.2/gpt-daybreak-blue.md");
+    include_str!("../prompts/codex-0.162.0/gpt-daybreak-blue.md");
 const DAYBREAK_RED_INSTRUCTIONS: &str =
-    include_str!("../prompts/codex-0.159.2/gpt-daybreak-red.md");
-const GPT_5_6_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-5.6.md");
-const GPT_5_5_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/gpt-5.5.md");
-const FALLBACK_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.159.2/fallback.md");
+    include_str!("../prompts/codex-0.162.0/gpt-daybreak-red.md");
+const GPT_5_6_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/gpt-5.6.md");
+const GPT_5_5_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/gpt-5.5.md");
+const FALLBACK_INSTRUCTIONS: &str = include_str!("../prompts/codex-0.162.0/fallback.md");
 
 const MODEL_INSTRUCTIONS: &[(&str, &str)] = &[
     ("gpt-6-astra", GPT_6_ASTRA_INSTRUCTIONS),

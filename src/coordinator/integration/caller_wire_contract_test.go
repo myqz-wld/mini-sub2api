@@ -208,10 +208,6 @@ func assertCallerRootPresence(t *testing.T, caller, output, baseline *nativeJSON
 		switch name {
 		case "instructions":
 			present = false
-			if node := caller.fields[name]; node != nil {
-				value, _ := node.scalar.(string)
-				present = !lite && value != ""
-			}
 		case "tools":
 			present = !lite
 		case "previous_response_id":
@@ -274,12 +270,14 @@ func callerContinuationDifferences(caller, output *nativeJSONShape, lite bool) [
 	}
 	formed := len(before.items) > 0 && before.items[0].fields["type"] != nil && before.items[0].fields["type"].scalar == "additional_tools"
 	if lite && !formed {
-		want++
-		if base := caller.fields["instructions"]; base != nil {
-			text, _ := base.scalar.(string)
-			if strings.TrimSpace(text) != "" {
-				want++
-			}
+		if tools := caller.fields["tools"]; tools != nil && len(tools.items) > 0 {
+			want++
+		}
+	}
+	if base := caller.fields["instructions"]; base != nil {
+		text, _ := base.scalar.(string)
+		if text != "" {
+			want++
 		}
 	}
 	if caller.fields["previous_response_id"] != nil {

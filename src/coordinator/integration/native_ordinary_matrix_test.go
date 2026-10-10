@@ -262,7 +262,7 @@ func TestNativeOrdinaryCallerMatrix(t *testing.T) {
 								if counts["duplicate developer"] != 2 || counts["first ordinary user"] != 1 || strings.Contains(strings.Join(roles, ","), "system") {
 									t.Fatal("ordinary HTTP reconstruction lost order/duplicates/roles")
 								}
-								if format == "ordinary" && next.value["instructions"] != first["instructions"] {
+								if format == "ordinary" && capturedBase(t, next) != first["instructions"] {
 									t.Fatal("ordinary base inheritance")
 								}
 								if format != "ordinary" && format != "native-lite" {

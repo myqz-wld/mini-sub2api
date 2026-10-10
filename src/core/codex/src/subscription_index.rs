@@ -293,6 +293,17 @@ impl History {
         hidden
     }
 
+    pub(crate) fn get(&self, index: usize) -> Option<&Arc<Item>> {
+        let mut block = self;
+        loop {
+            let inherited = block.parent.as_ref().map_or(0, |parent| parent.len);
+            if index >= inherited {
+                return block.items.get(index - inherited);
+            }
+            block = block.parent.as_deref()?;
+        }
+    }
+
     pub(crate) fn items(&self) -> Vec<&Arc<Item>> {
         let mut blocks = Vec::new();
         let mut current = Some(self);

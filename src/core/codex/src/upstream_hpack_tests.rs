@@ -16,6 +16,8 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
             .await
             .unwrap();
         let mut headers = Vec::new();
+        let mut settings = Vec::new();
+        let mut connection_window = None;
         loop {
             let mut header = [0; 9];
             socket.read_exact(&mut header).await.unwrap();
@@ -25,10 +27,25 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
             let mut body = vec![0; length];
             socket.read_exact(&mut body).await.unwrap();
             if header[3] == 4 && header[4] & 1 == 0 {
+                assert!(settings.is_empty());
+                assert_eq!(body.len() % 6, 0);
+                settings = body
+                    .chunks_exact(6)
+                    .map(|setting| {
+                        (
+                            u16::from_be_bytes(setting[..2].try_into().unwrap()),
+                            u32::from_be_bytes(setting[2..].try_into().unwrap()),
+                        )
+                    })
+                    .collect();
                 socket
                     .write_all(&[0, 0, 0, 4, 1, 0, 0, 0, 0])
                     .await
                     .unwrap();
+            }
+            if header[3] == 8 && header[5..9] == [0, 0, 0, 0] {
+                connection_window = Some(u32::from_be_bytes(body.try_into().unwrap()));
+                continue;
             }
             if header[3] == 1 {
                 assert_ne!(header[4] & 4, 0);
@@ -42,7 +59,7 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
                 break;
             }
         }
-        authorization_prefix(&headers)
+        (authorization_prefix(&headers), settings, connection_window)
     });
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -57,7 +74,7 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
             token: "synthetic-only".into(),
             account_id: "synthetic".into(),
         },
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         bytes::Bytes::from_static(b"{}"),
     )
     .unwrap();
@@ -67,8 +84,17 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
         .unwrap()
         .unwrap();
     assert_eq!(response.status(), 200);
-    // Static HPACK name index 23 with a four-bit zero prefix, as in native 0.159.2.
-    assert_eq!(peer.await.unwrap(), vec![0x0f, 0x08]);
+    // Static HPACK name index 23 with a four-bit zero prefix, as in native 0.162.0.
+    let (authorization, settings, window) = peer.await.unwrap();
+    assert_eq!(authorization, vec![0x0f, 0x08]);
+    // Exact pinned native reqwest 0.12.28 uses hyper 1.8.1 default HTTP/2 config;
+    // h2 0.4.19 frame/settings.rs emits these settings in this order. This is a
+    // cleartext builder probe, not a claim of negotiated native TLS/HTTP2 parity.
+    assert_eq!(
+        settings,
+        vec![(2, 0), (4, 2_097_152), (5, 16_384), (6, 16_384)]
+    );
+    assert_eq!(window, Some(5_242_880 - 65_535));
 }
 
 fn integer(data: &[u8], offset: &mut usize, bits: u8) -> usize {

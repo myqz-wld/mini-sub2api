@@ -11,14 +11,14 @@ mise exec -- python3 scripts/prepare-opencode-tests.py
 bash scripts/test-scaffold-parity.sh
 ```
 
-Pinned clients: Codex **0.159.2** (`ff6aec96948b70d94983af2641a6b67c94faeff5`) and OpenCode
+Pinned clients: Codex **0.162.0** (`c1382380de69521303b416720a52f42d51af6248`) and OpenCode
 **1.18.29** (`16747470f976aca3d362ad730bcd3fe82ecc2c9a`). Missing/wrong prerequisites fail.
 Clients are verified on macOS arm64. Standard suites use loopback mocks and never fall back to providers.
-Code Mode execution requires the matching 0.159.2 `codex-code-mode-host` companion in the CLI's
+Code Mode execution requires the matching 0.162.0 `codex-code-mode-host` companion in the CLI's
 installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NATIVE_CODEX_BINARY`;
 `MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout, defaulting to
-`ref/sources/codex-v0.159.2`. Retain the CLI and its companion together under
-`ref/tools/codex-v0.159.2`; `.ref/` is reserved for temporary work.
+`ref/sources/codex-v0.162.0`. Retain the CLI and its companion together under
+`ref/tools/codex-v0.162.0`; `.ref/` is reserved for temporary work.
 
 ## Method
 
@@ -53,9 +53,11 @@ Counts describe overlapping matrices, not additive independent cases.
 | Caller bases: 144 two-call cases | Missing/invalid/explicit bases, both credentials and HTTP/WS ordinary/Lite; no defaults, stable prefix ownership |
 | Actual OpenCode: 20 cases | Custom-provider text/read/denied-file, built-in OpenAI plugin and Core restart; continuity, tool turns, API-key bytes and ordered Subscription wire/header contracts |
 | Bare ordered wire: 12 cases | HTTP/WS × ordinary/Lite × minimal/explicit/null controls; independent actual CLI baselines, source-derived protocol order, complete header signatures |
-| 0.159.2 release | gpt-6.1-sol defaults/image/Code Mode and ultra-to-xhigh mapping; history prewarm; actual CLI instant interruption with done/discarded output, continuation and single accounting; bounded usage-window errors; late truncated metadata/reuse and provider opt-in. |
+| 0.162.0 retry advice | Actual CLI positive/negative overload delay across HTTP/WS and all three routes; only caller retries produce additional sends. |
+| 0.162.0 optional modes | Actual native HTTP/WS direct/API-key/Subscription incremental declaration add/change/remove; Guardian snapshot/retained include, dedicated setup, completion and cross-lease ciphertext history; full requests and no extra gateway inference. |
+| 0.159.2 retained regressions | gpt-6.1-sol defaults/image/Code Mode and ultra-to-xhigh mapping; history prewarm; actual CLI instant interruption with done/discarded output, continuation and single accounting; bounded usage-window errors; late truncated metadata/reuse and provider opt-in. |
 | Models/context | All 11 catalog models plus the retired gpt-5.4 fallback; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
-| 0.158.0 controls | Actual numeric effort across direct/API-key/Subscription HTTP/WS; MCP first-turn mapping/bounds, observation prompt/message budgets and persistent completeness revocation. Experimental effort-history updates remain disabled by gateway policy. |
+| 0.158.0 controls | Actual numeric effort across direct/API-key/Subscription HTTP/WS; MCP first-turn mapping/bounds, observation argument/message budgets and persistent completeness revocation. Experimental effort-history updates remain disabled by gateway policy. |
 | Built-in wire shape: 28 requests | Actual CLI app-server; HTTP fallback/WS × ordinary/Lite × two isolated processes; complete header order/presence/casing and recursive JSON shape, including tool loops and the next turn |
 | Identity/privacy | Key/device/shared-account isolation, forks/owners, explicit conflicts, restart/corruption and required references |
 | HTTP boundaries: 64 cases | EOF/delta/DONE-only/all terminals, 9 MiB output, JSON/SSE, no replay, exact API-key bytes and usage/status |
@@ -64,7 +66,7 @@ Counts describe overlapping matrices, not additive independent cases.
 | WS/compaction | Reuse/reconnect, first routing token, prewarm, uncertain sends, V2 item-done and window commit |
 | WS upgrade metadata: 16 native cases | Direct/Subscription model observations across reused sockets, event overrides/arrays/aliases, leading rate-limit/error events, no auth-only connections and the deferred Subscription reasoning-accounting limitation |
 | Compaction continuation: 36 cases | Explicit/in-band windows, two HTTP deltas, full WS recovery, Lite setup and missing-window errors |
-| Compaction message rebuild: 8 native cases | Actual pinned CLI media removal/text truncation with retained message IDs; HTTP/WS ordinary/Lite replacement and later continuation |
+| Compaction message rebuild: 8 native cases | Actual pinned CLI media removal/text truncation with native retained message IDs; gateway content-scoped aliases change when content changes and stabilize afterward |
 | Anonymous checkpoints: 36 four-call cases | Configuration/context changes, stable session/thread/window, new turn and exact checkpoint across credentials/transports/formats |
 | Tools | Actual native nested host callbacks; bare/OpenCode direct tools; schema order/duplicates and deterministic prefixes |
 
@@ -75,13 +77,27 @@ Negative controls preserve explicit IDs, substantive content/decoration, Key iso
 
 ## Evidence and limits
 
+The 2026-10-09 0.162.0 full loopback run passed 1,388 cases in 102 groups, with no skips.
+An additional actual CLI delay/no-delay matrix passed twelve cases (1,400 total, 103 groups).
+All 20 OpenCode cases and 144 fresh exact-source observation comparisons passed. Standard
+validation passed 644 Core/eight protocol tests, Go race/vet and clippy. See
+[current results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-10-09).
+The authorized live run passed 56 business cases and, after a focused correction, one negative
+numeric-effort capability case. Ordered checks covered 110 captured Core requests, including
+18 paired native conversation requests. The backend rejects numeric 8192 with `invalid_type`
+on `reasoning.effort` inside HTTP 200 SSE; official native and mediated clients both fail.
+Non-stream JSON returns 502 without a completed response. The first full run's fixed-400
+assumption failed; an authenticated, byte-preserving response observer confirmed the actual
+error and the focused rerun passed. Raw provider prefixes are bounded at 64 KiB in memory;
+only status/known classifications are retained. Original credentials remained unchanged.
+
 The 2026-09-29 0.159.2 validation verified 1,336 native/bare cases across 96 groups,
 combining the full matrix and targeted corrections, plus all 20 actual OpenCode cases.
 The standard suite passed 580 Core and eight protocol tests, Go race/vet and clippy.
 Release-specific captures include six interrupted turns, six Sol61 controls/image/host
 loops and eight built-in/custom metadata cases. Populated Apps metadata is checked
 synthetically; the native opt-in capture uses empty attribution. No live provider was
-contacted. See [current results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-09-29).
+contacted. See [historical results](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-09-29).
 
 Final 0.158.0 validation on 2026-09-28 passed 1,298 native/bare loopback cases in one expanded
 script invocation, 20 actual OpenCode cases and 56 real Subscription business scenarios.
@@ -116,8 +132,9 @@ Exports/live calls need separate opt-in and authorization. General protocol stre
 functions; actual code-mode tests separately execute the native host. Core supplies no JavaScript
 bridge to ordinary clients. No actual OpenCode WS producer, universal retry/retention contract,
 all-model entitlement or exhaustive environment Cartesian coverage is claimed.
-HTTP/1.1/WS shape equality and macOS ClientHello checks do not certify Linux TLS, negotiated HTTP/2
-SETTINGS/HPACK, packet timing or remote classification. Detailed findings are in
+HTTP/1.1/WS shape equality and macOS ClientHello checks do not certify Linux TLS, a complete
+negotiated HTTP/2 connection, packet timing or remote classification. A separate cleartext
+production-builder probe checks SETTINGS order/values and HPACK Authorization. Detailed findings are in
 [Codex compatibility](../../../docs/CODEX_COMPATIBILITY.md#field-order-and-presence).
 
 ## Opt-in live continuation run
@@ -129,7 +146,7 @@ unchanged and never prints payloads or tokens. It does not renew credentials. Na
 use neutral temporary paths; default test launchers remain loopback-only with no provider fallback.
 
 ```bash
-MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.159.2/codex" \
+MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.162.0/codex" \
   bash scripts/test-live-parity.sh --allow-real-subscription
 ```
 

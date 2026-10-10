@@ -91,11 +91,10 @@ pub(crate) async fn prepare_stateful_codex_request(
         if base.upstream_format != upstream_format {
             full_send = true;
         }
-        if target_lite {
-            // A changed ordinary base/tool prefix cannot be installed by pretending it is native Lite.
-            if base.setup_hash != crate::subscription_index::setup_hash(&plan.settings) {
-                full_send = true;
-            }
+        // Base instructions now live in input for both layouts. A changed or omitted current
+        // base needs a full reconstruction; a delta cannot replace an already held prefix.
+        if base.setup_hash != crate::subscription_index::setup_hash(&plan.settings) {
+            full_send = true;
         }
     }
     if explicit_delta && !full_send && prompt_requires_rebuild(&plan) {
@@ -113,10 +112,12 @@ pub(crate) async fn prepare_stateful_codex_request(
     } else {
         object.insert("input".into(), Value::Array(plan.input().to_vec()));
     }
-    if explicit_delta && !full_send && target_lite {
+    if explicit_delta && !full_send {
         // The validated unchanged prefix is already held upstream. Ordinary callers retain their
         // own classification; this only changes the selected WS payload projection.
-        object.remove("tools");
+        if target_lite {
+            object.remove("tools");
+        }
         object.remove("instructions");
     }
     if plan.caller_format == Format::Lite {

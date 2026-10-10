@@ -17,6 +17,8 @@ pub(super) struct DeferredConnectFailure {
     pub(super) error: CoreFailure,
     pub(super) provider_request_id: Option<String>,
     retry_metadata: Option<http::HeaderValue>,
+    retry_after: Option<http::HeaderValue>,
+    status: Option<StatusCode>,
 }
 
 impl DeferredConnectFailure {
@@ -25,6 +27,8 @@ impl DeferredConnectFailure {
             error,
             provider_request_id: None,
             retry_metadata: None,
+            retry_after: None,
+            status: None,
         }
     }
 }
@@ -79,6 +83,8 @@ pub(super) async fn connect(
             error,
             provider_request_id: initial_provider_request_id.clone(),
             retry_metadata: None,
+            retry_after: None,
+            status: None,
         })?;
         drop(guard);
         crate::server::validate_recovery_owner(&context.resolved, &retry)
@@ -95,6 +101,8 @@ pub(super) async fn connect(
             error,
             provider_request_id: initial_provider_request_id,
             retry_metadata: None,
+            retry_after: None,
+            status: None,
         })?;
         context.resolved = retry;
     }
@@ -103,6 +111,8 @@ pub(super) async fn connect(
             error: CoreFailure::UpstreamAuthFailed,
             provider_request_id: provider_request_id(handshake.headers()),
             retry_metadata: None,
+            retry_after: None,
+            status: None,
         });
     }
     if handshake.status() != StatusCode::SWITCHING_PROTOCOLS {
@@ -126,6 +136,11 @@ pub(super) async fn connect(
             error,
             provider_request_id: provider_request_id(handshake.headers()),
             retry_metadata,
+            retry_after: handshake
+                .headers()
+                .get("retry-after")
+                .and_then(crate::response_privacy::retry_after_header),
+            status: Some(handshake.status()),
         });
     }
     let turn_state = handshake.headers().get("x-codex-turn-state").cloned();
@@ -139,6 +154,8 @@ pub(super) async fn connect(
             error: CoreFailure::Internal,
             provider_request_id: provider_request_id(response.headers()),
             retry_metadata: None,
+            retry_after: None,
+            status: None,
         }),
     }
 }
@@ -148,10 +165,11 @@ pub(super) async fn send_protocol_failure(
     failure: &DeferredConnectFailure,
 ) -> bool {
     let error = &failure.error;
-    if !error.is_native_response() {
+    if !error.is_native_response() && failure.status.is_none() {
         return true;
     }
-    let mut event = serde_json::json!({"type":"error","status":error.status().as_u16(),
+    let status = failure.status.unwrap_or_else(|| error.status());
+    let mut event = serde_json::json!({"type":"error","status":status.as_u16(),
         "error":{"code":error.code(),"message":error.public_message()}});
     if let Some(kind) = error.native_error_type() {
         event["error"]["type"] = kind.into();
@@ -163,8 +181,16 @@ pub(super) async fn send_protocol_failure(
         .retry_metadata
         .as_ref()
         .and_then(|value| value.to_str().ok())
+        .filter(|value| value.len() <= crate::subscription_routing::MAX_ROUTING_TOKEN_BYTES)
     {
         event["error"]["headers"] = serde_json::json!({"x-retry-metadata":value});
+    }
+    if let Some(value) = failure
+        .retry_after
+        .as_ref()
+        .and_then(|value| value.to_str().ok())
+    {
+        event["error"]["headers"]["retry-after"] = value.into();
     }
     internal
         .send(Message::Text(event.to_string().into()))

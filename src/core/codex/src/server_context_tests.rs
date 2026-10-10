@@ -113,7 +113,7 @@ async fn http_full_delta_normal_and_lite_reconstruct_exact_parent_and_reconcile_
                         .iter()
                         .filter(|i| i["type"] == "additional_tools")
                         .count(),
-                    1
+                    usize::from(native_lite)
                 );
                 assert_eq!(
                     items
@@ -292,9 +292,9 @@ async fn aggregated_http_retains_item_events_when_terminal_omits_output() {
     .await;
     let captures = captures.lock().await;
     assert_eq!(captures.len(), 2);
-    assert_eq!(captures[1]["input"].as_array().unwrap().len(), 2);
+    assert_eq!(captures[1]["input"].as_array().unwrap().len(), 3);
     assert_eq!(
-        captures[1]["input"][1]["content"][0]["text"],
+        captures[1]["input"][2]["content"][0]["text"],
         "event answer"
     );
     assert!(

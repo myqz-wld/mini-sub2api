@@ -181,6 +181,15 @@ async fn deferred_codex_rejection_sends_private_diagnostic_before_structured_clo
     assert_eq!(control.event_type, PROVIDER_REQUEST_ID_EVENT_TYPE);
     assert_eq!(control.provider_request_id, "provider-rejected-ws");
 
+    let event = socket.next().await.unwrap().unwrap();
+    let DownstreamMessage::Text(event) = event else {
+        panic!("expected sanitized rejection");
+    };
+    let value: serde_json::Value = serde_json::from_str(&event).unwrap();
+    assert_eq!(value["type"], "error");
+    assert_eq!(value["status"], 429);
+    assert!(!event.contains("provider-rejected-ws"));
+
     let close = socket
         .next()
         .await

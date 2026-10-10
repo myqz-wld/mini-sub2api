@@ -67,8 +67,8 @@ func TestNative1580ObservationBudgetAtUpstream(t *testing.T) {
 					t.Fatal("budgeting lost resource evidence or business output")
 				}
 				if kind == "prompt" {
-					if call["tool_result_metadata"].(map[string]any)["large"] != nil || observation["tool_calls_complete"] != true {
-						t.Fatal("prompt budget changed inventory completeness")
+					if call["tool_result_metadata"].(map[string]any)["large"] != result["large"] || observation["tool_calls_complete"] != true {
+						t.Fatal("retired prompt budget shed valid metadata or changed completeness")
 					}
 					return
 				}

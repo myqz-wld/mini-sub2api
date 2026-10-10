@@ -155,7 +155,9 @@ func TestNativeScenarioFailureOrdinaryTerminal(t *testing.T) {
 					if delivery != "json" && kind != "disconnect" && failed.terminal != "response."+kind {
 						t.Fatalf("ordinary terminal changed: got=%s kind=%s", failed.terminal, kind)
 					}
-					if delivery == "ws" && (failed.terminal == "disconnect" || failed.terminal == "error") {
+					if delivery == "ws" {
+						// Failed streams close their socket; caller-owned recovery reconnects.
+						_ = client.ws.CloseNow()
 						client = ordinaryClient(t, gateway, true, true, nil)
 					}
 					recovered := failureOrdinarySend(client, failureRequest(model, "ordinary-failure"))
@@ -198,6 +200,10 @@ func TestNativeScenarioFailureUnsuccessfulToolReference(t *testing.T) {
 				second := failureRequest("gpt-5.4", "failed-tool-session")
 				second["previous_response_id"] = first.created
 				second["input"] = []any{map[string]any{"type": "function_call_output", "call_id": first.call, "output": "synthetic unsuccessful tool output"}}
+				if ws {
+					_ = client.ws.CloseNow()
+					client = ordinaryClient(t, gateway, true, true, nil)
+				}
 				result := failureOrdinarySend(client, second)
 				wantCount := 2
 				if subscription {

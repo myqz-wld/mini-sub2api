@@ -28,7 +28,7 @@ async fn bare_inject_is_byte_exact_but_emulated_inject_is_schema_filtered() {
     assert_eq!(got.text, original);
 
     for (profile, account_namespace) in [(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         Some(ACCOUNT_NAMESPACE),
     )] {
         let state_namespace = account_namespace.expect("stateful profile namespace");

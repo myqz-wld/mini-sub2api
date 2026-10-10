@@ -52,11 +52,14 @@ func (h *Handler) serveWebSocket(
 		writeOpenAIError(writer, http.StatusBadGateway, "adapter_unavailable", "The selected adapter is unavailable.", connectionID)
 		return
 	}
-	if !h.websockets.acquire(route.APIKeyID) {
+	// This untrusted hint only tightens capacity; it grants no classifier or history rights.
+	// Native Guardian prewarming must leave one slot for the sampling connection.
+	guardian := request.Header.Get("X-Openai-Subagent") == "guardian"
+	if !h.websockets.acquireRole(route.APIKeyID, guardian) {
 		writeOpenAIError(writer, http.StatusTooManyRequests, "websocket_connection_limit", "The API key has too many active WebSocket connections.", connectionID)
 		return
 	}
-	defer h.websockets.release(route.APIKeyID)
+	defer h.websockets.releaseRole(route.APIKeyID, guardian)
 
 	coreSocket, coreResponse, err := core.DialWebSocket(
 		request.Context(), route.AccountRef, route.PseudonymScope, connectionID,

@@ -1,4 +1,4 @@
-//! Codex 0.159.2 ModelClient and Guardian policies, separate from public API passthrough.
+//! Codex 0.162.0 ModelClient and Guardian policies, separate from public API passthrough.
 use crate::ignored_fields as log;
 use serde_json::{Map, Value, json};
 
@@ -100,7 +100,15 @@ pub(crate) fn apply_controls(
         log::record("request", "tool_choice", "role_policy");
     }
     object.insert("tool_choice".into(), choice.into());
-    let include = if role == Role::Classifier {
+    let encrypted = object
+        .get("include")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            values
+                .iter()
+                .any(|value| value == "reasoning.encrypted_content")
+        });
+    let include = if role == Role::Classifier && !encrypted {
         json!([])
     } else {
         json!(["reasoning.encrypted_content"])

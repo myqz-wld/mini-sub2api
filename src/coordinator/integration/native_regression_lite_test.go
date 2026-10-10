@@ -120,14 +120,19 @@ func TestNativeOrdinaryLiteToolChanges(t *testing.T) {
 							t.Fatal("new prefix is not on a full current-connection setup")
 						}
 					}
-					assertNativeLiteIDs(t, current)
 					items := current.value["input"].([]any)
-					projected := items[0].(map[string]any)["tools"].([]any)
+					baseIndex := 0
+					projected := []any{}
 					if len(wantNames[step]) > 0 {
+						assertNativeLiteIDs(t, current)
+						baseIndex = 1
+						projected = items[0].(map[string]any)["tools"].([]any)
 						if len(projected) != 1 {
 							t.Fatal("ordinary functions lost namespace grouping")
 						}
 						projected = projected[0].(map[string]any)["tools"].([]any)
+					} else if items[0].(map[string]any)["type"] == "additional_tools" || current.value["tools"] != nil {
+						t.Fatal("empty Lite setup generated a declaration")
 					}
 					if len(projected) != len(wantNames[step]) {
 						t.Fatal("tool occurrence count changed")
@@ -147,7 +152,7 @@ func TestNativeOrdinaryLiteToolChanges(t *testing.T) {
 					if step > 0 && step < 4 && items[0].(map[string]any)["id"] == previous.value["input"].([]any)[0].(map[string]any)["id"] {
 						t.Fatal("changed tools retained content ID")
 					}
-					if items[1].(map[string]any)["id"] != initial.value["input"].([]any)[1].(map[string]any)["id"] {
+					if items[baseIndex].(map[string]any)["id"] != initial.value["input"].([]any)[1].(map[string]any)["id"] {
 						t.Fatal("stable base changed content ID")
 					}
 					if step == 5 && items[0].(map[string]any)["id"] != initial.value["input"].([]any)[0].(map[string]any)["id"] {

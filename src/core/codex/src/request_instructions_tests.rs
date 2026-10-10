@@ -3,8 +3,8 @@ use crate::codex_instructions;
 use pretty_assertions::assert_eq;
 
 const PROFILES: [UpstreamProfile; 2] = [
-    UpstreamProfile::CodexSubscription1592,
-    UpstreamProfile::CodexSubscription1592,
+    UpstreamProfile::CodexSubscription1620,
+    UpstreamProfile::CodexSubscription1620,
 ];
 const TRANSPORTS: [EmulationTransport; 2] =
     [EmulationTransport::Http, EmulationTransport::WebSocket];
@@ -35,12 +35,11 @@ fn normal_and_converted_lite_only_use_caller_base_and_preserve_history() {
                             1
                         }
                     } else {
-                        if let Some(expected) = expected {
-                            assert_eq!(normalized["instructions"], expected);
-                        } else {
-                            assert!(normalized.get("instructions").is_none());
+                        assert!(normalized.get("instructions").is_none());
+                        if let Some(expected) = &expected {
+                            assert_developer_text(&input[0], expected);
                         }
-                        0
+                        usize::from(expected.is_some())
                     };
                     assert_history(&input[offset..], &history, profile);
                 }
@@ -145,10 +144,9 @@ fn lite_base_is_only_inserted_for_explicit_valid_instructions() {
             let normalized = prepare(profile, caller, transport).expect("normalized request");
             assert!(normalized.get("instructions").is_none());
             let input = normalized["input"].as_array().expect("input");
-            assert_eq!(input.len(), 1 + usize::from(expected.is_some()));
-            assert_eq!(input[0]["type"], "additional_tools");
+            assert_eq!(input.len(), usize::from(expected.is_some()));
             if let Some(expected) = expected {
-                assert_developer_text(&input[1], expected);
+                assert_developer_text(&input[0], expected);
             }
         }
     }
@@ -185,15 +183,11 @@ fn base_selection_handles_missing_and_string_input_without_extra_developer_messa
                     }
                     let normalized =
                         prepare(profile, caller, transport).expect("normalized request");
-                    if lite {
-                        let items = normalized["input"].as_array().expect("input");
-                        assert_eq!(items.len(), 2 + usize::from(input.is_some()));
-                        assert_eq!(items[0]["type"], "additional_tools");
-                        assert_developer_text(&items[1], "caller base");
-                    } else {
-                        assert_eq!(normalized["instructions"], "caller base");
-                        assert_eq!(normalized.get("input").is_some(), input.is_some());
-                    }
+                    let _ = lite;
+                    assert!(normalized.get("instructions").is_none());
+                    let items = normalized["input"].as_array().expect("input");
+                    assert_eq!(items.len(), 1 + usize::from(input.is_some()));
+                    assert_developer_text(&items[0], "caller base");
                     if input.is_some() {
                         let items = normalized["input"].as_array().expect("input");
                         let user = items.last().expect("user message");
@@ -211,7 +205,7 @@ fn invalid_input_still_fails_closed_and_caller_base_respects_request_size_limit(
     for model in ["gpt-5.4", "gpt-5.6-sol"] {
         assert!(
             prepare(
-                UpstreamProfile::CodexSubscription1592,
+                UpstreamProfile::CodexSubscription1620,
                 serde_json::json!({
                     "model":model,"instructions":"caller base","input":{"invalid":"shape"}
                 }),
@@ -223,7 +217,7 @@ fn invalid_input_still_fails_closed_and_caller_base_respects_request_size_limit(
             "model":model,"input":[],"instructions":"caller base".repeat(128)
         });
         let result = prepare_codex_overlay_for_test(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             EmulationTransport::Http,
             &HeaderMap::new(),
             Bytes::from(serde_json::to_vec(&caller).expect("caller JSON")),
@@ -310,7 +304,7 @@ fn assert_history(actual: &[Value], expected: &[Value], profile: UpstreamProfile
         for (field, value) in expected.as_object().expect("input item") {
             if field == "role"
                 && value == "system"
-                && profile == UpstreamProfile::CodexSubscription1592
+                && profile == UpstreamProfile::CodexSubscription1620
             {
                 assert_eq!(actual[field], "developer");
             } else {

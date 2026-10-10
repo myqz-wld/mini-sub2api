@@ -34,7 +34,7 @@ async fn restoring_hidden_reasoning_checks_source_thread_even_without_item_turn_
             );
         } else {
             let wire: Value = serde_json::from_slice(&prepared.unwrap().body).unwrap();
-            assert!(wire["input"][1]["encrypted_content"] == "private-child-a");
+            assert!(wire["input"][2]["encrypted_content"] == "private-child-a");
         }
     }
 }
@@ -92,7 +92,7 @@ async fn conflicting_hidden_contexts_reject_and_explicit_session_disambiguates()
     let chosen = prepare(&store, body).await.unwrap();
     let wire: Value = serde_json::from_slice(&chosen.body).unwrap();
     assert!(
-        wire["input"][1]["encrypted_content"] == "cipher-a",
+        wire["input"][2]["encrypted_content"] == "cipher-a",
         "explicit session restored another ciphertext"
     );
 }
@@ -147,9 +147,9 @@ async fn redaction_permission_requires_the_returned_history_and_preserves_suppli
             );
             let wire: Value = serde_json::from_slice(&prepared.body).unwrap();
             if should_restore {
-                assert!(wire["input"][1]["encrypted_content"] == "cipher-original");
+                assert!(wire["input"][2]["encrypted_content"] == "cipher-original");
             } else if change == "cipher" {
-                assert!(wire["input"][1]["encrypted_content"] == "cipher-caller");
+                assert!(wire["input"][2]["encrypted_content"] == "cipher-caller");
             } else if !visible {
                 assert!(
                     !wire["input"]
@@ -184,7 +184,7 @@ async fn hidden_provenance_does_not_survive_history_expiry_or_restore_across_key
     .await;
     body["input"] = json!([input("seed"), response["output"][0], input("next")]);
     let other = prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

@@ -24,7 +24,7 @@ async fn attempt(
     body: Value,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_identity_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -184,9 +184,9 @@ async fn unseen_historical_turn_does_not_acquire_the_fork_threads_ownership() {
     let mut fork = branch_request("fork", "fork", "fork-turn", None, &["unseen-turn"]);
     fork["client_metadata"]["forked_from_thread_id"] = "source".into();
     let prepared = attempt(&store, fork.clone()).await.unwrap();
-    let original_item = value(&prepared)["input"][0].clone();
+    let original_item = value(&prepared)["input"][1].clone();
     let source_turn =
-        value(&prepared)["input"][0]["internal_chat_message_metadata_passthrough"]["turn_id"]
+        value(&prepared)["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"]
             .as_str()
             .unwrap()
             .to_string();
@@ -210,5 +210,5 @@ async fn unseen_historical_turn_does_not_acquire_the_fork_threads_ownership() {
         Some(source_turn.as_str())
     );
     let repeated = attempt(&reopened, fork).await.unwrap();
-    assert_eq!(value(&repeated)["input"][0], original_item);
+    assert_eq!(value(&repeated)["input"][1], original_item);
 }

@@ -69,15 +69,15 @@ async fn full_history_expiry_imports_old_turns_without_reassigning_source_owners
                     let wire: Value = serde_json::from_slice(&replay.body).unwrap();
                     assert!(wire.get("previous_response_id").is_none());
                     assert_eq!(
-                        wire["input"][1]["id"],
+                        wire["input"][2]["id"],
                         if tool { "fc_expiry" } else { "msg_expiry" }
                     );
                     if tool {
-                        assert_eq!(wire["input"][1]["call_id"], "call_expiry");
                         assert_eq!(wire["input"][2]["call_id"], "call_expiry");
+                        assert_eq!(wire["input"][3]["call_id"], "call_expiry");
                     }
                     let replayed_turn =
-                        wire["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"]
+                        wire["input"][2]["internal_chat_message_metadata_passthrough"]["turn_id"]
                             .as_str()
                             .unwrap()
                             .to_string();
@@ -111,7 +111,7 @@ async fn full_history_expiry_imports_old_turns_without_reassigning_source_owners
                     );
                     let next_wire: Value = serde_json::from_slice(&next.body).unwrap();
                     assert_eq!(
-                        next_wire["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"],
+                        next_wire["input"][2]["internal_chat_message_metadata_passthrough"]["turn_id"],
                         replayed_turn
                     );
                     drop(next);

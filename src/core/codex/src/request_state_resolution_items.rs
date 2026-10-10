@@ -68,6 +68,7 @@ pub(super) fn project_items(
             current_turn_raw,
             identity,
             history_import,
+            index.checked_sub(prefix_count),
         )?;
         if evidence.is_classifier() {
             if let Some(metadata) = item
@@ -78,7 +79,9 @@ pub(super) fn project_items(
             {
                 metadata.insert("turn_id".into(), turn.clone().into());
             }
-        } else {
+        } else if item.get("type").and_then(Value::as_str) != Some("additional_tools")
+            || item.contains_key("internal_chat_message_metadata_passthrough")
+        {
             set_item_turn(item, projected_turn.as_deref(), evidence.is_memory());
         }
 
@@ -133,6 +136,7 @@ fn project_item_turn(
     current_raw: Option<&str>,
     identity: &ResolvedRequestIdentity,
     history_import: Option<&crate::subscription_prepare::HistoryImport<'_>>,
+    index: Option<usize>,
 ) -> Result<Option<String>> {
     if identity.request_kind == "memory" {
         return Ok(raw.map(str::to_string));
@@ -143,7 +147,19 @@ fn project_item_turn(
     let raw = raw.expect("checked above");
     let key = turn_key_for_raw(editor, raw)?;
     let projected = if let Some(existing) = editor.existing_turn(&key) {
-        if !editor.history_thread_allowed(&existing.thread_id, identity)
+        let allowed = editor.history_thread_allowed(&existing.thread_id, identity)
+            || history_import
+                .map(|import| {
+                    import.plan.classifier_history_item_allowed(
+                        editor,
+                        &existing.id,
+                        identity,
+                        index,
+                    )
+                })
+                .transpose()?
+                .unwrap_or(false);
+        if !allowed
             && let Some(import) = history_import
             && let Some(imported) = import.resolve_turn(editor, &existing, identity)?
         {
@@ -151,12 +167,13 @@ fn project_item_turn(
             // solely to the target thread and has a separate reversible public identity.
             return Ok(Some(imported));
         }
-        anyhow::ensure!(
-            editor.history_thread_allowed(&existing.thread_id, identity),
-            "historical turn belongs to an unrelated thread"
-        );
+        anyhow::ensure!(allowed, "historical turn belongs to an unrelated thread");
         existing.id
     } else {
+        anyhow::ensure!(
+            identity.request_kind != "guardian_classifier",
+            "classifier historical turn lacks scoped completion evidence"
+        );
         // Supplied history may predate this gateway. Preserve a reversible alias, but do not
         // invent its owning thread or causal parent. A later real turn assignment adopts it.
         editor

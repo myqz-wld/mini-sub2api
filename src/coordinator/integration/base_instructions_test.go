@@ -157,42 +157,25 @@ func assertCallerOnlyBase(t *testing.T, value map[string]any, test baseInstructi
 		t.Fatal("base-policy input was not an array")
 	}
 	toolID := ""
+	if _, present := value["instructions"]; present {
+		t.Fatal("obsolete root instructions retained")
+	}
 	if test.lite {
-		if _, present := value["instructions"]; present {
-			t.Fatal("Lite retained top-level instructions")
-		}
 		if _, present := value["tools"]; present {
-			t.Fatal("Lite retained top-level tools")
+			t.Fatal("Lite root tools retained")
 		}
-		if full {
-			if len(input) < 1 {
-				t.Fatal("Lite tool prefix missing")
-			}
-			tools, _ := input[0].(map[string]any)
-			definitions, ok := tools["tools"].([]any)
-			toolID, _ = tools["id"].(string)
-			if tools["type"] != "additional_tools" || tools["role"] != "developer" || !ok || len(definitions) != 0 || !isUUIDVersion(strings.TrimPrefix(toolID, "at_"), '5') {
-				t.Fatal("empty Lite tools or deterministic ID changed")
-			}
-			input = input[1:]
-			if test.expected != "" {
-				if len(input) == 0 {
-					t.Fatal("explicit Lite base missing")
-				}
-				assertDeveloperMessageText(t, input[0], test.expected)
-				base, _ := input[0].(map[string]any)
-				id, _ := base["id"].(string)
-				if !isUUIDVersion(strings.TrimPrefix(id, "msg_"), '5') {
-					t.Fatal("explicit Lite base ID is not deterministic")
-				}
-				input = input[1:]
-			}
+	}
+	if full && test.expected != "" {
+		if len(input) == 0 {
+			t.Fatal("explicit caller base missing")
 		}
-	} else {
-		base, present := value["instructions"]
-		if (test.expected == "" && present) || (test.expected != "" && base != test.expected) {
-			t.Fatal("ordinary base was invented or caller text changed")
+		assertDeveloperMessageText(t, input[0], test.expected)
+		base, _ := input[0].(map[string]any)
+		toolID, _ = base["id"].(string)
+		if !isUUIDVersion(strings.TrimPrefix(toolID, "msg_"), '5') {
+			t.Fatal("base ID is not content derived")
 		}
+		input = input[1:]
 	}
 	prewarm := value["generate"] == false
 	if prewarm && !test.lite {

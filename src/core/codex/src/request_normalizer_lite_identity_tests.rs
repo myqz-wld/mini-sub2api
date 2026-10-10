@@ -147,3 +147,68 @@ async fn native_lite_prefixes_restore_thread_proof_from_previous_response() {
     assert_ids(&restored);
     assert!(value(&first)["input"][0]["id"] == restored["input"][0]["id"]);
 }
+
+#[tokio::test]
+async fn ordinary_and_tool_free_lite_base_ids_use_exact_native_thread_and_text_proof() {
+    for model in ["gpt-5.5", "gpt-6-astra"] {
+        for native in [false, true] {
+            for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
+                let harness = CodexStateTestHarness::new();
+                let text = "  synthetic {{base}}\n";
+                let ns = Uuid::new_v5(&Uuid::NAMESPACE_OID, b"native-thread");
+                let id = format!("msg_{}", Uuid::new_v5(&ns, text.as_bytes()));
+                let developer = json!({"type":"message","role":"developer",
+                    "content":[{"type":"input_text","text":text}]});
+                let mut body = json!({"model":model,"client_metadata":{
+                    "session_id":"native-thread","thread_id":"native-thread"},
+                    "input":[developer, {"role":"user","content":"synthetic"}]});
+                if native {
+                    let mut base = developer.clone();
+                    base["id"] = id.into();
+                    body["input"].as_array_mut().unwrap().insert(0, base);
+                } else {
+                    body["instructions"] = text.into();
+                }
+                let headers = HeaderMap::new();
+                let prepare = || {
+                    harness.prepare(
+                        UpstreamProfile::CodexSubscription1620,
+                        transport,
+                        &headers,
+                        Bytes::from(serde_json::to_vec(&body).unwrap()),
+                        1024 * 1024,
+                        ACCOUNT_REF,
+                        NAMESPACE,
+                        SCOPE,
+                    )
+                };
+                let first = value(&prepare().await.unwrap());
+                let repeated = value(&prepare().await.unwrap());
+                let projected_thread = first["client_metadata"]["thread_id"].as_str().unwrap();
+                let ns = Uuid::new_v5(&Uuid::NAMESPACE_OID, projected_thread.as_bytes());
+                assert_eq!(
+                    first["input"][0]["id"],
+                    format!("msg_{}", Uuid::new_v5(&ns, text.as_bytes()))
+                );
+                assert_eq!(first["input"][0], repeated["input"][0]);
+                assert!(first.get("instructions").is_none());
+                assert!(
+                    first["input"][0]
+                        .get("internal_chat_message_metadata_passthrough")
+                        .is_none()
+                );
+                assert_eq!(first["input"].as_array().unwrap().len(), 3);
+                // Equal caller developer text is a distinct item, never collapsed into setup.
+                assert_eq!(first["input"][1]["content"], developer["content"]);
+                assert_ne!(first["input"][1]["id"], first["input"][0]["id"]);
+                assert!(
+                    first["input"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|v| v["type"] != "additional_tools")
+                );
+            }
+        }
+    }
+}

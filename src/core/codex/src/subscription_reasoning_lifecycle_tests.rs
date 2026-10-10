@@ -180,7 +180,7 @@ async fn prepare_ws(
     socket: &str,
 ) -> PreparedEmulatedRequest {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::WebSocket,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

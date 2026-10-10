@@ -144,7 +144,7 @@ async fn late_truncated_results_survive_waits_and_control_ws_reuse() {
             let mut history = start_exec(&store, socket_id).await;
             let mut reuse = ResponsesWebSocketState::new(
                 CallerKind::Bare,
-                UpstreamProfile::CodexSubscription1592,
+                UpstreamProfile::CodexSubscription1620,
             );
             for index in 0..waits {
                 let prepared = prepare_full(&store, &history, socket_id).await;

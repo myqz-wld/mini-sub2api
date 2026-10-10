@@ -117,7 +117,7 @@ Caller `x-codex-routing-hint` is preserved for API-key HTTP/WS requests, includi
 value; omission stays omission. Subscription derives its hint from the actual model/service tier.
 
 Subscription replaces `User-Agent`, `originator`, and `version` with the runtime-derived Codex
-v0.159.2 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
+v0.162.0 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
 level-3 zstd. Only API-key upstreams receive `OpenAI-Organization`, `OpenAI-Project` and reviewed
 `X-Stainless-*` headers. Both layers remove caller cookies, proxy authentication, forwarding headers,
 content length, transfer encoding, connection-specific headers, unreviewed internal headers and
@@ -125,7 +125,7 @@ unknown `X-Stainless-*` headers.
 
 ## Subscription request preparation
 
-Subscription follows Codex v0.159.2, commit `ff6aec96948b70d94983af2641a6b67c94faeff5`.
+Subscription follows Codex v0.162.0, commit `c1382380de69521303b416720a52f42d51af6248`.
 Classify original transport, identity/reference evidence and caller format before applying the overlay.
 Caller format, complete context and transmitted format remain distinct. Deterministic repairs require
 equivalent-content proof and revalidation. There is no HTTP/WS conversion.
@@ -147,7 +147,10 @@ every supplied input item to that exact response, including repetitions.
 | Public HTTP output | Retain caller stream preference: translated SSE when true, otherwise the final response object as bounded JSON. API-key traffic stays byte-transparent. |
 
 Ordinary/reviewer requests construct `tool_choice:auto`, encrypted reasoning include, and fixed
-output-schema names; classifiers construct `none`, empty include and no text. Typed tool schemas
+output-schema names; classifiers construct `none`, default empty include (preserving an explicit
+encrypted include) and no text. Ordinary base instructions become developer input; routing fields
+precede input in both transports. ModelClient omits generated empty Lite declarations, while the
+classifier keeps its dedicated empty setup. Caller incremental declarations/notices stay ordered. Typed tool schemas
 retain type-free enums and optional fields; raw import schemas lower schema-position const to enum
 and retain the native subset. Output schemas remain free ordered JSON
 with arbitrary-precision numbers. Fixed feature policy stores configuration_update history but
@@ -211,7 +214,7 @@ caller workspaces remain intact.
 
 Each credential owns HTTP/WS transport contexts. HTTP uses reqwest/native-tls. Provider WS uses
 AWS-LC rustls/native roots, PQ-first groups, HTTP/1 without ALPN, and fresh TLS session state per
-connection. Pinned tungstenite forks and compression match v0.159.2; Go need not parse bodies for identity.
+connection. Pinned tungstenite forks and compression match v0.162.0; Go need not parse bodies for identity.
 
 ## Inference response
 

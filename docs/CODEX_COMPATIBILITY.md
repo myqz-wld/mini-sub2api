@@ -1,10 +1,64 @@
-# Codex 0.159.2 compatibility
+# Codex 0.162.0 compatibility
 
 [Behavior](BEHAVIOR.md) · [Capture suite](../src/coordinator/integration/NATIVE_PARITY.md)
 
-The Subscription emulator targets [Codex 0.159.2](https://github.com/openai/codex/releases/tag/rust-v0.159.2),
-source commit `ff6aec96948b70d94983af2641a6b67c94faeff5`. Exact tagged sources and the official macOS
+The Subscription emulator targets [Codex 0.162.0](https://github.com/openai/codex/releases/tag/rust-v0.162.0),
+source commit `c1382380de69521303b416720a52f42d51af6248`. Exact tagged sources and the official macOS
 arm64 CLI/Code Mode host anchor validation. API-key bodies and valid WebSocket frames remain transparent.
+
+## Changes from 0.159.2
+
+| Native change | Gateway adaptation |
+|---|---|
+| Ordinary base carrier | Move exact caller base text into developer input before business items; preserve omission and whitespace. Generate or re-prove UUIDv5 only for native setup, including ordinary base-only prefixes. |
+| Routing-first wire order | Serialize model, stream, optional service tier and previous response before input; WS type remains first. Keep producer-specific nested/schema order and API-key bytes. |
+| Lite setup and incremental tools | Omit generated empty ModelClient declarations; preserve the classifier's separate empty declaration and IDs. Support caller-enabled ordered additions, changes and opaque removals through history and compaction, including tool-free Lite. |
+| Guardian retained mode | Honor explicit encrypted reasoning include and full merged input. Admit prior transport-lease turns only with completed exact same-Key/account/session/source evidence; reject early scores, failed/incomplete/expired or forged history. Never enable mode, run scoring or create automatic classifier deltas. |
+| Retry advice | Retain safe bounded nested Retry-After and actual deferred WS rejection status, including generic errors. Keep provider text private and the no-replay contract. |
+| Observation limits | Remove only the aggregate 2 MiB observation cap. Keep 8 KiB arguments, 15 MiB final-message shedding, global limits and persistent negative completeness evidence. |
+| Transport dependency | Advance h2 from 0.4.16 to 0.4.19. Eleven catalog defaults, all nine literal prompt bodies, Rust and OpenSSL pins remain unchanged. |
+
+Native Guardian opens eight pooled classifier sockets at startup. The gateway now caps
+Guardian-marked sockets at seven within the existing eight-per-Key ceiling, preserving one
+sampling slot. The marker only tightens capacity; it grants no role or ownership. This resource
+reservation was separately approved after actual native startup exposed the conflict.
+
+## Validation on 2026-10-09
+
+| Check | Result |
+|---|---|
+| Standard project | 644 Core and eight protocol tests; three manual benchmarks ignored. Complete Go race/vet, clippy, formatting and build policy passed. |
+| Official 0.162.0 loopback | 1,388 cases across 102 groups passed in one complete run, with no skips. Twelve additional actual CLI retry-advice cases passed, totaling 1,400 cases across 103 groups. |
+| Optional native modes | The full run includes twelve Guardian snapshot/retained cases and six incremental-tool cases over direct/API-key/Subscription HTTP/WS. Native logical IDs, complete ordered shapes and retained ciphertext were compared. |
+| OpenCode | All 20 actual 1.18.29 cases passed, including ordered wire and restart continuity. |
+| Native observation oracle | 144 comparisons against the freshly extracted exact 0.162.0 algorithm passed. |
+| Fixtures/fingerprint | All eleven defaults plus fallback and nine byte-identical prompts verified. Complete ordered HTTP/WS captures and macOS ClientHello checks passed. A source-backed cleartext HTTP/2 probe checked SETTINGS order/values, connection window and Authorization HPACK. |
+| Release artifact | macOS arm64 build, both installed-metadata checks, exact three-file anonymous archive and personal-path scans passed. Metadata records the detached, dirty local source honestly. |
+
+The authorized live run passed all 56 business cases: bare API, official Codex/Code Mode and
+OpenCode; text/schema/tools, three-turn conversations, five-turn memory, response references,
+HTTP/SSE/WS and reconnects, including Sol/Luna. Ordered application-wire checks covered 110
+captured Core requests, including 18 paired native conversation requests. Source login hashes
+remained unchanged; imports were access-only, with no refresh or retained raw traffic.
+
+The additional `8192` numeric-effort case is a confirmed negative capability result. An
+HTTP application relay observed the official CLI's unchanged JSON number and the provider's
+HTTP 200 streamed error: `code: invalid_type`, `param: reasoning.effort`, rejecting an integer.
+The native CLI exposes only a stream/connection failure for this envelope. The mediated CLI
+fails the same way; a non-stream JSON caller receives 502 because no completed response exists.
+Two captured gateway requests retained numeric 8192 and had no extra inference send.
+
+The first full live run passed 56 business cases and failed this probe's old fixed-HTTP-400
+expectation. After observing the provider before native error parsing, the focused capability
+rerun passed. Combined coverage is 57 verified live cases, including that negative case; this
+is not successful generation at numeric effort 8192. No production parameter coercion or retry
+policy changed. The 2026-09-28 backend rejection remains earlier evidence of the same type limit.
+
+macOS application/transport checks do not certify Linux TLS, every negotiated HTTP/2 behavior or
+remote fingerprint classification. The live relay uses Go TLS/HTTP/1.1 and verifies application
+wire, not native TLS. Real API-key coverage is unavailable. Earlier dated sections retain their
+original version and validation provenance.
+
 
 ## Changes from 0.158.0
 
@@ -122,7 +176,7 @@ gateway decision is a Codex requirement or a separately selected user policy.
 | User-selected isolation | Scoped reversible session/thread/turn/item/response IDs; account-level installation convergence in device mode. | Separates callers and preserves correlation. UUID formats follow native conventions, but the aliasing and convergence policy is gateway-specific. |
 | User-selected continuation | Keep the caller's transport; resolve eligible anonymous histories and referenced continuations; rebuild HTTP full context; expire local history after three business-idle hours. | Supports ordinary clients. These ownership, matching and retention rules extend native client behavior. |
 | User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests, filter public visibility by include; classifier requests keep their native empty include. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
-| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and 0.159.2 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
+| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and the pinned 0.162.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
 | Gateway implementation defaults | Pin a Codex TUI identity using the Core runtime; synthesize missing root-agent/timing/analytics metadata and model catalog flags; choose backend Guardian metadata for bare non-reviewer requests. | Supplies a consistent emulated session. Individual fallback values are not all explicit user choices or evidence of the caller's real execution environment. |
 | Gateway implementation mechanisms | Infer omitted turns; suppress additional gateway prewarm/incrementality for callers with Originator; choose bounded storage, admission, retry and timeout mechanisms. | Prevents duplicated client automation and bounds resource use. Exact budgets/mechanisms are implementation choices, distinct from native wire behavior. |
 
@@ -201,7 +255,7 @@ automatically selects native HTTP fallback. API-key forwarding retains its direc
 
 Subscription omits `x-reasoning-included` from downstream 101. The actual upstream header arrives
 after that response, so it cannot be forwarded truthfully or added retroactively through events.
-Pinned native 0.159.2 freezes header presence at upgrade, including empty or literal `false` values.
+Pinned native 0.162.0 freezes header presence at upgrade, including empty or literal `false` values.
 If the upstream supplies this header, a Subscription client retains absent-header reasoning
 accounting and may compact earlier than a direct client. Actual/replacement reasoning-header
 changes do not reject inference. This limitation avoids per-connection probes and route-dependent
@@ -324,14 +378,14 @@ The same assertion now runs in the native message and transport-lifecycle compar
 
 | Surface | Verified rule / correction |
 |---|---|
-| WS envelope | `stream` follows `store`; it was incorrectly appended after other fields. |
+| Routing envelope | HTTP starts with `model`, `stream`, optional `service_tier` and `previous_response_id`, then `input`; WS adds `type` first. Final late mutations restore this 0.162.0 order. |
 | `client_metadata` | Native uses a randomized Rust `HashMap`; independent CLI processes produce different key orders. Preserve each complete native carrier's incoming order, including the slot replaced by a trusted routing token. Synthesized carriers include learned routing state in randomization, including after hidden WS setup; the token is not always appended last. |
 | HTTP routing token | Learn it from response headers and replay it only as a header. Do not learn it from SSE `response.metadata` or add it to HTTP JSON. |
 | Infrastructure cookies | HTTPS and WSS share the restricted jar, including `__oailb`. Successful and rejected upgrades refresh it; explicit Cookie headers take precedence. Host/path/secure/expiry checks apply, and account/authentication cookies are excluded. |
 | Function/schema serialization | Omit local `function.output_schema`, including namespace children. Place `minItems` after `items` and before composition/object fields, matching native schema serialization and Lite UUIDv5 input bytes. Response text schemas and schema property names remain intact. |
 | Lite setup | Native `additional_tools` has no message metadata; its base message omits empty metadata with classification disabled. Generated setup follows that shape; proven native prefixes retain supplied fields without invented `turn_id`/`create_time`. Business-item metadata remains intact. |
 | No-tool ordinary requests | Emit `tools: []` when the caller omits tools, matching the native non-Lite builder. Lite still omits top-level tools. Explicit caller `null` follows the existing caller-control policy. |
-| Built-in provider | OpenAI adds `Version: 0.158.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
+| Built-in provider | OpenAI adds `Version: 0.162.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
 | HTTP/WS headers | Compare the complete ordered name list and original casing, with no optional-header exclusion in the built-in capture. Check stable values separately from scoped identity/credential/nonce values. |
 
 The dedicated built-in fixture runs the official CLI in `app-server` mode through a loopback backend

@@ -10,7 +10,7 @@ switching, Chat Completions or conversation-management API.
 | Upstream | Every caller |
 |---|---|
 | API key | Bodies/valid WS frames remain byte-transparent; gateway auth, admission, usage and safe headers still apply. Caller `X-Codex-Routing-Hint` survives; omission stays absent. |
-| Subscription | Codex 0.159.2 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
+| Subscription | Codex 0.162.0 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
 
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
@@ -56,6 +56,8 @@ Compare normalized caller input and retained public-ID output before upstream id
   arguments and ciphertext; object-key order is irrelevant.
 - Ignore empty annotations/logprobs on assistant `output_text` and completed status on
   message/direct-tool items. Nonempty decoration remains significant.
+- Reasoning `content` may be absent, null or an empty list after native reserialization;
+  these are equivalent only for history lookup. Nonempty content and ciphertext stay significant.
 - An assistant message's top-level `metadata` may be omitted during lookup. Explicit metadata
   conflicts remain significant; stored histories and provider completion checks remain exact.
   This does not ignore nested business metadata or metadata on user/tool items.
@@ -114,22 +116,25 @@ the completed prewarm; reconnect/full-context and unrelated-thread checks still 
 
 | Caller format | Base and tools |
 |---|---|
-| Ordinary | Keep nonempty top-level instructions verbatim, including whitespace; omit missing/null/empty/nonstring bases. Top-level tools; omitted tools serialize as `[]`. |
-| Ordinary → Lite | `additional_tools`, optional valid caller-base developer message, original input; remove top-level base/tools. |
-| Formed Lite | Preserve input instructions; place an explicit valid top-level base after tools. |
+| Ordinary | Move nonempty top-level instructions verbatim into the first developer input item, including whitespace; omit missing/null/empty/nonstring bases. Top-level tools; omitted tools serialize as `[]`. |
+| Ordinary → Lite | A nonempty tool catalog becomes `additional_tools`, followed by any explicit caller-base developer message and original input. Omit generated empty declarations and top-level base/tools. |
+| Formed Lite | Preserve ordered input instructions/declarations; place an explicit valid top-level base after an existing initial tool declaration, or first when absent. |
 | Inherited Lite increment | Validate referenced caller format/setup; do not repeat the prefix. |
 
 No path inserts model-default bases or renders caller placeholders. Ordinary continuation does not
 restore an omitted base. Preserve developer content/order/duplicates; Subscription maps
-system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.159.2/README.md)
+system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.162.0/README.md)
 are offline test fixtures only. The eleven-model catalog includes `gpt-6.1-sol` with
 Lite layout, low reasoning effort/verbosity, model-required review metadata, priority support
 and `ultra` mapped to its native multi-agent effort `xhigh`. The separate `gpt-6-sol` keeps its medium default.
 
-Lite UUIDv5 uses OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
+Generated ordinary base and Lite setup UUIDv5 use OID + thread UTF-8 as its namespace, then exact serialized tools bytes (`at_`) or
 base text (`msg_`). Regenerate only Core-owned/proven native prefixes; retain durable aliases.
 Generated setup carries no turn/time attribution: the tool prefix omits message metadata and the
 base prefix also omits metadata when classification is disabled. Proven native setup preserves the caller's supplied fields.
+Client-enabled incremental declarations retain additions, modifications and opaque removal notices in
+original order through full requests, deltas and compaction. Core neither enables this mode nor
+parses notice text to infer a catalog. Proven tool-free Lite compaction needs no artificial setup.
 Group loose functions/custom tools and function namespaces in encounter order, preserving duplicates
 and the last nonblank description.
 
@@ -166,7 +171,11 @@ parent linkage, without ModelClient installation/credits/input timing metadata. 
 recovered when Guardian root metadata is absent, without adding an omitted root to the wire.
 Classifier retries retain their logical turn across transport lease threads only with the same
 scoped source, parent and root. The first turn owner and each response's actual thread owner remain
-stable; classifier leases do not acquire ordinary current-turn pointers. Child threads can start
+stable; classifier leases do not acquire ordinary current-turn pointers. Retained classifier history
+can cross leases only after complete, non-conflicting source completion in the same Key/account/
+session/source, with exact saved occurrences and scoped historical turn proof. Missing, early-score,
+failed, incomplete, expired, altered and other-scope histories fail closed. Retained mode always sends
+full merged input; Core never enables it or converts its prefixes to previous-response deltas. Child threads can start
 self-rooted turns, and their descendants resolve those roots on the owning ancestor thread.
 Classifier HTTP is uncompressed with its own header order; WS retains its Lite handshake header. Memory keeps
 flat identity and supplied turn/root fields but omits installation/session/thread/window from
@@ -212,8 +221,8 @@ use existing same-Key aliases; unknown IDs or invalid sources become `source_inv
 serialized carrier is bounded at 16 KiB, including after mapping. The gateway collects no MCP
 provenance and does not synthesize an absent carrier.
 
-Optional executed-tool observations follow the native 8 KiB argument and 2 MiB complete-prompt
-budgets. The argument bound uses actual serialized UTF-8 bytes, including truncation markers.
+Optional executed-tool observations retain the native 8 KiB argument budget. Codex 0.162.0 removes
+the aggregate 2 MiB prompt-observation cap; the final-message and global resource limits still apply. The argument bound uses actual serialized UTF-8 bytes, including truncation markers.
 Sources are string type/id pairs, deduplicated in order, with at most 32 unique pairs and 128 UTF-8
 bytes per field. Overflow omits the entire sources field; malformed shapes become the native
 `parse_failed` source marker. The final HTTP body or selected WS frame gets a 15 MiB soft message limit, shedding
@@ -257,7 +266,9 @@ Ping/Pong remains supported. Public admission still rejects controls when no ope
 
 Ordinary and synchronous reviewer Subscription requests send exactly
 `include:["reasoning.encrypted_content"]` and `tool_choice:"auto"`. Async Guardian classifiers send
-`include:[]`, `tool_choice:"none"`, no text controls and no invented tier. Missing `include` exposes ciphertext by default; explicit lists expose it only when
+`include:[]` by default, preserve explicitly requested `reasoning.encrypted_content`, and send
+`tool_choice:"none"`, no text controls and no invented tier. Their separate producer retains an explicit
+empty `additional_tools` declaration with independently allocated IDs. Missing `include` exposes ciphertext by default; explicit lists expose it only when
 requested; null hides optional ciphertext. Other types/non-string entries fail before inference.
 
 Retain complete output before filtering public JSON/SSE/WS. Hide only reasoning
@@ -300,10 +311,14 @@ The three-hour history TTL is a code constant; `CONVERSATION_IDLE_TTL` is not a 
 | Request / outgoing frame / collected response or frame | 128 MiB each |
 | Context/index/live facts/assembly: Core / Key / session | 2 GiB / 1 GiB / 256 MiB |
 | Records/session; output items/response | 8,192 each |
-| WS/Key; first-frame / idle / write timeout | 8; 30 s / 5 min / 120 s |
+| WS/Key; first-frame / idle / write timeout | 8 total, at most 7 Guardian-marked; 30 s / 5 min / 120 s |
 | HTTP event idle / per-write timeout | 300 s / 120 s |
 | HTTP SSE first output / subsequent output idle | 300 s / 300 s |
 | HTTP terminal tail: Core / coordinator fallback | 1 s / 2 s |
+
+A socket carrying `x-openai-subagent: guardian` consumes both Guardian and total capacity, reserving
+one total slot for sampling. This admission hint grants no classifier role or history permission.
+Failed upgrades and closed sessions release both counters.
 
 These are accounting budgets, not RSS limits. Reserve essential state before inference and measure
 WS deltas at their actual size. Oversized retained output may finish valid delivery without publishing

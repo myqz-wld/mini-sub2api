@@ -38,7 +38,7 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             EmulationTransport::Http,
             &headers,
             Bytes::from(body),
@@ -60,12 +60,12 @@ async fn normalizes_responses_lite_with_codex_namespace_and_identity_shape() {
         ordered_fields,
         [
             "model",
+            "stream",
             "input",
             "tool_choice",
             "parallel_tool_calls",
             "reasoning",
             "store",
-            "stream",
             "include",
             "prompt_cache_key",
             "text",
@@ -196,7 +196,7 @@ fn normalizes_non_lite_with_current_model_defaults() {
         "true".parse().expect("header"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &headers,
         body,
@@ -209,15 +209,16 @@ fn normalizes_non_lite_with_current_model_defaults() {
     assert_eq!(value["tools"][0]["description"], "");
     assert_eq!(value["tools"][0]["strict"], false);
     assert_eq!(value["tools"][0]["parameters"], serde_json::json!({}));
-    assert_eq!(value["instructions"], "Be concise");
-    assert_eq!(value["input"][0]["role"], "developer");
+    assert!(value.get("instructions").is_none());
+    assert_eq!(value["input"][0]["content"][0]["text"], "Be concise");
+    assert_eq!(value["input"][1]["role"], "developer");
     assert_eq!(
-        value["input"][0]["content"][0]["text"],
+        value["input"][1]["content"][0]["text"],
         "Follow system rules"
     );
-    assert_eq!(value["input"][1]["role"], "user");
-    assert_eq!(value["input"][1]["type"], "message");
-    assert_eq!(value["input"].as_array().expect("input").len(), 2);
+    assert_eq!(value["input"][2]["role"], "user");
+    assert_eq!(value["input"][2]["type"], "message");
+    assert_eq!(value["input"].as_array().expect("input").len(), 3);
     assert_eq!(value["parallel_tool_calls"], true);
     assert_eq!(value["reasoning"]["effort"], "medium");
     assert!(value["reasoning"].get("context").is_none());
@@ -271,7 +272,7 @@ fn strips_subscription_incompatible_and_codex_unemitted_fields() {
         .expect("request"),
     );
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         body,
@@ -310,7 +311,7 @@ async fn filters_unsupported_fields_from_already_subscription_shaped_json() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             EmulationTransport::Http,
             &HeaderMap::new(),
             body,
@@ -342,7 +343,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
         br#"{"model":"gpt-5.6-sol","input":[{"type":"additional_tools","role":"developer","tools":[]}],"stream":true}"#,
     );
     let native_prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         native.clone(),
@@ -389,7 +390,7 @@ fn incomplete_native_request_is_enriched_and_encoded_body_fails_closed() {
     );
     let encoded = Bytes::from_static(b"compressed bytes");
     let prepared = prepare_codex_overlay_for_test(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &encoded_headers,
         encoded,
@@ -416,7 +417,7 @@ async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     let harness = CodexStateTestHarness::new();
     let prepared = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             EmulationTransport::Http,
             &headers,
             body.clone(),
@@ -430,7 +431,7 @@ async fn complete_codex_request_pseudonymizes_identity_deterministically() {
     assert_ne!(prepared.body, body);
     let repeated = harness
         .prepare(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             EmulationTransport::Http,
             &headers,
             body,

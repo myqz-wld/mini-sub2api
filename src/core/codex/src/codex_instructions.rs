@@ -13,24 +13,19 @@ pub(crate) fn normalize_base(object: &mut Map<String, Value>) {
     }
 }
 
-/// Keeps caller base text verbatim, placing it after the tool prefix only for Lite.
+/// Keeps caller base text verbatim in input, after an actual Lite tool prefix when present.
 pub(crate) fn apply(object: &mut Map<String, Value>, responses_lite: bool) -> Result<(), ()> {
-    if !responses_lite && object.get("input").is_some_and(|input| !input.is_array()) {
-        return Err(());
-    }
     normalize_base(object);
-    if !responses_lite {
-        return Ok(());
-    }
     let base = object.remove("instructions");
     let input = input_items(object)?;
     if let Some(Value::String(base)) = base {
         let insertion = usize::from(
-            input
-                .first()
-                .and_then(|item| item.get("type"))
-                .and_then(Value::as_str)
-                == Some("additional_tools"),
+            responses_lite
+                && input
+                    .first()
+                    .and_then(|item| item.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("additional_tools"),
         );
         input.insert(insertion, developer_message(base));
     }

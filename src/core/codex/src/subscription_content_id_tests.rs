@@ -25,7 +25,7 @@ async fn project(
     key: &str,
 ) -> PreparedEmulatedRequest {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -52,10 +52,13 @@ fn wire(prepared: &PreparedEmulatedRequest) -> Value {
 }
 
 fn identifiers(value: &Value) -> Vec<Value> {
+    let items = value["input"].as_array().unwrap();
+    let message = items.iter().find(|v| v["role"] == "assistant").unwrap();
+    let call = items.iter().find(|v| v["type"] == "function_call").unwrap();
     vec![
-        value["input"][1]["id"].clone(),
-        value["input"][2]["id"].clone(),
-        value["input"][2]["call_id"].clone(),
+        message["id"].clone(),
+        call["id"].clone(),
+        call["call_id"].clone(),
     ]
 }
 
@@ -79,7 +82,7 @@ async fn local_ids_are_content_session_scoped_native_pseudonyms() {
             let suffix = id.as_str().unwrap().strip_prefix(prefix).unwrap();
             assert_eq!(uuid::Uuid::parse_str(suffix).unwrap().get_version_num(), 7);
         }
-        assert_eq!(first["input"][2]["call_id"], first["input"][3]["call_id"]);
+        assert_eq!(first["input"][3]["call_id"], first["input"][4]["call_id"]);
         let retry = project(&store, original.clone(), transport, NAMESPACE, KEY).await;
         assert_eq!(identifiers(&wire(&retry)), first_ids);
         drop(retry);
@@ -95,7 +98,7 @@ async fn local_ids_are_content_session_scoped_native_pseudonyms() {
                     "content and session must each separate local IDs"
                 );
             }
-            assert_eq!(next["input"][2]["call_id"], next["input"][3]["call_id"]);
+            assert_eq!(next["input"][3]["call_id"], next["input"][4]["call_id"]);
         }
         for (namespace, key) in [(NAMESPACE, "other-key"), ("other-account", KEY)] {
             let next = project(&store, original.clone(), transport, namespace, key).await;
@@ -146,9 +149,9 @@ async fn original_ids_and_semantics_remain_significant_but_object_order_does_not
     for (before, after) in original.iter().zip(identifiers(&next)) {
         assert_ne!(*before, after);
     }
-    assert_eq!(next["input"][2]["call_id"], next["input"][3]["call_id"]);
+    assert_eq!(next["input"][3]["call_id"], next["input"][4]["call_id"]);
     assert_eq!(
-        next["input"][3]["output"],
+        next["input"][4]["output"],
         "opaque payload containing call_pi_1"
     );
 }

@@ -100,9 +100,10 @@ func ordinaryResolvedContext(t *testing.T, wire nativeWire) map[string]any {
 	input := value["input"].([]any)
 	if input[0].(map[string]any)["type"] == "additional_tools" {
 		value["tools"] = input[0].(map[string]any)["tools"]
-		value["instructions"] = capturedBase(t, wire)
-		input = input[2:]
+		input = input[1:]
 	}
+	value["instructions"] = capturedBase(t, wire)
+	input = input[1:]
 	for _, raw := range input {
 		item := raw.(map[string]any)
 		delete(item, "id")
@@ -130,6 +131,8 @@ func assertOrdinaryResolvedContent(t *testing.T, expected map[string]any, wire n
 		input = input[2:]
 	} else if !reflect.DeepEqual(wire.value["tools"], expected["tools"]) {
 		t.Fatal("ordinary resolved-context tools changed")
+	} else {
+		input = input[1:]
 	}
 	if capturedBase(t, wire) != expected["instructions"] {
 		t.Fatal("ordinary resolved-context base changed")

@@ -68,7 +68,7 @@ async fn prepare_for_transport(
     transport: EmulationTransport,
 ) -> PreparedEmulatedRequest {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         transport,
         headers,
         Bytes::from(serde_json::to_vec(&body).unwrap()),

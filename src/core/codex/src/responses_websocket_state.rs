@@ -140,7 +140,9 @@ impl ResponsesWebSocketState {
         let mut frame = request.as_object()?.clone();
         let input = frame.get("input")?.as_array()?;
         let prefix = match mode {
-            PrewarmMode::Ordinary => Vec::new(),
+            PrewarmMode::Ordinary => {
+                crate::responses_websocket_reuse::ordinary_prewarm_prefix(request)
+            }
             PrewarmMode::ResponsesLite => lite_prewarm_prefix(input)?,
         };
         frame.insert("input".to_string(), Value::Array(prefix));

@@ -9,7 +9,7 @@ async fn project(
     let body = json!({"model":"gpt-5.4","input":input,
         "client_metadata":{"session_id":"reasoning-tail-session"}});
     prepare_identity_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),

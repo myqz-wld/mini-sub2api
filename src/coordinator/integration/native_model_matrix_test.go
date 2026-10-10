@@ -121,22 +121,19 @@ func TestNativeSol61ControlsImageAndCodeModeLoop(t *testing.T) {
 
 func capturedBase(t *testing.T, wire nativeWire) string {
 	t.Helper()
-	input, _ := wire.value["input"].([]any)
-	if len(input) > 1 {
-		first, _ := input[0].(map[string]any)
-		if first["type"] == "additional_tools" {
-			base, _ := input[1].(map[string]any)
-			content, _ := base["content"].([]any)
-			if len(content) == 1 {
-				part, _ := content[0].(map[string]any)
-				if text, ok := part["text"].(string); ok {
-					return text
-				}
-			}
-		}
+	if _, present := wire.value["instructions"]; present {
+		t.Fatal("native root instructions are obsolete")
 	}
-	if base, ok := wire.value["instructions"].(string); ok && base != "" {
-		return base
+	input, _ := wire.value["input"].([]any)
+	index := 0
+	if len(input) > 0 && input[0].(map[string]any)["type"] == "additional_tools" {
+		index++
+	}
+	if len(input) > index {
+		base, _ := input[index].(map[string]any)
+		if text, ok := developerMessageText(base); ok && text != "" {
+			return text
+		}
 	}
 	t.Fatal("full captured base instructions missing")
 	return ""
@@ -261,7 +258,7 @@ func TestNativeLitePrefixContentAndThreadDimensions(t *testing.T) {
 					t.Fatal("native thread did not namespace prefix ID")
 				}
 			}
-			// v0.159.2 requires a persisted source rollout for fork/resume. Assert this
+			// v0.162.0 requires a persisted source rollout for fork/resume. Assert this
 			// boundary explicitly; native ephemeral tests never create transcript fixtures.
 			client.callExpect("thread/fork", map[string]any{"threadId": thread, "ephemeral": true}, -32600)
 			options.base = "基础 {{literal}}\n"

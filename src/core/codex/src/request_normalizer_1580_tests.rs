@@ -22,12 +22,7 @@ async fn codex1580_generated_lite_setup_has_no_invented_turn_attribution() {
                 .is_none()
         );
         assert!(
-            body["input"][1]
-                .get("internal_chat_message_metadata_passthrough")
-                .is_none()
-        );
-        assert!(
-            body["input"][2]["internal_chat_message_metadata_passthrough"]["create_time"]
+            body["input"][1]["internal_chat_message_metadata_passthrough"]["create_time"]
                 .is_number()
         );
         assert_eq!(
@@ -46,7 +41,7 @@ async fn prepare(
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     harness
         .prepare(
-            UpstreamProfile::CodexSubscription1592,
+            UpstreamProfile::CodexSubscription1620,
             transport,
             headers,
             Bytes::from(serde_json::to_vec(&body).unwrap()),

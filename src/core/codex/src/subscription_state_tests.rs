@@ -64,6 +64,9 @@ mod observation_tests;
 #[path = "subscription_late_metadata1592_tests.rs"]
 mod late_metadata1592_tests;
 
+#[path = "subscription_classifier_history_tests.rs"]
+mod classifier_history_tests;
+
 const NAMESPACE: &str = "context-admission";
 const OWNER: &str = "acct_context_tests";
 const KEY: &str = "isolated-key";
@@ -114,7 +117,7 @@ async fn prepare(
     body: Value,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         EmulationTransport::Http,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -262,7 +265,7 @@ async fn admission_reclaims_idle_ws_comparison_without_closing_its_socket() {
     let socket = store.contexts.open_socket().unwrap();
     identity.connection_id = Some(socket.id.clone());
     let mut baseline =
-        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1592);
+        ResponsesWebSocketState::new(CallerKind::Bare, UpstreamProfile::CodexSubscription1620);
     baseline.plan_public_create(&json!({"type":"response.create","model":"gpt-5.4",
         "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"x".repeat(40 * 1024)}]}]}));
     assert!(baseline.mark_public_create_attempted());

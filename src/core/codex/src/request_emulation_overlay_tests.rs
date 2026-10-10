@@ -32,7 +32,11 @@ fn official_explicit_fields_round_trip_and_unknown_top_level_fields_are_stripped
     ] {
         assert!(value.get(key).is_none(), "{key}");
     }
-    assert_eq!(value["instructions"], "caller instructions");
+    assert!(value.get("instructions").is_none());
+    assert_eq!(
+        value["input"][0]["content"][0]["text"],
+        "caller instructions"
+    );
     assert_eq!(value["tool_choice"], "auto");
     assert_eq!(
         value["include"],
@@ -298,7 +302,7 @@ fn bare_profile_fails_closed_but_both_codex_overlays_are_available() {
         .is_err()
     );
     {
-        let profile = UpstreamProfile::CodexSubscription1592;
+        let profile = UpstreamProfile::CodexSubscription1620;
         assert!(
             prepare_codex_overlay_for_test(
                 profile,
@@ -375,7 +379,7 @@ fn output_cap_and_sampling_controls_are_filtered_only_for_subscription() {
 }
 
 fn prepare_subscription(caller: Value, transport: EmulationTransport) -> Value {
-    prepare(UpstreamProfile::CodexSubscription1592, caller, transport)
+    prepare(UpstreamProfile::CodexSubscription1620, caller, transport)
 }
 
 fn prepare(profile: UpstreamProfile, caller: Value, transport: EmulationTransport) -> Value {
@@ -403,5 +407,52 @@ fn find_image<'a>(value: &'a Value, image_url: &str) -> Option<&'a serde_json::M
                 .find_map(|value| find_image(value, image_url))
         }
         _ => None,
+    }
+}
+
+#[test]
+fn native_1620_routing_fields_precede_input_in_final_http_and_websocket_bytes() {
+    // Independent declaration order: codex-api/src/common.rs ResponsesApiRequest and
+    // ResponseCreateWsRequest at pinned c1382380de69; never read the local order table.
+    for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
+        for tier in [false, true] {
+            let mut body = serde_json::json!({"type":"response.create","model":"gpt-5.5",
+                "instructions":"synthetic base","input":"synthetic",
+                "previous_response_id":"resp_previous"});
+            if tier {
+                body["service_tier"] = "priority".into();
+            }
+            let value = prepare_subscription(body, transport);
+            let actual: Vec<_> = value
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let mut expected = vec![];
+            if transport == EmulationTransport::WebSocket {
+                expected.push("type");
+            }
+            expected.extend(["model", "stream"]);
+            if tier {
+                expected.push("service_tier");
+            }
+            if transport == EmulationTransport::WebSocket {
+                expected.push("previous_response_id");
+            }
+            expected.extend([
+                "input",
+                "tools",
+                "tool_choice",
+                "parallel_tool_calls",
+                "reasoning",
+                "store",
+                "include",
+                "prompt_cache_key",
+                "text",
+                "client_metadata",
+            ]);
+            assert_eq!(actual, expected);
+        }
     }
 }

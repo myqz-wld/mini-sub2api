@@ -5,8 +5,10 @@ package integration
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -70,5 +72,48 @@ func TestLiveRelayPreservesWireBytes(t *testing.T) {
 	relay.copyFrames(&out, bufio.NewReader(strings.NewReader(frames)))
 	if out.Len() != 0 {
 		t.Fatal("relay forwarded a request beyond its bound")
+	}
+}
+
+func TestLiveRelayObservedResponseKeepsWireAndBoundsPrivatePrefix(t *testing.T) {
+	body := `{"error":{"code":"invalid_type","param":"reasoning.effort","message":"Invalid integer value"}}` + strings.Repeat(" ", 128*1024)
+	raw := fmt.Sprintf("HTTP/1.1 400 Bad Request\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+	remote, peer := net.Pipe()
+	defer peer.Close()
+	_ = peer.SetDeadline(time.Now().Add(3 * time.Second))
+	relay := &liveWireRelay{connections: map[net.Conn]bool{}, dial: func() (net.Conn, error) { return remote, nil }}
+	observations := observeNumericProvider(relay)
+	upstreamDone := make(chan struct{})
+	go func() {
+		defer close(upstreamDone)
+		request, err := http.ReadRequest(bufio.NewReader(peer))
+		if err != nil {
+			return
+		}
+		_ = request.Body.Close()
+		_, _ = io.WriteString(peer, raw)
+	}()
+	server, client := net.Pipe()
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer server.Close()
+		relay.serve(server, liveAccessCredentials{AccessToken: "synthetic-token", AccountID: "synthetic-account"})
+	}()
+	_, err := io.WriteString(client, "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer synthetic-token\r\nChatgpt-Account-Id: synthetic-account\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	if err != nil {
+		t.Fatal("write synthetic observed request")
+	}
+	actual, err := io.ReadAll(client)
+	<-done
+	<-upstreamDone
+	if err != nil || string(actual) != raw {
+		t.Fatal("observed relay changed response bytes")
+	}
+	observation := waitNumericProvider(t, observations)
+	if observation.status != 400 || observation.bytes != 64*1024 || !observation.confirmedEffortRejection() {
+		t.Fatal("numeric response observer exceeded capacity or lost structured proof")
 	}
 }

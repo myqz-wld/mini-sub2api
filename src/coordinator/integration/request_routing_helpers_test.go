@@ -151,7 +151,7 @@ func assertSubscriptionCapture(
 		t.Fatalf("subscription authorization headers = %#v", capture.Headers)
 	}
 	if capture.Headers.Get("Originator") != "codex-tui" ||
-		capture.Headers.Get("Version") != "0.159.2" {
+		capture.Headers.Get("Version") != "0.162.0" {
 		t.Fatalf("subscription identity headers = %#v", capture.Headers)
 	}
 	assertRuntimeCodexUserAgent(t, capture.Headers.Get("User-Agent"))
@@ -175,9 +175,9 @@ func assertSubscriptionCapture(
 
 func assertRuntimeCodexUserAgent(t *testing.T, value string) {
 	t.Helper()
-	if !strings.HasPrefix(value, "codex-tui/0.159.2 (") ||
+	if !strings.HasPrefix(value, "codex-tui/0.162.0 (") ||
 		!strings.Contains(value, "; ") || !strings.Contains(value, ") ") ||
-		!strings.HasSuffix(value, " (codex-tui; 0.159.2)") {
+		!strings.HasSuffix(value, " (codex-tui; 0.162.0)") {
 		t.Fatalf("runtime Codex User-Agent = %q", value)
 	}
 }
@@ -238,14 +238,15 @@ func assertNonLiteSubscriptionBody(t *testing.T, body []byte, messages, tools []
 	if !ok {
 		t.Fatalf("non-lite input = %#v", value["input"])
 	}
-	if len(input) != len(messages) {
+	if len(input) != len(messages)+1 {
 		t.Fatalf("non-lite input count = %d, want %d", len(input), len(messages))
 	}
-	assertNormalizedMessages(t, input, messages)
+	assertNormalizedMessages(t, input[1:], messages)
 	if !jsonEqual(value["tools"], canonicalExpectedTools(tools)) {
 		t.Fatalf("non-lite messages/tools = %#v", value)
 	}
-	if value["instructions"] != "Look up the requested order." {
+	assertDeveloperMessageText(t, input[0], "Look up the requested order.")
+	if _, present := value["instructions"]; present {
 		t.Fatal("non-lite caller base instructions changed")
 	}
 	if value["store"] != false ||
@@ -265,11 +266,12 @@ func assertNativeSubscriptionBody(t *testing.T, body []byte, messages []any) {
 	if !ok {
 		t.Fatalf("native subscription input = %#v", value["input"])
 	}
-	if len(input) != len(messages) {
+	if len(input) != len(messages)+1 {
 		t.Fatalf("native subscription input count = %d, want %d", len(input), len(messages))
 	}
-	assertMessageSemantics(t, input, messages)
-	if value["instructions"] != "Continue the existing turn." {
+	assertMessageSemantics(t, input[1:], messages)
+	assertDeveloperMessageText(t, input[0], "Continue the existing turn.")
+	if _, present := value["instructions"]; present {
 		t.Fatal("native subscription caller base instructions changed")
 	}
 	if value["model"] != "gpt-5.4" ||

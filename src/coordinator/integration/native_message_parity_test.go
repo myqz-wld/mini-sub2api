@@ -136,7 +136,12 @@ func assertNativeMessageParity(t *testing.T, packet nativePacket, wire nativeWir
 	// Identity values are validated by assertNativeWireParity; the input traversal deliberately
 	// does not mask arbitrary IDs embedded in tool definitions, arguments, content or output.
 	metadata, _ := wire.value["client_metadata"].(map[string]any)
-	if key := wire.value["prompt_cache_key"]; key != metadata["session_id"] && key != metadata["thread_id"] {
+	if nativeClassifier(wire.value) {
+		source, _ := afterTurn["guardian_classifier_source_thread_id"].(string)
+		if source == "" || wire.value["prompt_cache_key"] != "guardian-v2:"+source || afterTurn["session_id"] != metadata["session_id"] || afterTurn["thread_id"] != metadata["thread_id"] {
+			t.Fatal("native classifier source/cache relationship")
+		}
+	} else if key := wire.value["prompt_cache_key"]; key != metadata["session_id"] && key != metadata["thread_id"] {
 		t.Fatal("native cache/session relationship")
 	}
 }

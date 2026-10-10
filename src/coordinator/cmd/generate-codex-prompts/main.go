@@ -11,8 +11,8 @@ import (
 	"sort"
 )
 
-const sourceCommit = "ff6aec96948b70d94983af2641a6b67c94faeff5"
-const promptDirectory = "src/core/codex/prompts/codex-0.159.2"
+const sourceCommit = "c1382380de69521303b416720a52f42d51af6248"
+const promptDirectory = "src/core/codex/prompts/codex-0.162.0"
 
 var modelFiles = map[string]string{
 	"gpt-6.1-sol": "gpt-6.1-sol.md",
@@ -34,7 +34,7 @@ type modelMessages struct {
 }
 
 func main() {
-	source := flag.String("codex-source", "", "local Codex Git repository containing the pinned 0.159.2 commit")
+	source := flag.String("codex-source", "", "local Codex Git repository containing the pinned 0.162.0 commit")
 	output := flag.String("output", promptDirectory, "snapshot output directory")
 	check := flag.Bool("check", false, "compare snapshots without writing files")
 	flag.Parse()
@@ -46,7 +46,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("Validated Codex 0.159.2: 11 catalog defaults and 1 fallback in 9 prompt files.")
+	fmt.Println("Validated Codex 0.162.0: 11 catalog defaults and 1 fallback in 9 prompt files.")
 }
 
 func run(source, output string, check bool) error {
@@ -124,7 +124,7 @@ func renderSnapshots(catalog []byte, fallback string) (map[string][]byte, error)
 			return nil, fmt.Errorf("missing instruction template: %s", entry.Slug)
 		}
 		text := *entry.Messages.Template
-		// Codex 0.159.2 consumes the template literally; personalities are already embedded.
+		// Codex 0.162.0 consumes the template literally; personalities are already embedded.
 		if previous, exists := snapshots[name]; exists && string(previous) != text {
 			return nil, fmt.Errorf("shared prompt differs for model: %s", entry.Slug)
 		}

@@ -102,61 +102,57 @@ func scenarioBasePrefixNamespace(t *testing.T, wire nativeWire) []byte {
 
 func assertScenarioBaseValue(t *testing.T, wire nativeWire, lite bool, expected string) {
 	t.Helper()
-	if !lite {
-		actual, present := wire.value["instructions"]
-		if (expected == "" && present) || (expected != "" && actual != expected) {
-			t.Fatal("ordinary native resolved base value or omission differs")
-		}
+	if _, present := wire.value["instructions"]; present {
+		t.Fatal("native root instructions are obsolete")
+	}
+	if _, present := wire.value["tools"]; lite && present {
+		t.Fatal("native Lite serialized root tools")
+	}
+	if wire.value["previous_response_id"] != nil {
 		return
-	}
-	if _, ok := wire.value["instructions"]; ok {
-		t.Fatal("native Lite serialized a top-level instructions carrier")
-	}
-	if _, ok := wire.value["tools"]; ok {
-		t.Fatal("native Lite serialized a top-level tools carrier")
 	}
 	var raw struct{ Input []json.RawMessage }
 	if json.Unmarshal(wire.body, &raw) != nil {
-		t.Fatal("native Lite scenario prefix parse")
-	}
-	if len(raw.Input) == 0 {
-		return // A validated empty WS suffix has no prompt prefix.
-	}
-	var prefix struct {
-		Type, ID, Role string
-		Tools          json.RawMessage
-	}
-	_ = json.Unmarshal(raw.Input[0], &prefix)
-	if prefix.Type != "additional_tools" {
-		return // Native WS reused the preceding full request's prefix.
+		t.Fatal("native setup parse")
 	}
 	namespace := scenarioBasePrefixNamespace(t, wire)
-	if prefix.Role != "developer" || prefix.ID != "at_"+uuidText(uuid5(namespace, prefix.Tools)) {
-		t.Fatal("native Lite tools prefix content-derived identity differs")
+	index := 0
+	if len(raw.Input) > 0 {
+		var prefix struct {
+			Type, ID, Role string
+			Tools          json.RawMessage
+		}
+		_ = json.Unmarshal(raw.Input[0], &prefix)
+		if prefix.Type == "additional_tools" {
+			if !lite || prefix.Role != "developer" || prefix.ID != "at_"+uuidText(uuid5(namespace, prefix.Tools)) {
+				t.Fatal("native tools prefix identity differs")
+			}
+			index++
+		}
 	}
 	if expected == "" {
-		for _, item := range raw.Input[1:] {
+		for _, item := range raw.Input[index:] {
 			var header struct{ ID string }
 			_ = json.Unmarshal(item, &header)
 			if header.ID == "msg_"+uuidText(uuid5(namespace, nil)) {
-				t.Fatal("empty native Lite base emitted an instruction prefix")
+				t.Fatal("empty base emitted a setup item")
 			}
 		}
 		return
 	}
-	if len(raw.Input) < 2 {
-		t.Fatal("native Lite base prefix missing")
+	if len(raw.Input) <= index {
+		t.Fatal("native base prefix missing")
 	}
 	var base struct {
 		Type, ID, Role string
 		Content        []struct{ Type, Text string }
 	}
-	_ = json.Unmarshal(raw.Input[1], &base)
+	_ = json.Unmarshal(raw.Input[index], &base)
 	if base.Type != "message" || base.Role != "developer" || len(base.Content) != 1 || base.Content[0].Type != "input_text" || base.Content[0].Text != expected {
-		t.Fatal("native Lite base text or content boundary differs")
+		t.Fatal("native base text boundary differs")
 	}
 	if base.ID != "msg_"+uuidText(uuid5(namespace, []byte(expected))) {
-		t.Fatal("native Lite base deterministic ID differs")
+		t.Fatal("native base deterministic ID differs")
 	}
 }
 

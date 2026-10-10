@@ -28,21 +28,21 @@ pub(crate) enum CredentialKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum UpstreamProfile {
     ApiKeyPassthrough,
-    CodexSubscription1592,
+    CodexSubscription1620,
 }
 
 impl UpstreamProfile {
     pub(crate) const fn select(_caller: CallerKind, credential: CredentialKind) -> Self {
         match credential {
             CredentialKind::OpenAiApiKey => Self::ApiKeyPassthrough,
-            CredentialKind::CodexSubscription => Self::CodexSubscription1592,
+            CredentialKind::CodexSubscription => Self::CodexSubscription1620,
         }
     }
 
     pub(crate) const fn credential_kind(self) -> CredentialKind {
         match self {
             Self::ApiKeyPassthrough => CredentialKind::OpenAiApiKey,
-            Self::CodexSubscription1592 => CredentialKind::CodexSubscription,
+            Self::CodexSubscription1620 => CredentialKind::CodexSubscription,
         }
     }
 
@@ -55,7 +55,7 @@ impl UpstreamProfile {
     }
 
     pub(crate) const fn uses_subscription_transport(self) -> bool {
-        matches!(self, Self::CodexSubscription1592)
+        matches!(self, Self::CodexSubscription1620)
     }
 
     pub(crate) const fn uses_oauth_refresh(self) -> bool {

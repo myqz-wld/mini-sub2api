@@ -58,7 +58,7 @@ async fn prepare_scope(
     namespace: &str,
 ) -> Result<PreparedEmulatedRequest, StatefulPrepareError> {
     prepare_stateful_codex_request(
-        UpstreamProfile::CodexSubscription1592,
+        UpstreamProfile::CodexSubscription1620,
         transport,
         &HeaderMap::new(),
         Bytes::from(serde_json::to_vec(&body).unwrap()),
@@ -252,7 +252,7 @@ async fn imported_history_follows_target_ancestry_without_authorizing_unrelated_
     let target = imported.resolved_identity.as_ref().unwrap().clone();
     let projected: Value = serde_json::from_slice(&imported.body).unwrap();
     let copy =
-        projected["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"].clone();
+        projected["input"][2]["internal_chat_message_metadata_passthrough"]["turn_id"].clone();
     publish(&store, imported, "resp_target_import", json!([])).await;
     for mode in ["child", "fork", "unrelated"] {
         let mut body = request(history.clone());
@@ -273,7 +273,7 @@ async fn imported_history_follows_target_ancestry_without_authorizing_unrelated_
             let child = result.unwrap();
             let wire: Value = serde_json::from_slice(&child.body).unwrap();
             assert_eq!(
-                wire["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"],
+                wire["input"][2]["internal_chat_message_metadata_passthrough"]["turn_id"],
                 copy
             );
         } else {

@@ -47,10 +47,7 @@ pub(super) fn select(record: &Record, observed: &CompactionOutput, output: &[Val
         };
         retained
     } else if record.caller_format == Format::Lite {
-        let Some(prefix) = retain_lite_setup(&source) else {
-            return Window::Unavailable;
-        };
-        prefix
+        retain_lite_setup(&source)
     } else {
         Vec::new()
     };
@@ -86,29 +83,22 @@ fn kind(item: &Value) -> &str {
     item.get("type").and_then(Value::as_str).unwrap_or("")
 }
 
-fn retain_lite_setup(source: &[&Arc<Item>]) -> Option<Vec<Arc<Item>>> {
-    if source
-        .first()
-        .is_none_or(|item| kind(&item.value) != "additional_tools")
-    {
-        return None;
-    }
-    // Lite configuration lives in input. Preserve the caller's leading tools/developer block;
-    // the first developer item need not be a base instruction, so do not infer a fixed count.
-    Some(
-        source
-            .iter()
-            .take_while(|item| {
-                kind(&item.value) == "additional_tools"
-                    || (kind(&item.value) == "message"
-                        && matches!(
-                            item.value.get("role").and_then(Value::as_str),
-                            Some("developer" | "system")
-                        ))
-            })
-            .map(|item| Arc::clone(item))
-            .collect(),
-    )
+fn retain_lite_setup(source: &[&Arc<Item>]) -> Vec<Arc<Item>> {
+    // Complete, established Lite history can have no setup at all. Retain declarations and
+    // all developer context in encounter order, including opaque removal/description notices.
+    // Replaying this configuration sequence preserves updates without inventing a current catalog.
+    source
+        .iter()
+        .filter(|item| {
+            kind(&item.value) == "additional_tools"
+                || (kind(&item.value) == "message"
+                    && matches!(
+                        item.value.get("role").and_then(Value::as_str),
+                        Some("developer" | "system")
+                    ))
+        })
+        .map(|item| Arc::clone(item))
+        .collect()
 }
 
 fn retain_explicit(source: &[&Arc<Item>], format: Format) -> Option<Vec<Arc<Item>>> {
@@ -119,9 +109,9 @@ fn retain_explicit(source: &[&Arc<Item>], format: Format) -> Option<Vec<Arc<Item
         return None;
     }
     let mut retained = Vec::with_capacity(source.len());
-    for (index, item) in source[..source.len() - 1].iter().enumerate() {
+    for item in &source[..source.len() - 1] {
         match kind(&item.value) {
-            "additional_tools" if index == 0 && format == Format::Lite => {
+            "additional_tools" if format == Format::Lite => {
                 retained.push(Arc::clone(item));
             }
             "message" => match item.value.get("role").and_then(Value::as_str) {

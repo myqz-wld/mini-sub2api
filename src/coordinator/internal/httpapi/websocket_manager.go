@@ -11,6 +11,7 @@ type websocketManager struct {
 	mu        sync.Mutex
 	limit     int
 	perKey    map[string]int
+	guardian  map[string]int
 	sessions  map[*websocketSession]struct{}
 	closing   bool
 	drained   chan struct{}
@@ -19,24 +20,42 @@ type websocketManager struct {
 
 func newWebSocketManager(limit int) *websocketManager {
 	return &websocketManager{
-		limit: limit, perKey: make(map[string]int), sessions: make(map[*websocketSession]struct{}),
+		limit: limit, perKey: make(map[string]int), guardian: make(map[string]int), sessions: make(map[*websocketSession]struct{}),
 		drained: make(chan struct{}),
 	}
 }
 
 func (m *websocketManager) acquire(apiKeyID string) bool {
+	return m.acquireRole(apiKeyID, false)
+}
+
+func (m *websocketManager) acquireRole(apiKeyID string, guardian bool) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.closing || m.perKey[apiKeyID] >= m.limit {
+	if m.closing || m.perKey[apiKeyID] >= m.limit || (guardian && m.guardian[apiKeyID] >= m.limit-1) {
 		return false
 	}
 	m.perKey[apiKeyID]++
+	if guardian {
+		m.guardian[apiKeyID]++
+	}
 	return true
 }
 
 func (m *websocketManager) release(apiKeyID string) {
+	m.releaseRole(apiKeyID, false)
+}
+
+func (m *websocketManager) releaseRole(apiKeyID string, guardian bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if guardian {
+		if m.guardian[apiKeyID] <= 1 {
+			delete(m.guardian, apiKeyID)
+		} else {
+			m.guardian[apiKeyID]--
+		}
+	}
 	remaining := m.perKey[apiKeyID] - 1
 	if remaining <= 0 {
 		delete(m.perKey, apiKeyID)

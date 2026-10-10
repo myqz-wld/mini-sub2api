@@ -37,6 +37,7 @@ type nativeCapture struct {
 	connections        int
 	business           int
 	bytes              int
+	respond            func(map[string]any, string, bool) []map[string]any
 	metadataOnlyFooter bool
 	codeModeLoop       bool
 	httpRoutingToken   bool
@@ -161,6 +162,9 @@ func (c *nativeCapture) capture(r *http.Request, body, encoded []byte, connectio
 	c.requests = append(c.requests, nativeWire{encodedBody: append([]byte(nil), encoded...), method: r.Method, headers: r.Header.Clone(), body: append([]byte(nil), body...), value: value, connection: connection})
 	id := fmt.Sprintf("resp_native_%d", len(c.requests))
 	prewarm := value["generate"] == false
+	if c.respond != nil {
+		return c.respond(value, id, prewarm)
+	}
 	output := []any{}
 	if !prewarm {
 		c.business++
@@ -277,7 +281,7 @@ func TestNativeCodexCaptureHTTPAndWS(t *testing.T) {
 					if wire.value["model"] != model {
 						t.Fatal("native model selection changed")
 					}
-					if !strings.Contains(wire.headers.Get("User-Agent"), "0.159.2") {
+					if !strings.Contains(wire.headers.Get("User-Agent"), "0.162.0") {
 						t.Fatal("native UA version mismatch")
 					}
 				}

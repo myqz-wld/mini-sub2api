@@ -95,7 +95,10 @@ impl ContextPlan {
         let mut lineage = HistoryLineage::default();
         if let Some((source, source_lineage)) = baseline {
             anyhow::ensure!(
-                editor.history_thread_allowed(&source.thread_id, identity),
+                editor.history_thread_allowed(&source.thread_id, identity)
+                    || source.turn_id.as_deref().is_some_and(
+                        |turn| self.classifier_history_source_allowed(editor, turn, identity)
+                    ),
                 "previous response belongs to an unrelated historical thread"
             );
             // Validate all effective history, including a prior response's explicitly copied fork
@@ -103,7 +106,8 @@ impl ContextPlan {
             for turn in source_lineage.turns.iter() {
                 if let Some((_, known)) = editor.turn_by_id(turn) {
                     anyhow::ensure!(
-                        editor.history_thread_allowed(&known.thread_id, identity),
+                        editor.history_thread_allowed(&known.thread_id, identity)
+                            || self.classifier_history_source_allowed(editor, turn, identity),
                         "previous response history belongs to an unrelated thread"
                     );
                 }

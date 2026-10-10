@@ -327,16 +327,11 @@ async fn oauth_handshake_401_refreshes_once_then_normalizes_create_frame() {
     assert_eq!(turn_id, "");
     assert!(turn_metadata.get("root_turn_id").is_none());
     assert!(turn_metadata.get("turn_started_at_unix_ms").is_none());
-    assert_eq!(value["input"][0]["type"], "additional_tools");
-    assert!(
-        value["input"][0]["id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("at_"))
-    );
-    assert_eq!(value["input"].as_array().expect("input").len(), 2);
-    assert!(value["input"][1].get("id").is_none());
+    assert_eq!(value["input"][0]["type"], "message");
+    assert_eq!(value["input"].as_array().expect("input").len(), 1);
+    assert!(value["input"][0].get("id").is_none());
     assert_eq!(
-        value["input"][1]["internal_chat_message_metadata_passthrough"]["turn_id"],
+        value["input"][0]["internal_chat_message_metadata_passthrough"]["turn_id"],
         turn_id
     );
     assert!(value.get("max_output_tokens").is_none());

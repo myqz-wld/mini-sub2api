@@ -20,10 +20,10 @@ async fn provider_aliases_keep_original_upstream_ids_on_history_replay() {
     ]));
     let replay = prepare(&store, body).await.unwrap();
     let value = wire(&replay);
-    assert_eq!(value["input"][1]["id"], "msg_provider_original");
-    assert_eq!(value["input"][2]["id"], "ctc_provider_original");
-    assert_eq!(value["input"][2]["call_id"], "call_provider_original");
+    assert_eq!(value["input"][2]["id"], "msg_provider_original");
+    assert_eq!(value["input"][3]["id"], "ctc_provider_original");
     assert_eq!(value["input"][3]["call_id"], "call_provider_original");
+    assert_eq!(value["input"][4]["call_id"], "call_provider_original");
 }
 
 #[tokio::test]
@@ -67,7 +67,7 @@ async fn websocket_delta_uses_local_call_binding_after_body_expiry() {
         assert_eq!(next_wire["input"].as_array().unwrap().len(), 1);
         assert_eq!(
             next_wire["input"][0]["call_id"],
-            first_wire["input"][2]["call_id"]
+            first_wire["input"][3]["call_id"]
         );
     }
 }
@@ -82,10 +82,10 @@ async fn repeated_local_call_ids_pair_by_occurrence_and_all_aliases_stay_protect
     items.extend([second["input"][2].clone(), second["input"][3].clone()]);
     let first = prepare(&store, body.clone()).await.unwrap();
     let value = wire(&first);
-    assert_ne!(value["input"][2]["call_id"], value["input"][4]["call_id"]);
-    assert_ne!(value["input"][3]["id"], value["input"][5]["id"]);
-    assert_eq!(value["input"][2]["call_id"], value["input"][3]["call_id"]);
-    assert_eq!(value["input"][4]["call_id"], value["input"][5]["call_id"]);
+    assert_ne!(value["input"][3]["call_id"], value["input"][5]["call_id"]);
+    assert_ne!(value["input"][4]["id"], value["input"][6]["id"]);
+    assert_eq!(value["input"][3]["call_id"], value["input"][4]["call_id"]);
+    assert_eq!(value["input"][5]["call_id"], value["input"][6]["call_id"]);
     publish(&store, first, "resp_repeat_occurrences", json!([])).await;
     store
         .edit_at(
@@ -101,7 +101,7 @@ async fn repeated_local_call_ids_pair_by_occurrence_and_all_aliases_stay_protect
         serde_json::from_slice(&std::fs::read(store.state_path_for_test(NAMESPACE)).unwrap())
             .unwrap();
     let scope = ledger.scopes.values().next().unwrap();
-    for index in [2, 4] {
+    for index in [3, 5] {
         let upstream = value["input"][index]["call_id"].as_str().unwrap();
         assert!(
             scope
@@ -118,7 +118,7 @@ async fn repeated_local_call_ids_pair_by_occurrence_and_all_aliases_stay_protect
     }
     let replay = prepare(&store, body).await.unwrap();
     let replay = wire(&replay);
-    for index in [2, 3, 4, 5] {
+    for index in [3, 4, 5, 6] {
         assert_eq!(value["input"][index]["id"], replay["input"][index]["id"]);
         assert_eq!(
             value["input"][index]["call_id"],
