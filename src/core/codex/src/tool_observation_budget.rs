@@ -1,4 +1,4 @@
-//! Codex 0.162.0 observation budgets; model-visible content is never trimmed.
+//! Codex 0.162.1 observation budgets; model-visible content is never trimmed.
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// Compare actual 0.162.0 serialization with both gateway credential paths.
+// Compare actual 0.162.1 serialization with both gateway credential paths.
 // Configuration-update items and turn metadata still use the selected string.
 func TestNative1580NumericReasoningEffort(t *testing.T) {
 	for _, route := range []string{"direct", "api-key", "subscription"} {

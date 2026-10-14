@@ -108,7 +108,7 @@ func TestRetryAfterAcrossSSEJSONAndWebSocketWithoutGatewayReplay(t *testing.T) {
 }
 
 func TestDeferredRetryAfterKeepsActualGenericAndNativeStatus(t *testing.T) {
-	for _, status := range []int{429, 503, 418} {
+	for _, status := range []int{429, 503, 418, 426, 501} {
 		for _, code := range []string{"server_is_overloaded", "flex_unavailable", "insufficient_quota", "private_unknown"} {
 			for _, advice := range []string{"7", "Wed, 21 Oct 2015 07:28:00 GMT", "invalid-private"} {
 				t.Run(fmt.Sprintf("%d/%s/%s", status, code, strings.ReplaceAll(advice, " ", "_")), func(t *testing.T) {

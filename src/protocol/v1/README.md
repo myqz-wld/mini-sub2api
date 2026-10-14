@@ -117,7 +117,7 @@ Caller `x-codex-routing-hint` is preserved for API-key HTTP/WS requests, includi
 value; omission stays omission. Subscription derives its hint from the actual model/service tier.
 
 Subscription replaces `User-Agent`, `originator`, and `version` with the runtime-derived Codex
-v0.162.0 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
+v0.162.1 identity and adds `ChatGPT-Account-ID`. HTTP uses `Accept: text/event-stream`, JSON and
 level-3 zstd. Only API-key upstreams receive `OpenAI-Organization`, `OpenAI-Project` and reviewed
 `X-Stainless-*` headers. Both layers remove caller cookies, proxy authentication, forwarding headers,
 content length, transfer encoding, connection-specific headers, unreviewed internal headers and
@@ -125,7 +125,7 @@ unknown `X-Stainless-*` headers.
 
 ## Subscription request preparation
 
-Subscription follows Codex v0.162.0, commit `c1382380de69521303b416720a52f42d51af6248`.
+Subscription follows Codex v0.162.1, commit `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`.
 Classify original transport, identity/reference evidence and caller format before applying the overlay.
 Caller format, complete context and transmitted format remain distinct. Deterministic repairs require
 equivalent-content proof and revalidation. There is no HTTP/WS conversion.
@@ -214,11 +214,12 @@ caller workspaces remain intact.
 
 Each credential owns HTTP/WS transport contexts. HTTP uses reqwest/native-tls. Provider WS uses
 AWS-LC rustls/native roots, PQ-first groups, HTTP/1 without ALPN, and fresh TLS session state per
-connection. Pinned tungstenite forks and compression match v0.162.0; Go need not parse bodies for identity.
+connection. Pinned tungstenite forks and compression match v0.162.1; Go need not parse bodies for identity.
 
 ## Inference response
 
-- The core preserves the upstream status but default-denies provider response headers. It allows
+- The core preserves the upstream status except for the streaming context-limit conversion below,
+  and default-denies provider response headers. It allows
   only content/cache encoding metadata, retry and rate-limit fields, model/timing fields,
   `x-reasoning-included`, `x-models-etag`, opaque `x-codex-turn-state`,
   `x-codex-safety-buffering-enabled`, and `x-codex-safety-buffering-faster-model`. The two safety
@@ -231,17 +232,24 @@ connection. Pinned tungstenite forks and compression match v0.162.0; Go need not
   `X-Mini-Sub2Api-Provider-Request-Id` header. The coordinator consumes and removes it, stores it in
   nullable request detail, and exposes it only through local `usage history` output.
 - `ApiKeyPassthrough` response bodies remain byte-transparent. Subscription rewrites only
-  enumerated lifecycle IDs on successful JSON/SSE responses. Any stateful Codex non-2xx response
+  enumerated lifecycle IDs on successful JSON/SSE responses. Except for the conversion below,
+  a stateful Codex non-2xx response
   discards the raw provider body and returns a bounded core error with the gateway request ID and
   `never/upstream_response/delivered`; its safe status and allowlisted headers remain.
+- A streaming Subscription request whose bounded upstream HTTP 400 body identifies
+  `context_length_exceeded` instead receives HTTP 200 with a finite SSE `response.failed`.
+  It carries only the safe category, without invented response ID, output, usage or history.
+  JSON callers retain HTTP 400 and the category; API-key status and body remain transparent.
 - The core adds `X-Mini-Sub2Api-Core-TTFB-Ms` after receiving upstream response headers.
-- For an aggregated Codex response, the core adds the optional private
+- For an aggregated Codex response or the finite context-limit SSE conversion, the core adds the optional private
   `X-Mini-Sub2Api-Response-Terminal` header with `completed`, `failed`, or `incomplete`. The
   coordinator consumes it only for local accounting and never forwards it publicly. Streaming
-  terminal types remain in the SSE body and do not use this header.
-- Every streamed response declares the three failure trailers. They remain empty on clean EOF; a
-  provider-body failure emits `X-Mini-Sub2Api-Failure-Phase`,
+  terminal types otherwise remain in the SSE body and do not use this header.
+- Relayed upstream streams declare the three core failure trailers. They remain empty on clean EOF;
+  a body failure without a known native failure terminal emits `X-Mini-Sub2Api-Failure-Phase`,
   `X-Mini-Sub2Api-Delivery-State`, and `X-Mini-Sub2Api-Retry-Advice` as the final trailer block.
+  The finite context-limit conversion has no core failure trailers. The coordinator still declares
+  public failure trailers on forwarded responses and accounts for its failed terminal.
 - The coordinator removes internal headers, adds the public request id, and merges `upstream_ttfb;dur=<milliseconds>` into `Server-Timing`.
 - The coordinator validates and republishes a failure trailer block without inserting bytes into
   the JSON/SSE body.
@@ -353,6 +361,7 @@ Before any upstream response bytes are sent, core errors use the JSON shape in `
 - `upstream_connect_failed`
 - `upstream_delivery_unknown`
 - `upstream_response_failed`
+- `context_length_exceeded`
 - `invalid_prompt`
 - `flex_unavailable`
 - `server_is_overloaded`

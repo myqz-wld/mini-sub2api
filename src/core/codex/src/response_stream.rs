@@ -48,9 +48,47 @@ pub(crate) async fn build_http_response(
         let status = upstream.status();
         let (failure, retry_metadata) = crate::response_failure::classify_http(upstream).await;
         if let Some(value) = retry_metadata {
-            // The coordinator restores the nested public error header from this
-            // allowlisted control without forwarding the provider error body.
+            // Retain the bounded control for both JSON errors and synthesized SSE terminals.
             filtered_headers.insert("x-retry-metadata", value);
+        }
+        if downstream_expects_sse
+            && matches!(
+                &failure,
+                CoreFailure::NativeResponse(
+                    crate::error::NativeErrorCategory::ContextWindowExceeded,
+                    _
+                )
+            )
+        {
+            // Native Codex recognizes context exhaustion only inside response.failed.
+            // No upstream response exists, so do not fabricate an ID, output or usage.
+            filtered_headers.remove(http::header::CONTENT_TYPE);
+            filtered_headers.remove(http::header::CONTENT_ENCODING);
+            let event = crate::response_privacy::failed_terminal(
+                &serde_json::json!({"code":failure.code()}),
+                None,
+            );
+            let mut response = Response::builder()
+                .status(http::StatusCode::OK)
+                .body(Body::from(format!("data: {event}\n\n")))
+                .map_err(|_| CoreFailure::Internal)?;
+            *response.headers_mut() = filtered_headers;
+            response.headers_mut().insert(
+                http::header::CONTENT_TYPE,
+                HeaderValue::from_static("text/event-stream"),
+            );
+            response.headers_mut().insert(
+                CORE_TTFB_HEADER,
+                ttfb_ms
+                    .to_string()
+                    .parse()
+                    .map_err(|_| CoreFailure::Internal)?,
+            );
+            response.headers_mut().insert(
+                RESPONSE_TERMINAL_HEADER,
+                HeaderValue::from_static(RESPONSE_TERMINAL_FAILED),
+            );
+            return Ok(response);
         }
         return normalized_upstream_failure(
             status,

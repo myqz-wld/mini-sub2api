@@ -1,6 +1,6 @@
 use super::*;
 
-// Codex 0.162.0 compact.rs rebuilds media/truncated user messages while retaining
+// Codex 0.162.1 compact.rs rebuilds media/truncated user messages while retaining
 // their IDs. A complete client replacement must supersede the cached old body.
 #[tokio::test]
 async fn compacted_same_id_messages_replace_content_and_survive_continuation() {

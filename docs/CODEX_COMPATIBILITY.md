@@ -1,10 +1,61 @@
-# Codex 0.162.0 compatibility
+# Codex 0.162.1 compatibility
 
-[Behavior](BEHAVIOR.md) · [Capture suite](../src/coordinator/integration/NATIVE_PARITY.md)
+[Behavior](BEHAVIOR.md) · [Capture suite](../src/coordinator/integration/NATIVE_PARITY.md) ·
+[Re-anchoring checklist](CODEX_REANCHORING.md)
 
-The Subscription emulator targets [Codex 0.162.0](https://github.com/openai/codex/releases/tag/rust-v0.162.0),
-source commit `c1382380de69521303b416720a52f42d51af6248`. Exact tagged sources and the official macOS
+The Subscription emulator targets [Codex 0.162.1](https://github.com/openai/codex/releases/tag/rust-v0.162.1),
+source commit `092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`. Exact tagged sources and the official macOS
 arm64 CLI/Code Mode host anchor validation. API-key bodies and valid WebSocket frames remain transparent.
+
+## Changes from 0.162.0
+
+The 0.162.1 stable release changes ten files: the version and TUI questions/background-server
+startup. Exact tagged tree comparison found no changes to protocol/error parsing, field order,
+model catalog/default instructions, dependencies or release TLS construction. Runtime Version/UA,
+source checks, native test clients and byte-exact fixture provenance now use 0.162.1. The internal
+`CodexSubscription1620` name continues to identify the unchanged protocol family.
+
+This alignment also repairs three gateway error paths:
+
+- Subscription SSE with an ordinary standalone `error` now appends a sanitized `response.failed`
+  at EOF or the existing upstream read failure/deadline if no real failed footer arrives.
+  A supplied failed footer retains its identity, output and usage unchanged by this fallback.
+  No output/usage/history is invented; `flex_unavailable` keeps its native immediate handling.
+  Synthesized failures retain valid nested retry advice first, falling back to valid top-level
+  advice inside `response.error.headers` so native overload recovery sees the requested delay.
+- A bounded, recognized HTTP 400 `context_length_exceeded` becomes HTTP 200 SSE `response.failed`
+  for streaming Subscription callers. JSON callers retain HTTP 400 with the safe category;
+  API-key responses remain byte-transparent. Codex marks the context full and can compact on
+  the next turn; the gateway performs no automatic compaction or inference replay.
+- Local WS connection-capacity HTTP 429 now includes `Retry-After: 1`. Upstream delays are
+  preserved, while quota/flex and overload behavior remain native-controlled.
+
+Subscription still accepts the downstream upgrade before connecting upstream. An upstream 426
+therefore remains an established-WS error, as required by the existing transport/admission
+design. API-key handshake rejections retain their HTTP status. This patch does not add a hidden
+HTTP fallback or change the no-replay policy.
+
+## Validation on 2026-10-14
+
+| Check | Result |
+|---|---|
+| Standard checks | 651 Core and eight protocol tests passed; three existing manual benchmarks ignored. Formatting, clippy, build policy, isolated OAuth proxy check, Go vet and a fresh complete Go race run passed. |
+| Official 0.162.1 loopback | 1,402 cases across 104 groups passed in one complete run, with no skips. This includes the twelve retry-advice controls and two new actual CLI context-recovery cases. |
+| Error recovery | HTTP 400 and standalone SSE context errors reach native contextWindowExceeded, followed by exactly one automatic compaction and resumed sampling on the next turn. Late real failed footers retain usage; bounded/malformed negatives and API-key byte preservation pass. |
+| Source and fixtures | Exact tagged-tree comparison found only ten version/TUI/startup changes. All nine literal prompt bodies, LICENSE and NOTICE remain byte-identical; exact 0.162.1 regeneration passes. Official CLI/host archive digests and executable hashes match. |
+| Native algorithm oracle | The retained extraction matches the unchanged 0.162.1 source hash; all 144 comparisons against the current production reducers passed. |
+| OpenCode | All 20 actual 1.18.29 cases passed in five groups, with no skips. |
+| Concurrent follow-up | Three independent sessions checked errors, transport and anchor/evidence. Fixed top-level Retry-After loss in synthesized failures and corrected the internal protocol reference. After repair: 24 SSE and eight privacy tests, three Go integration race groups, 17 actual CLI cases across three groups, formatting, clippy and native-tag Go vet passed. |
+| Release artifacts | macOS arm64 build, exact anonymous three-file archive, private-path scans and both extracted version/installed checks passed. Metadata identifies the current base commit and dirty worktree; this is not a deployed release. |
+
+These checks used isolated loopback fixtures. No live provider or Linux runtime validation was
+performed for this patch. Historical live results below retain their original date and version.
+The first standard runs exposed stale error-terminal expectations; those were updated and the
+complete Rust and Go race checks were rerun. The new tests also preserve the historical rule
+that an ordinary error may have a real failed footer delayed beyond one second.
+The complete-suite counts above describe the pre-follow-up snapshot. The subsequent checks
+target the localized retry-advice repair: three new CLI cases plus fourteen existing controls;
+the full native matrix was not rerun. Current artifact evidence was rebuilt after that repair.
 
 ## Changes from 0.159.2
 
@@ -176,7 +227,7 @@ gateway decision is a Codex requirement or a separately selected user policy.
 | User-selected isolation | Scoped reversible session/thread/turn/item/response IDs; account-level installation convergence in device mode. | Separates callers and preserves correlation. UUID formats follow native conventions, but the aliasing and convergence policy is gateway-specific. |
 | User-selected continuation | Keep the caller's transport; resolve eligible anonymous histories and referenced continuations; rebuild HTTP full context; expire local history after three business-idle hours. | Supports ordinary clients. These ownership, matching and retention rules extend native client behavior. |
 | User-selected output/parameter policy | Retain upstream reasoning ciphertext for ordinary/reviewer requests and filter public visibility by include. Classifiers default to empty include and preserve explicitly requested encrypted reasoning. | Maintains usable continuation state and the existing backend compatibility contract. It is not a universal Responses API promise. |
-| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and the pinned 0.162.0 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
+| Native protocol/model behavior | Ordinary/Lite layouts, model defaults, field omission/order, zstd/WS framing, UUIDv5 setup IDs, routing-token lifecycle, reuse comparisons and the pinned 0.162.1 control/metadata fields. | Follow exact pinned source and actual CLI captures. Native random key ordering is preserved rather than sorted. |
 | Gateway implementation defaults | Pin a Codex TUI identity using the Core runtime; synthesize missing root-agent/timing/analytics metadata and model catalog flags; choose backend Guardian metadata for bare non-reviewer requests. | Supplies a consistent emulated session. Individual fallback values are not all explicit user choices or evidence of the caller's real execution environment. |
 | Gateway implementation mechanisms | Infer omitted turns; suppress additional gateway prewarm/incrementality for callers with Originator; choose bounded storage, admission, retry and timeout mechanisms. | Prevents duplicated client automation and bounds resource use. Exact budgets/mechanisms are implementation choices, distinct from native wire behavior. |
 
@@ -257,7 +308,7 @@ automatically selects native HTTP fallback. API-key forwarding retains its direc
 
 Subscription omits `x-reasoning-included` from downstream 101. The actual upstream header arrives
 after that response, so it cannot be forwarded truthfully or added retroactively through events.
-Pinned native 0.162.0 freezes header presence at upgrade, including empty or literal `false` values.
+Pinned native 0.162.1 freezes header presence at upgrade, including empty or literal `false` values.
 If the upstream supplies this header, a Subscription client retains absent-header reasoning
 accounting and may compact earlier than a direct client. Actual/replacement reasoning-header
 changes do not reject inference. This limitation avoids per-connection probes and route-dependent
@@ -380,14 +431,14 @@ The same assertion now runs in the native message and transport-lifecycle compar
 
 | Surface | Verified rule / correction |
 |---|---|
-| Routing envelope | HTTP starts with `model`, `stream`, optional `service_tier` and `previous_response_id`, then `input`; WS adds `type` first. Final late mutations restore this 0.162.0 order. |
+| Routing envelope | HTTP starts with `model`, `stream`, optional `service_tier` and `previous_response_id`, then `input`; WS adds `type` first. Final late mutations restore this 0.162.1 order. |
 | `client_metadata` | Native uses a randomized Rust `HashMap`; independent CLI processes produce different key orders. Preserve each complete native carrier's incoming order, including the slot replaced by a trusted routing token. Synthesized carriers include learned routing state in randomization, including after hidden WS setup; the token is not always appended last. |
 | HTTP routing token | Learn it from response headers and replay it only as a header. Do not learn it from SSE `response.metadata` or add it to HTTP JSON. |
 | Infrastructure cookies | HTTPS and WSS share the restricted jar, including `__oailb`. Successful and rejected upgrades refresh it; explicit Cookie headers take precedence. Host/path/secure/expiry checks apply, and account/authentication cookies are excluded. |
 | Function/schema serialization | Omit local `function.output_schema`, including namespace children. Place `minItems` after `items` and before composition/object fields, matching native schema serialization and Lite UUIDv5 input bytes. Response text schemas and schema property names remain intact. |
-| Base and Lite setup | Native `additional_tools` has no message metadata; generated base messages retain `content_item_kinds:["model.base_instructions"]`, matching the enabled 0.162.0 classification default. Generated/proven native prefixes add no `turn_id`/`create_time`; supplied classification presence is preserved. Business-item metadata remains intact. |
+| Base and Lite setup | Native `additional_tools` has no message metadata; generated base messages retain `content_item_kinds:["model.base_instructions"]`, matching the enabled 0.162.1 classification default. Generated/proven native prefixes add no `turn_id`/`create_time`; supplied classification presence is preserved. Business-item metadata remains intact. |
 | No-tool ordinary requests | Emit `tools: []` when the caller omits tools, matching the native non-Lite builder. Lite still omits top-level tools. Explicit caller `null` follows the existing caller-control policy. |
-| Built-in provider | OpenAI adds `Version: 0.162.0` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
+| Built-in provider | OpenAI adds `Version: 0.162.1` and backend-gated `guardian_credits_requested`. A custom `/v1` provider is insufficient as the baseline for these fields. Preserve native optional metadata; synthesize the Guardian credit flag for bare non-reviewer Subscription callers. |
 | HTTP/WS headers | Compare the complete ordered name list and original casing, with no optional-header exclusion in the built-in capture. Check stable values separately from scoped identity/credential/nonce values. |
 
 The dedicated built-in fixture runs the official CLI in `app-server` mode through a loopback backend

@@ -35,7 +35,7 @@ func TestSubscriptionWebSocketUpgradeMetadata(t *testing.T) {
 						}
 						return true
 					})
-				headers := codexScenarioHeaders("synthetic-metadata-session", "codex-loopback/0.162.0")
+				headers := codexScenarioHeaders("synthetic-metadata-session", "codex-loopback/0.162.1")
 				connection, response := dialResponsesProfileWebSocketWithResponse(t, fixture.public, fixture.subscriptionKey, headers)
 				defer connection.CloseNow()
 				for _, name := range []string{"X-Reasoning-Included", "OpenAI-Model"} {
@@ -289,7 +289,7 @@ func TestSubscriptionWebSocketModelNoticeWaitsForActualError(t *testing.T) {
 			_ = connection.Write(context.Background(), websocket.MessageText,
 				[]byte(`{"type":"error","status":429,"error":{"code":"flex_unavailable"}}`))
 		})
-	headers := codexScenarioHeaders("synthetic-error-session", "codex-loopback/0.162.0")
+	headers := codexScenarioHeaders("synthetic-error-session", "codex-loopback/0.162.1")
 	connection := dialResponsesProfileWebSocket(t, fixture.public, fixture.subscriptionKey, headers)
 	defer connection.CloseNow()
 	writeE2EWebSocketText(t, connection, `{"type":"response.create","model":"gpt-5.5","input":[]}`)

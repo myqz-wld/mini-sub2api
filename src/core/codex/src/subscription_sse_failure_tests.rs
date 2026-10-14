@@ -276,6 +276,12 @@ async fn sse_error_only_releases_validation_budget_on_eof_or_cancellation() {
             assert_eq!(inner.reservations.len(), 1);
         }
         if eof {
+            let failed = data_event(stream.next().await.unwrap().unwrap());
+            assert_eq!(failed["type"], "response.failed");
+            assert_eq!(
+                failed["response"]["error"]["code"],
+                "upstream_response_failed"
+            );
             assert!(stream.next().await.is_none());
         }
         drop(stream);

@@ -16,7 +16,7 @@ use crate::error::failure;
 use crate::response_translation::{ResponseStateContext, SseFailureTail};
 
 pub(crate) use crate::response_sse_reader::UpstreamByteStream;
-use crate::response_sse_reader::{SseReader, data_payload};
+use crate::response_sse_reader::{SseReadError, SseReader, data_payload};
 
 struct TranslationState {
     reader: SseReader,
@@ -24,6 +24,8 @@ struct TranslationState {
     finished: bool,
     terminal_seen: bool,
     failed_footer_pending: bool,
+    pending_failure: Option<serde_json::Value>,
+    public_response_id: Option<String>,
     failure_tail: Option<SseFailureTail>,
     maximum: usize,
     output_lifecycle: crate::response_output::OutputLifecycle,
@@ -60,6 +62,8 @@ pub(crate) fn translate_reader(
             finished: false,
             terminal_seen: false,
             failed_footer_pending: false,
+            pending_failure: None,
+            public_response_id: None,
             failure_tail: None,
             maximum,
             output_lifecycle: Default::default(),
@@ -70,11 +74,18 @@ pub(crate) fn translate_reader(
             }
             match state.reader.next_event().await {
                 Ok(Some(event)) => Some(finish_event(state, event).await),
+                Ok(None) if state.pending_failure.is_some() => Some(finish_failure(state)),
                 Ok(None) if state.terminal_seen => None,
                 Ok(None) => {
                     state.reader.processing("missing_terminal");
                     Some(fail(state))
                 }
+                Err(
+                    SseReadError::Upstream
+                    | SseReadError::IdleTimeout
+                    | SseReadError::FirstOutputTimeout
+                    | SseReadError::OutputIdleTimeout,
+                ) if state.pending_failure.is_some() => Some(finish_failure(state)),
                 Err(_) => Some(fail(state)),
             }
         },
@@ -89,6 +100,27 @@ async fn finish_event(
         Ok(bytes) => (Ok(Frame::data(bytes)), state),
         Err(()) => fail(state),
     }
+}
+
+fn finish_failure(
+    mut state: TranslationState,
+) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
+    let event = state
+        .pending_failure
+        .take()
+        .expect("pending failure terminal");
+    let bytes = format!("data: {event}\n\n");
+    if bytes.len() > state.maximum {
+        return fail(state);
+    }
+    state.reader.terminal(&event);
+    state.reader.close();
+    state.finished = true;
+    state.failure_tail = None;
+    if let Some(context) = state.context.take() {
+        let _ = context.update_operation(None);
+    }
+    (Ok(Frame::data(Bytes::from(bytes))), state)
 }
 
 fn fail(mut state: TranslationState) -> (Result<Frame<Bytes>, Infallible>, TranslationState) {
@@ -147,6 +179,10 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     }
     if data.trim() == "[DONE]" {
         state.reader.processing("none");
+        // Keep clients reading until the real failed footer or our bounded EOF terminal.
+        if state.pending_failure.is_some() {
+            return Ok(Bytes::from_static(b":\n\n"));
+        }
         return Ok(Bytes::from_static(b"data: [DONE]\n\n"));
     }
     state.reader.processing("sse_json");
@@ -211,8 +247,26 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
         return Err(());
     }
     state.terminal_seen |= terminal;
+    if let Some(id) = translated
+        .pointer("/response/id")
+        .and_then(serde_json::Value::as_str)
+    {
+        state.public_response_id = Some(id.to_owned());
+    }
+    if event_type == Some("error")
+        && state.failed_footer_pending
+        && !flex_terminal
+        && state.pending_failure.is_none()
+    {
+        let id = state.public_response_id.as_deref().or_else(|| {
+            translated
+                .get("response_id")
+                .and_then(serde_json::Value::as_str)
+        });
+        state.pending_failure = Some(crate::response_privacy::failed_terminal(&translated, id));
+    }
     if flex_terminal {
-        // Native 0.162.0 ends this category immediately, even without a failed footer.
+        // Native 0.162.1 ends this category immediately, even without a failed footer.
         state.reader.close();
         state.finished = true;
         state.failed_footer_pending = false;
@@ -220,6 +274,7 @@ async fn translate_event(state: &mut TranslationState, event: Vec<u8>) -> Result
     }
     if failed_footer {
         state.failed_footer_pending = false;
+        state.pending_failure = None;
         state.failure_tail = None;
     }
     state.reader.processing("none");
@@ -282,3 +337,7 @@ fn find_event_end(bytes: &[u8]) -> Option<usize> {
 #[cfg(test)]
 #[path = "response_sse_translation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "response_sse_missing_failure_tests.rs"]
+mod missing_failure_tests;

@@ -281,7 +281,7 @@ func TestNativeCodexCaptureHTTPAndWS(t *testing.T) {
 					if wire.value["model"] != model {
 						t.Fatal("native model selection changed")
 					}
-					if !strings.Contains(wire.headers.Get("User-Agent"), "0.162.0") {
+					if !strings.Contains(wire.headers.Get("User-Agent"), "0.162.1") {
 						t.Fatal("native UA version mismatch")
 					}
 				}

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Native 0.162.0 makes overload retryable only when a usable delay is attached.
+// Native 0.162.1 makes overload retryable only when a usable delay is attached.
 // The actual CLI is the retry oracle; the gateway must not create extra sends.
 func TestNative1620NestedRetryAdvice(t *testing.T) {
 	for _, ws := range []bool{false, true} {

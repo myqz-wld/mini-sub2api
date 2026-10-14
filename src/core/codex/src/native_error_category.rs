@@ -1,6 +1,7 @@
 //! Fixed native categories with bounded usage-window metadata; no provider text.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum NativeErrorCategory {
+    ContextWindowExceeded,
     ServerOverloaded,
     SlowDown,
     MisalignmentPolicy,
@@ -14,6 +15,7 @@ pub(crate) enum NativeErrorCategory {
 impl NativeErrorCategory {
     pub(crate) fn code(self) -> &'static str {
         match self {
+            Self::ContextWindowExceeded => "context_length_exceeded",
             Self::ServerOverloaded => "server_is_overloaded",
             Self::SlowDown => "slow_down",
             Self::MisalignmentPolicy => "misalignment_policy_violation",
@@ -43,6 +45,7 @@ impl NativeErrorCategory {
 
     pub(crate) fn public_message(self) -> &'static str {
         match self {
+            Self::ContextWindowExceeded => "The input exceeds the model context window.",
             Self::ServerOverloaded => "The upstream service is overloaded.",
             Self::SlowDown => "The upstream service requested a slower request rate.",
             Self::MisalignmentPolicy | Self::CyberPolicy | Self::BioPolicy => {

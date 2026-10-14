@@ -1,4 +1,4 @@
-//! Codex 0.162.0 ModelClient and Guardian policies, separate from public API passthrough.
+//! Codex 0.162.1 ModelClient and Guardian policies, separate from public API passthrough.
 use crate::ignored_fields as log;
 use serde_json::{Map, Value, json};
 

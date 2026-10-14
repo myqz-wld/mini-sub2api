@@ -56,6 +56,8 @@ func (h *Handler) serveWebSocket(
 	// Native Guardian prewarming must leave one slot for the sampling connection.
 	guardian := request.Header.Get("X-Openai-Subagent") == "guardian"
 	if !h.websockets.acquireRole(route.APIKeyID, guardian) {
+		// Capacity can return when a socket closes; native clients need explicit retry advice.
+		writer.Header().Set("Retry-After", "1")
 		writeOpenAIError(writer, http.StatusTooManyRequests, "websocket_connection_limit", "The API key has too many active WebSocket connections.", connectionID)
 		return
 	}

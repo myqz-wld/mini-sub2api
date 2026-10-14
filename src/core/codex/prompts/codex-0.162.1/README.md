@@ -1,7 +1,7 @@
-# Codex 0.162.0 instruction fixtures
+# Codex 0.162.1 instruction fixtures
 
-These are byte-exact offline comparison/test fixtures from OpenAI Codex `rust-v0.162.0`, commit
-`c1382380de69521303b416720a52f42d51af6248`; LICENSE and NOTICE accompany them.
+These are byte-exact offline comparison/test fixtures from OpenAI Codex `rust-v0.162.1`, commit
+`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`; LICENSE and NOTICE accompany them.
 Core preserves valid caller bases and never injects these defaults. The Rust snapshot module is test-only.
 
 Eleven catalog models use eight defaults. The three gpt-5.6 models and codex-auto-review
@@ -12,7 +12,7 @@ normal prefix/fallback selection still applies.
 ## Offline regeneration
 
 ```bash
-bash scripts/generate-codex-prompts.sh --codex-source ref/sources/codex-v0.162.0 --check
+bash scripts/generate-codex-prompts.sh --codex-source ref/sources/codex-v0.162.1 --check
 ```
 
 Omit `--check` to regenerate; `--output build/codex-prompts` writes a separate copy.

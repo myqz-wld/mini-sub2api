@@ -76,16 +76,16 @@ mod tests {
     fn formats_the_codex_tui_identity_like_codex_0149() {
         assert_eq!(
             canonical_value_for_platform("(Mac OS 15.6.1; arm64) Apple_Terminal"),
-            "codex-tui/0.162.0 (Mac OS 15.6.1; arm64) Apple_Terminal \
-             (codex-tui; 0.162.0)"
+            "codex-tui/0.162.1 (Mac OS 15.6.1; arm64) Apple_Terminal \
+             (codex-tui; 0.162.1)"
         );
     }
 
     #[test]
     fn sanitizes_dynamic_platform_values_for_http_headers() {
         assert_eq!(
-            sanitize_header_value("codex/0.162.0 (Test\nOS; arch) terminal".to_string()),
-            "codex/0.162.0 (Test_OS; arch) terminal"
+            sanitize_header_value("codex/0.162.1 (Test\nOS; arch) terminal".to_string()),
+            "codex/0.162.1 (Test_OS; arch) terminal"
         );
     }
 

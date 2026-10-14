@@ -258,7 +258,7 @@ func TestNativeLitePrefixContentAndThreadDimensions(t *testing.T) {
 					t.Fatal("native thread did not namespace prefix ID")
 				}
 			}
-			// v0.162.0 requires a persisted source rollout for fork/resume. Assert this
+			// v0.162.1 requires a persisted source rollout for fork/resume. Assert this
 			// boundary explicitly; native ephemeral tests never create transcript fixtures.
 			client.callExpect("thread/fork", map[string]any{"threadId": thread, "ephemeral": true}, -32600)
 			options.base = "基础 {{literal}}\n"

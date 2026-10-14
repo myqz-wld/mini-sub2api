@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Codex 0.162.0 ext/guardian-reviewer/src/assessment.rs intentionally requires
+// Codex 0.162.1 ext/guardian-reviewer/src/assessment.rs intentionally requires
 // only outcome. Its basic review session always sends this schema as non-strict.
 func guardianAssessmentSchema() map[string]any {
 	return map[string]any{

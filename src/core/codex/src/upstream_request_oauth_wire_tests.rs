@@ -10,7 +10,7 @@ fn oauth_websocket_headers_match_codex_0149_raw_order() {
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
         (
             "user-agent",
-            "codex-tui/0.162.0 (Mac OS test; arm64) dumb (codex-tui; 0.162.0)",
+            "codex-tui/0.162.1 (Mac OS test; arm64) dumb (codex-tui; 0.162.1)",
         ),
         ("originator", "codex-tui"),
         ("x-codex-beta-features", "remote_compaction_v2"),
@@ -96,7 +96,7 @@ fn oauth_websocket_replaces_process_identity_and_keeps_canonical_merge_position(
     let mut headers = HeaderMap::new();
     for (name, value) in [
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
-        ("user-agent", "codex_exec/0.162.0 (Mac OS test; arm64) dumb"),
+        ("user-agent", "codex_exec/0.162.1 (Mac OS test; arm64) dumb"),
         ("originator", "codex_exec"),
         ("x-codex-beta-features", "remote_compaction_v2"),
         (CODEX_ROUTING_HINT_HEADER, "model=gpt-5.4"),
@@ -153,7 +153,7 @@ fn oauth_websocket_timing_headers_match_codex_0149_conditional_order() {
         (CODEX_VERSION_HEADER, CODEX_COMPATIBILITY_VERSION),
         (
             "user-agent",
-            "codex-tui/0.162.0 (Mac OS test; arm64) dumb (codex-tui; 0.162.0)",
+            "codex-tui/0.162.1 (Mac OS test; arm64) dumb (codex-tui; 0.162.1)",
         ),
         ("originator", "codex-tui"),
         ("x-codex-beta-features", "remote_compaction_v2"),

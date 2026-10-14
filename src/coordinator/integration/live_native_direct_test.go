@@ -111,7 +111,7 @@ code_mode = false
 code_mode_host = false
 `, options.model, filepath.Join(nativeSource(t), "codex-rs", "models-manager", "models.json"))
 	if !options.ws {
-		// 0.162.0 selects WS by provider capability. Its old feature toggles are removed.
+		// 0.162.1 selects WS by provider capability. Its old feature toggles are removed.
 		config = strings.Replace(config, `model_provider = "openai"`, `model_provider = "live_http"`, 1)
 		endpoint := "https://chatgpt.com/backend-api/codex"
 		if options.endpoint != "" {
@@ -125,7 +125,7 @@ base_url = %q
 wire_api = "responses"
 requires_openai_auth = true
 supports_websockets = false
-http_headers = { version = "0.162.0" }
+http_headers = { version = "0.162.1" }
 request_max_retries = 0
 stream_max_retries = 0
 stream_idle_timeout_ms = 90000

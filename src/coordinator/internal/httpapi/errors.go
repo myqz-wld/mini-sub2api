@@ -26,6 +26,7 @@ var knownCoreErrors = map[string]bool{
 	"upstream_delivery_unknown":     true,
 	"upstream_response_failed":      true,
 	"invalid_prompt":                true,
+	"context_length_exceeded":       true,
 	"flex_unavailable":              true,
 	"server_is_overloaded":          true,
 	"slow_down":                     true,
@@ -144,6 +145,8 @@ func publicFailure(code string) protocolv1.FailureMetadata {
 		DeliveryState: protocolv1.DeliveryNotDelivered,
 	}
 	switch code {
+	case "websocket_connection_limit":
+		failure.RetryAdvice = protocolv1.RetrySafe
 	case "invalid_api_key", "credential_requires_login":
 		failure.Phase = protocolv1.PhaseCredential
 	case "adapter_unavailable":

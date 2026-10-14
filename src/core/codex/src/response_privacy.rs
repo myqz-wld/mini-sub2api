@@ -5,6 +5,30 @@ use crate::lifecycle_carriers::{CarrierAction, response_header_action};
 
 pub(crate) const FAILURE_MESSAGE: &str = "The upstream request failed.";
 
+/// A gateway failure terminal carries only sanitized error controls and an already public ID.
+/// It contains no invented output, usage or continuation state.
+pub(crate) fn failed_terminal(error: &Value, response_id: Option<&str>) -> Value {
+    let mut failure = public_error(error.get("error").unwrap_or(error).as_object());
+    // Standalone errors may carry retry advice on the envelope. The native failed-event
+    // parser reads only nested error headers; prefer usable nested advice, then the envelope.
+    if failure.pointer("/headers/retry-after").is_none()
+        && let Some(retry_after) = error
+            .get("headers")
+            .and_then(Value::as_object)
+            .and_then(retry_advice::from_json)
+    {
+        failure["headers"]["retry-after"] =
+            retry_after.to_str().expect("validated Retry-After").into();
+    }
+    let mut event = json!({"type":"response.failed","response":{
+        "status":"failed", "error":failure
+    }});
+    if let Some(id) = response_id {
+        event["response"]["id"] = id.into();
+    }
+    event
+}
+
 #[cfg(test)]
 #[path = "response_retry_metadata_tests.rs"]
 mod retry_metadata_tests;
@@ -207,7 +231,7 @@ fn public_error(object: Option<&Map<String, Value>>) -> Value {
             .and_then(Value::as_str)
             .and_then(retry_delay)
     {
-        // Native 0.162.0 extracts this delay from text. Retain only the bounded numeric
+        // Native 0.162.1 extracts this delay from text. Retain only the bounded numeric
         // control, never the surrounding provider message or identifying quota details.
         error["message"] = format!("{FAILURE_MESSAGE} Try again in {delay}.").into();
     }

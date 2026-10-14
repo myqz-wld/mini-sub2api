@@ -1,11 +1,10 @@
 # mini-sub2api
 
-A lightweight Responses API gateway for Codex subscriptions and API keys.
-Supports HTTP/SSE, WebSocket and usage tracking.
+Connect Responses API clients to a Codex subscription or an OpenAI API key.
 
 ## Quick start
 
-Install the project runtimes with [mise](https://mise.jdx.dev/), then build and start:
+Install [mise](https://mise.jdx.dev/), then run:
 
 ```bash
 mise install
@@ -21,28 +20,14 @@ build/bin/mini-sub2api serve
 Replace `cred_EXAMPLE` with the credential ID from `credential list`.
 Save the generated `ms2a_` key; it is shown only once.
 
-The default listener is `127.0.0.1:8787`. Remote access requires
-[TLS configuration](docs/OPERATIONS.md#deployment).
-
-## Connect a client
-
 Use `http://127.0.0.1:8787/v1` as the base URL and your `ms2a_` key for authentication.
-For the Codex CLI, follow the [client setup](docs/OPERATIONS.md#codex-client).
-
-```bash
-curl --no-buffer http://127.0.0.1:8787/v1/responses \
-  -H 'Authorization: Bearer ms2a_EXAMPLE' -H 'Content-Type: application/json' \
-  -d '{"model":"YOUR_CODEX_MODEL","input":"Say hello","stream":true}'
-```
-
-## Development
-
-Run `bash scripts/test.sh` for local checks.
+See [Codex client setup](docs/OPERATIONS.md#codex-client).
+Remote access requires [TLS configuration](docs/OPERATIONS.md#deployment).
 
 ## Documentation
 
-- [Operations](docs/OPERATIONS.md): credentials, administration and deployment
-- [Behavior](docs/BEHAVIOR.md): request handling, history and limits
-- [Codex compatibility](docs/CODEX_COMPATIBILITY.md): version alignment and validation
+- [Operations](docs/OPERATIONS.md): authentication, administration and deployment
+- [Behavior and limits](docs/BEHAVIOR.md)
+- [Codex compatibility](docs/CODEX_COMPATIBILITY.md) and [upgrade checklist](docs/CODEX_REANCHORING.md)
 
 Personal learning/research software; not an official OpenAI product or intended for commercial/production use.

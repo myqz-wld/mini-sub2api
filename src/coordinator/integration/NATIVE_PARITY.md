@@ -1,6 +1,6 @@
 # Capture tests
 
-[Setup](../../../README.md) · [Behavior](../../../docs/BEHAVIOR.md)
+[Setup](../../../README.md) · [Behavior](../../../docs/BEHAVIOR.md) · [Re-anchoring checklist](../../../docs/CODEX_REANCHORING.md)
 
 ## Run and prerequisites
 
@@ -11,14 +11,14 @@ mise exec -- python3 scripts/prepare-opencode-tests.py
 bash scripts/test-scaffold-parity.sh
 ```
 
-Pinned clients: Codex **0.162.0** (`c1382380de69521303b416720a52f42d51af6248`) and OpenCode
+Pinned clients: Codex **0.162.1** (`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`) and OpenCode
 **1.18.29** (`16747470f976aca3d362ad730bcd3fe82ecc2c9a`). Missing/wrong prerequisites fail.
 Clients are verified on macOS arm64. Standard suites use loopback mocks and never fall back to providers.
-Code Mode execution requires the matching 0.162.0 `codex-code-mode-host` companion in the CLI's
+Code Mode execution requires the matching 0.162.1 `codex-code-mode-host` companion in the CLI's
 installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NATIVE_CODEX_BINARY`;
 `MINI_SUB2API_CODEX_SOURCE` selects the exact read-only source checkout, defaulting to
-`ref/sources/codex-v0.162.0`. Retain the CLI and its companion together under
-`ref/tools/codex-v0.162.0`; `.ref/` is reserved for temporary work.
+`ref/sources/codex-v0.162.1`. Retain the CLI and its companion together under
+`ref/tools/codex-v0.162.1`; `.ref/` is reserved for temporary work.
 
 ## Method
 
@@ -38,6 +38,19 @@ installation layout. An isolated CLI path can be supplied with `MINI_SUB2API_NAT
 - TLS probes stop at ClientHello before credentials. Compare stable negotiation fields, excluding
   randomness/key material; this does not certify negotiation or remote fingerprint classification.
 
+## Current 0.162.1 run
+
+On 2026-10-14 the complete official 0.162.1 loopback matrix passed **1,402 cases across 104 groups**
+with no skips. It includes native context-error recognition and next-turn automatic compaction
+for both normalized HTTP 400 and standalone SSE errors. The existing twelve retry-advice cases
+also passed. See [current validation](../../../docs/CODEX_COMPATIBILITY.md#validation-on-2026-10-14)
+for source, fingerprint, standard-suite and platform limits.
+
+A subsequent concurrent check found a top-level Retry-After carrier loss in synthesized failed
+events. After repair, three new standalone-overload cases and fourteen existing context/retry
+controls passed against the actual CLI. These are 17 focused cases in three groups, separate
+from the earlier full-matrix count; the complete matrix was not rerun after this repair.
+
 ## Coverage
 
 Counts describe overlapping matrices, not additive independent cases.
@@ -53,7 +66,9 @@ Counts describe overlapping matrices, not additive independent cases.
 | Caller bases: 144 two-call cases | Missing/invalid/explicit bases, both credentials and HTTP/WS ordinary/Lite; no defaults, stable prefix ownership |
 | Actual OpenCode: 20 cases | Custom-provider text/read/denied-file, built-in OpenAI plugin and Core restart; continuity, tool turns, API-key bytes and ordered Subscription wire/header contracts |
 | Bare ordered wire: 12 cases | HTTP/WS × ordinary/Lite × minimal/explicit/null controls; independent actual CLI baselines, source-derived protocol order, complete header signatures |
+| Context recovery | Actual 0.162.1 CLI recognizes normalized HTTP 400 and standalone SSE context errors, then compacts and resumes on the next turn without gateway replay. |
 | 0.162.0 retry advice | Actual CLI positive/negative overload delay across HTTP/WS and all three routes; only caller retries produce additional sends. |
+| Standalone overload recovery | Missing advice is terminal; valid top-level-only advice or valid top-level advice with invalid nested advice permits exactly one native retry after SSE normalization. |
 | 0.162.0 optional modes | Actual native HTTP/WS direct/API-key/Subscription incremental declaration add/change/remove; Guardian snapshot/retained include, dedicated setup, completion and cross-lease ciphertext history; full requests and no extra gateway inference. |
 | 0.159.2 retained regressions | gpt-6.1-sol defaults/image/Code Mode and ultra-to-xhigh mapping; history prewarm; actual CLI instant interruption with done/discarded output, continuation and single accounting; bounded usage-window errors; late truncated metadata/reuse and provider opt-in. |
 | Models/context | All 11 catalog models plus the retired gpt-5.4 fallback; literal bases, personality removal, ordered developer messages, AGENTS/Skills/permissions and caller environment |
@@ -146,7 +161,7 @@ unchanged and never prints payloads or tokens. It does not renew credentials. Na
 use neutral temporary paths; default test launchers remain loopback-only with no provider fallback.
 
 ```bash
-MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.162.0/codex" \
+MINI_SUB2API_NATIVE_CODEX_BINARY="$PWD/ref/tools/codex-v0.162.1/codex" \
   bash scripts/test-live-parity.sh --allow-real-subscription
 ```
 

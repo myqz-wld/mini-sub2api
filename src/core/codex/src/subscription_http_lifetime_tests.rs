@@ -156,10 +156,18 @@ async fn missing_error_footer_uses_idle_budget_without_canceling_a_retry() {
     let retry = prepare(&store, body).await.unwrap();
     let retry_id = retry.operation.as_ref().unwrap().0.id.clone();
     let failure = frames.next().await.unwrap().unwrap();
+    let bytes = failure
+        .data_ref()
+        .expect("known error becomes a failed terminal");
+    let payload =
+        crate::response_sse_reader::data_payload(std::str::from_utf8(bytes).unwrap()).unwrap();
+    let event: Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(event["type"], "response.failed");
     assert_eq!(
-        failure.trailers_ref().unwrap()[mini_sub2api_protocol_v1::RETRY_ADVICE_TRAILER],
-        "never"
+        event["response"]["error"]["code"],
+        "upstream_response_failed"
     );
+    assert!(event["response"].get("usage").is_none());
     assert!(frames.next().await.is_none());
     assert!(closed.load(Ordering::SeqCst));
     let inner = store.contexts.inner.lock().unwrap();

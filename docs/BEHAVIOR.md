@@ -10,7 +10,7 @@ switching, Chat Completions or conversation-management API.
 | Upstream | Every caller |
 |---|---|
 | API key | Bodies/valid WS frames remain byte-transparent; gateway auth, admission, usage and safe headers still apply. Caller `X-Codex-Routing-Hint` survives; omission stays absent. |
-| Subscription | Codex 0.162.0 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
+| Subscription | Codex 0.162.1 normalization and scoped identities; HTTP zstd level 3, WS JSON. The model/service tier determines the routing hint. |
 
 HTTP stays HTTP and WS stays WS, including recovery. Nonblank `Originator` disables gateway-added WS
 prewarm/automatic incrementality; it never bypasses emulation.
@@ -126,7 +126,7 @@ the completed prewarm; reconnect/full-context and unrelated-thread checks still 
 
 No path inserts model-default bases or renders caller placeholders. Ordinary continuation does not
 restore an omitted base. Preserve developer content/order/duplicates; Subscription maps
-system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.162.0/README.md)
+system→developer in place. [Pinned snapshots](../src/core/codex/prompts/codex-0.162.1/README.md)
 are offline test fixtures only. The eleven-model catalog includes `gpt-6.1-sol` with
 Lite layout, low reasoning effort/verbosity, model-required review metadata, priority support
 and `ultra` mapped to its native multi-agent effort `xhigh`. The separate `gpt-6-sol` keeps its medium default.
@@ -383,9 +383,14 @@ baselines except for a validated, caller-requested Lite interruption described b
 
 Subscription SSE may forward `error` followed by one valid matching `response.failed`, including
 projected IDs, details and usage. The first error releases the lane; bounded validation facts stay
-reserved until the footer/EOF/tail deadline/cancellation. New output, later success, duplicate/conflicting terminals
-fail. Error-only EOF and a valid failed footer need no extra failure trailers, but usage records the
-request as failed. Neither path publishes history or commits compaction. JSON aggregation always
+reserved until the footer/EOF/read failure/cancellation. New output, later success, duplicate/conflicting terminals
+fail. When no failed footer arrives by EOF or the existing upstream read failure/deadline, an ordinary
+error receives one sanitized `response.failed` carrying its safe category/retry advice and any
+already public response ID. A pending error suppresses `[DONE]` until that terminal. The fallback
+adds no output, usage or history; `flex_unavailable` still ends immediately. Ordinary errors do
+not start the one-second terminal-tail timer: a delayed real failed footer retains its usage. Both the fallback and
+a valid real failed footer need no extra failure trailers, and accounting records one failed
+request. Neither path publishes history or commits compaction. JSON aggregation always
 rejects an error event. Valid SSE prefix events survive later malformed/oversized chunks; failure
 trailers cross the internal HTTP hop even after a previously delivered terminal.
 
@@ -403,6 +408,10 @@ Subscription HTTP/deferred-WS failures preserve the native invalid-prompt, flex,
 policy and quota/usage categories. Inspection is limited to 64 KiB and one second; arbitrary provider
 messages and extensions stay private. Recognized categories use the public gateway error envelope
 and typed diagnostics. Native quota classifiers also receive their fixed `error.type`.
+Recognized HTTP 400 `context_length_exceeded` becomes HTTP 200 SSE `response.failed` only for
+streaming Subscription callers. Non-streaming Subscription callers keep HTTP 400 and the safe
+category; API-key error status/body remain transparent. Native Codex marks the context full and
+can compact at the next turn. The gateway does not perform that compaction or replay inference.
 For `usage_limit_reached`, optional integer `limit_window_minutes` survives only within
 0..65535; malformed or unrelated values are omitted in HTTP, deferred WS and streamed errors.
 
@@ -411,6 +420,8 @@ Public response headers and JSON/SSE/WebSocket event header containers preserve
 this field and valid bounded `Retry-After` advice; other error extensions remain private.
 Advice never schedules a gateway retry. JSON header names are
 matched case-insensitively, with existing header value, size and nesting checks.
+Local WS capacity rejection returns HTTP 429 with `Retry-After: 1`, allowing a bounded client
+retry after a connection closes. This does not alter upstream quota/flex or overload policy.
 
 V2 compaction requires matching completion and exactly one valid encrypted item-done; a final array
 alone is insufficient. Concurrent same-base commits advance once. With complete source history,

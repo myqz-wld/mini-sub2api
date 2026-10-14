@@ -80,6 +80,7 @@ pub(crate) fn http_category(status: http::StatusCode, bytes: &[u8]) -> Option<Co
                 code,
                 body.error.kind.as_ref().and_then(Value::as_str),
             ) {
+                (400, "context_length_exceeded", _) => Native::ContextWindowExceeded,
                 (503, "server_is_overloaded", _) => Native::ServerOverloaded,
                 (503, "slow_down", _) => Native::SlowDown,
                 (400 | 403, "misalignment_policy_violation", _) => Native::MisalignmentPolicy,

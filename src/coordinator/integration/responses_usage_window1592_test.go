@@ -194,10 +194,14 @@ func TestUsageWindow1592SSEErrors(t *testing.T) {
 						if !ok || !json.Valid([]byte(data)) {
 							continue
 						}
-						assertUsageWindow1592Event(t, []byte(data), tc, wrapped)
+						assertUsageWindow1592Event(t, []byte(data), tc, wrapped && seen == 0)
 						seen++
 					}
-					if seen != 1 {
+					want := 1
+					if wrapped {
+						want = 2 // The error-only stream gains one native-readable failed terminal.
+					}
+					if seen != want {
 						t.Fatal("stream error missing or duplicated")
 					}
 				})

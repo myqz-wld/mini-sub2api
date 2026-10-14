@@ -1,10 +1,54 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"sync"
 	"testing"
 )
+
+func TestWebSocketCapacityRejectionProvidesNativeRetryDelay(t *testing.T) {
+	for _, guardian := range []bool{false, true} {
+		store, _, key := setupHTTPTest(t)
+		handler, public := startPublicWebSocketServer(t, store, &rejectingWebSocketCore{})
+		limit := maxWebSocketsPerKey
+		headers := make(http.Header)
+		if guardian {
+			limit--
+			headers.Set("X-Openai-Subagent", "guardian")
+		}
+		for i := 0; i < limit; i++ {
+			if !handler.websockets.acquireRole(key.ID, guardian) {
+				t.Fatal("fixture capacity unavailable")
+			}
+		}
+		connection, response, err := dialPublicWebSocket(t, public.URL, key.Secret, headers)
+		if err == nil || connection != nil || response == nil || response.StatusCode != http.StatusTooManyRequests {
+			t.Fatal("capacity rejection did not remain HTTP 429")
+		}
+		if response.Header.Get("Retry-After") != "1" {
+			t.Fatal("capacity rejection lost native retry advice")
+		}
+		var body struct {
+			Error struct {
+				Code          string `json:"code"`
+				RetryAdvice   string `json:"retryAdvice"`
+				DeliveryState string `json:"deliveryState"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(responseBody(t, response)), &body) != nil || body.Error.Code != "websocket_connection_limit" || body.Error.RetryAdvice != "safe" || body.Error.DeliveryState != "not_delivered" {
+			t.Fatal("capacity rejection category changed")
+		}
+		for i := 0; i < limit; i++ {
+			handler.websockets.releaseRole(key.ID, guardian)
+		}
+		_, next, _ := dialPublicWebSocket(t, public.URL, key.Secret, headers)
+		if next == nil || next.StatusCode != http.StatusUpgradeRequired {
+			t.Fatal("released capacity did not allow the next upstream handshake")
+		}
+		_ = responseBody(t, next)
+	}
+}
 
 func TestGuardianFailedUpgradeReleasesBothAdmissionCounters(t *testing.T) {
 	store, _, key := setupHTTPTest(t)

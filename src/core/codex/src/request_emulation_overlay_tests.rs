@@ -413,7 +413,7 @@ fn find_image<'a>(value: &'a Value, image_url: &str) -> Option<&'a serde_json::M
 #[test]
 fn native_1620_routing_fields_precede_input_in_final_http_and_websocket_bytes() {
     // Independent declaration order: codex-api/src/common.rs ResponsesApiRequest and
-    // ResponseCreateWsRequest at pinned c1382380de69; never read the local order table.
+    // ResponseCreateWsRequest at pinned 092d3acd6bec; never read the local order table.
     for transport in [EmulationTransport::Http, EmulationTransport::WebSocket] {
         for tier in [false, true] {
             let mut body = serde_json::json!({"type":"response.create","model":"gpt-5.5",

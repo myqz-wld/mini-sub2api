@@ -84,7 +84,7 @@ async fn subscription_authorization_uses_native_without_indexing_on_http2() {
         .unwrap()
         .unwrap();
     assert_eq!(response.status(), 200);
-    // Static HPACK name index 23 with a four-bit zero prefix, as in native 0.162.0.
+    // Static HPACK name index 23 with a four-bit zero prefix, as in native 0.162.1.
     let (authorization, settings, window) = peer.await.unwrap();
     assert_eq!(authorization, vec![0x0f, 0x08]);
     // Exact pinned native reqwest 0.12.28 uses hyper 1.8.1 default HTTP/2 config;

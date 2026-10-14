@@ -68,7 +68,7 @@ pub(crate) fn selected_session(
     let declared = optional_id(flat.and_then(|m| m.get("session_id")))?.or(optional_id(
         body.as_ref().and_then(|m| m.get("session_id")),
     )?);
-    // Codex 0.162.0 uses session-id for cache affinity on root forks. The body's
+    // Codex 0.162.1 uses session-id for cache affinity on root forks. The body's
     // explicit session remains the owner when the header carries prompt_cache_key.
     if let Some(session) = direct {
         if object.get("prompt_cache_key").and_then(Value::as_str) == Some(session.as_str())
@@ -201,7 +201,7 @@ impl Evidence {
                 .and_then(Value::as_str)
                 .is_some_and(|model| crate::request_defaults::model_profile(model).responses_lite)
         {
-            // 0.162.0 ModelClient can emit developer-only or empty Lite setup. The
+            // 0.162.1 ModelClient can emit developer-only or empty Lite setup. The
             // catalog and complete input carrier establish layout; absence of tools alone cannot.
             Some(Format::Lite)
         } else if previous.is_none() || object.contains_key("tools") {
