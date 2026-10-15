@@ -38,6 +38,7 @@ pub(crate) struct TrackedBaseline {
 pub(crate) struct Scope {
     pub(crate) records: HashMap<String, Record>,
     pub(crate) sessions: HashMap<String, Session>,
+    pub(crate) thread_activity: HashMap<String, (String, Instant)>,
     pub(crate) aliases: HashMap<String, String>,
     pub(crate) turns: HashMap<String, String>,
     pub(crate) routing: HashMap<String, String>,
@@ -57,6 +58,7 @@ pub(crate) struct Session {
 pub(crate) struct Record {
     pub(crate) identity: ResolvedRequestIdentity,
     pub(crate) branch: String,
+    pub(crate) emitted_aliases: std::collections::BTreeSet<(String, String)>,
     pub(crate) caller_format: Format,
     pub(crate) upstream_format: Format,
     pub(crate) setup_hash: [u8; 32],
@@ -91,6 +93,8 @@ pub(crate) struct Active {
     pub(crate) scope: String,
     pub(crate) record: Record,
     pub(crate) publication: Option<Publication>,
+    pub(crate) pending_routing: Option<(String, String)>,
+    pub(crate) allow_hidden_prewarm: bool,
     pub(crate) lane: String,
     pub(crate) reserved: usize,
     pub(crate) output: BTreeMap<usize, Value>,
@@ -259,6 +263,11 @@ pub(crate) use checkpoint::CheckpointAssociation;
 impl Record {
     pub(crate) fn descriptor_cost(&self) -> usize {
         2048 + self.dependencies.cost()
+            + self
+                .emitted_aliases
+                .iter()
+                .map(|(kind, id)| 64 + kind.len() + id.len())
+                .sum::<usize>()
             + self.lineage.cost
             + self.socket.as_ref().map_or(0, String::len)
             + self.startup.as_ref().map_or(0, |startup| startup.cost())
@@ -281,6 +290,9 @@ impl Scope {
         let sessions: HashSet<_> = self.sessions.keys().cloned().collect();
         self.aliases.retain(|_, id| sessions.contains(id));
         self.turns.retain(|_, id| sessions.contains(id));
+        self.thread_activity.retain(|_, (session, seen)| {
+            sessions.contains(session) && now.saturating_duration_since(*seen) < ttl
+        });
         let turns: HashSet<_> = self
             .records
             .values()
@@ -347,6 +359,11 @@ impl Scope {
                 .map(|(key, token)| key.len() + token.len())
                 .sum::<usize>()
             + self.settings_pool.len() * 128
+            + self
+                .thread_activity
+                .iter()
+                .map(|(thread, (session, _))| 1024 + thread.len() + session.len())
+                .sum::<usize>()
             + (self.sessions.len()
                 + self.aliases.len()
                 + self.turns.len()
@@ -387,6 +404,12 @@ impl Scope {
             })
             .map(|(key, token)| 1024 + key.len() + token.len())
             .sum::<usize>()
+            + self
+                .thread_activity
+                .iter()
+                .filter(|(_, (owner, _))| owner == session)
+                .map(|(thread, (owner, _))| 1024 + thread.len() + owner.len())
+                .sum::<usize>()
             + self.index.get(&Some(session.into())).map_or(0, Radix::cost)
             + self.checkpoint_index_cost(Some(session))
             + self

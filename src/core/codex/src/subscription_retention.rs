@@ -291,6 +291,9 @@ impl Inner {
                 != Some(&session)
         });
         scope.sessions.remove(&session);
+        scope
+            .thread_activity
+            .retain(|_, (owner, _)| owner != &session);
         scope.aliases.retain(|_, owner| *owner != session);
         scope.turns.retain(|_, owner| *owner != session);
         true

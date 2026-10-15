@@ -53,7 +53,9 @@ pub(crate) async fn prepare_stateful_codex_request(
     crate::request_native_metadata::NativeMetadata::read(&object, headers)
         .map_err(|_| Error::InvalidRequest)?;
     let evidence = Evidence::read(&object, headers, transport)?;
-    let store = &context.store.contexts;
+    let state_store = context.store;
+    let state_namespace = context.state_namespace;
+    let store = &state_store.contexts;
     let mut plan = store.plan(
         ContextStore::scope_key(context.state_namespace, context.downstream_scope),
         &object,
@@ -140,17 +142,18 @@ pub(crate) async fn prepare_stateful_codex_request(
         .clone()
         .or_else(|| plan.evidence.session.clone())
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-    let turn = plan
-        .turn
-        .clone()
-        .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+    // Preserve explicit evidence; implicit turn selection needs the resolved owning thread.
+    let turn = plan.evidence.turn.clone();
     let metadata = object
         .entry("client_metadata")
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
         .ok_or(Error::InvalidRequest)?;
     metadata.insert("session_id".into(), Value::String(session));
-    if let Some(inherited) = plan.identity_baseline().or(context.binding)
+    if let Some(inherited) = plan
+        .identity_baseline()
+        .or_else(|| plan.association.as_ref().map(|source| &source.identity))
+        .or(context.binding)
         && (!identity_evidence.explicit_thread_lineage
             || (identity_evidence.parent_thread.is_none() && identity_evidence.thread.is_none()))
         && inherited.thread_id != inherited.session_id
@@ -178,8 +181,10 @@ pub(crate) async fn prepare_stateful_codex_request(
         metadata.insert("turn_id".into(), Value::String(String::new()));
     } else if identity_evidence.is_memory() {
         metadata.remove("turn_id");
-    } else {
+    } else if let Some(turn) = turn {
         metadata.insert("turn_id".into(), Value::String(turn));
+    } else {
+        metadata.remove("turn_id");
     }
     metadata.shift_remove("x-codex-turn-state");
     let mut clean_headers = headers.clone();
@@ -214,6 +219,10 @@ pub(crate) async fn prepare_stateful_codex_request(
         return Ok(prepared);
     }
     let operation = prepared.operation.as_ref().ok_or(Error::StateUnavailable)?;
+    state_store
+        .restore_turn_state(state_namespace, operation)
+        .await
+        .map_err(|_| Error::StateUnavailable)?;
     let Some(token) = store.turn_token(operation) else {
         return Ok(prepared);
     };

@@ -1,4 +1,4 @@
-//! Provider routing tokens are opaque, memory-only headers, not persisted logical IDs.
+//! Provider routing tokens are opaque headers; bounded persistence is separate from logical IDs.
 use crate::request_normalizer::EmulationTransport;
 use crate::subscription_context::{ContextStore, Operation};
 
@@ -35,6 +35,23 @@ pub(crate) fn metadata_token(event: &serde_json::Value) -> Option<&str> {
 }
 
 impl ContextStore {
+    pub(crate) fn allow_hidden_prewarm(&self, operation: &Operation) -> bool {
+        let Ok(inner) = self.inner.lock() else {
+            return false;
+        };
+        let Some(active) = inner.operations.get(&operation.0.id) else {
+            return false;
+        };
+        active.allow_hidden_prewarm
+            && active.record.identity.turn_id.as_ref().is_none_or(|turn| {
+                inner.scopes.get(&active.scope).is_none_or(|scope| {
+                    !scope
+                        .routing
+                        .contains_key(&format!("{}:{turn}", active.record.branch))
+                })
+            })
+    }
+
     pub(crate) fn learn_turn(&self, operation: &Operation, token: &str) -> anyhow::Result<()> {
         let mut inner = self
             .inner

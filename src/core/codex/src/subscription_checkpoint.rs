@@ -11,6 +11,13 @@ pub(crate) struct CheckpointAssociation {
 
 impl Scope {
     pub(crate) fn rebuild_index(&mut self) {
+        for record in self
+            .records
+            .values_mut()
+            .filter(|record| record.history.is_none())
+        {
+            record.emitted_aliases.clear();
+        }
         self.index.clear();
         self.checkpoints = Default::default();
         for (id, record) in &self.records {

@@ -38,6 +38,9 @@ pub(crate) use response::ResponseEdit;
 mod transaction;
 use transaction::{edit_locked, edit_under_lock};
 
+#[path = "request_state_routing.rs"]
+mod routing;
+
 #[derive(Clone)]
 pub(crate) struct RequestStateStore {
     accounts_dir: PathBuf,
@@ -172,6 +175,7 @@ impl RequestStateStore {
         let path = state_path(&self.accounts_dir, state_ref);
         if owners.is_empty() {
             remove_file_if_exists(&self.accounts_dir, &path)?;
+            routing::remove(&self.accounts_dir, state_ref)?;
             return Ok(());
         }
         let Some(mut state) = (match read_optional_state(&path) {
@@ -209,7 +213,10 @@ fn cleanup_unowned_request_states(accounts_dir: &Path, active: &BTreeSet<String>
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        let Some(state_ref) = name.strip_suffix(STATE_SUFFIX) else {
+        let Some(state_ref) = name
+            .strip_suffix(STATE_SUFFIX)
+            .or_else(|| name.strip_suffix(routing::SUFFIX))
+        else {
             continue;
         };
         if !valid_state_ref(state_ref) || active.contains(state_ref) {
@@ -220,6 +227,7 @@ fn cleanup_unowned_request_states(accounts_dir: &Path, active: &BTreeSet<String>
         // committed new identity state while cleanup waited for this same state lock.
         if owners_for_state_ref(accounts_dir, state_ref)?.is_empty() {
             remove_file_if_exists(accounts_dir, &entry.path())?;
+            routing::remove(accounts_dir, state_ref)?;
         }
     }
     Ok(())

@@ -41,7 +41,8 @@ current producer role, preserving its defaults and explicit caller effort across
 ## Sessions and matching
 
 Within Key/account scope, locate by original handshake `session-id` → `client_metadata.session_id` →
-turn metadata session ID → known previous response → eligible history/checkpoint → new session.
+turn metadata session ID → known previous response → eligible history/checkpoint → verified
+output-alias association → new session.
 For native cache-affinity requests where `session-id` carries `prompt_cache_key`, an explicit body
 session ID remains the owner. Scoped cache aliases may be shared across forks without merging their
 sessions; arbitrary bare-client cache hints do not create session ownership.
@@ -88,7 +89,20 @@ restore session/thread/window, validate lineage/dependencies, and use the caller
 and settings. This grants neither a prior turn nor WS reuse. Changed/missing IDs, external summaries
 and conflicting owners fail; checkpoint evidence shares history expiry, eviction and memory budgets.
 
+If only leading developer/system input or Lite tool setup changes, known provider-emitted item/call
+aliases may preserve a unique anonymous session/thread/branch. Every retained business item must
+still match; changed past tasks or outputs, missing aliases and expired evidence do not qualify.
+Select the longest eligible business history and reject equally qualified conflicting owners rather
+than choosing by recency. Explicit identity takes precedence. This association uses only caller-supplied
+content: it does not restore private fields, inherit current settings, select an old window, supply
+missing dependencies, or authorize WS incremental reuse.
+
 Explicit turns win; tool follow-ups retain their turn, while quiescent new user input starts one.
+Without a retained baseline, inspect new task input after the last model output. Tool-only replay
+continues the invocation's validated owning turn, including its target-local imported copy; otherwise
+reuse the resolved thread's current turn when available. Historical user messages do not start a new
+turn. An implicit child continuation never executes its parent's turn: new child input starts a turn,
+and an input-free parent-response continuation derives a stable child-owned turn for retries.
 Each branch/turn and physical WS permits one inference. Equivalent contexts may share immutable
 content, never execution owners/tool consumption. Current-thread, ancestor or declared-fork history
 still requires the same session, including remote-only continuation.
@@ -101,13 +115,27 @@ Synthesized metadata includes the token in native-style randomized key ordering.
 opaque header values with a separate 64 KiB limit, retain the first value (including an empty one),
 and consume actual retained-state budget; the 512-byte logical-ID limit does not apply. WS metadata
 accepts a string or the first array value, matching the pinned native parser.
+Trusted business-turn tokens also use a private `*.turn-state.json` sidecar, separate from the
+identity ledger. Each account namespace shares a limit of 4,096 entries and 8 MiB across its Keys,
+with a three-hour per-turn idle expiry and oldest-entry capacity eviction. Same-branch/turn requests
+reuse an entry; conflict branches use separate entries. Capacity eviction can shorten retention below
+three hours and remove restart continuity for the evicted entries. Atomic 0600 writes share the account-state
+lock; final credential-owner deletion removes the sidecar. Old installations need no identity-schema
+migration. Caller-supplied tokens remain ignored. Restore exact branch state, or unanimous tokens for
+the same Key/session/thread/turn when a complete replay has lost its branch; conflicting values fail
+with `state_unavailable`. Independent anonymous branches never borrow this fallback. This persistence
+does not restore response history, so unavailable `previous_response_id` references still fail.
 Failed-turn facts follow idle expiry/capacity; admitted work is protected. Completed prewarm may
 learn an idle metadata token and transfer it only to the first business turn on that socket/thread.
 The handoff includes an empty first value, is charged to the state budget, and expires with the
 socket or incompatible work. Metadata received after the business frame was prepared affects
 later same-turn requests; it never changes the business response ID. Credential or upstream-address
 changes require a new connection and do not carry an unconsumed startup token. Hidden setup updates the
-business frame before sending. Native memory-consolidation turn/root-turn IDs are projected when
+business frame before sending. Eligible bare-client reconnects skip hidden setup after recent business
+admission on the same scoped thread, or when its business-turn token was restored. Thread activity
+shares the three-hour idle horizon and memory budgets; a fresh thread or unknown resumed thread can
+prewarm again. Explicit prewarm and Originator behavior remain caller-owned.
+Native memory-consolidation turn/root-turn IDs are projected when
 present; absent memory turns remain absent. Core provides no memory-writing service.
 
 History-bearing `generate:false` prewarm keeps an empty request turn and preserves each
@@ -130,8 +158,11 @@ API-key credential passthrough keeps its existing behavior.
 
 Even identical request bodies remain independent calls. Forking does not wait for, replay,
 deduplicate, retry or cancel another request. The client owns retries and cancellation. Each
-branch retains its own response history and routing token; a new branch does not inherit the
-busy branch's token. Compaction keeps the existing window commit rules and each response's own
+branch retains its own response history. A conflict fork copies the busy branch's already-known
+same-turn routing token, including a present empty value, and keeps first-value semantics. The copy
+is reserved before admission and published only after identity persistence succeeds. A fork created
+before any token was learned still starts without one. Equivalent anonymous-history branches remain
+independent and do not inherit another branch's token. Compaction keeps the existing window commit rules and each response's own
 checkpoint; prewarm routing transfers only on its owning socket. Existing resource budgets,
 alias ownership, invalid-reference rejection and cancellation cleanup still apply.
 

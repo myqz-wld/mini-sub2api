@@ -20,6 +20,7 @@ pub(crate) struct Evidence {
     pub(crate) turn: Option<String>,
     pub(crate) previous: Option<String>,
     pub(crate) declared_format: Option<Format>,
+    pub(crate) allow_id_association: bool,
     pub(crate) input: Vec<Value>,
 }
 
@@ -230,6 +231,17 @@ impl Evidence {
             }
             turn = one(header_turns)?;
         }
+        let identity = crate::request_identity_evidence::RequestIdentityEvidence::extract(
+            object, headers, transport, false,
+        );
+        let allow_id_association = identity.thread.is_none()
+            && identity.parent_thread.is_none()
+            && identity.forked_from_thread.is_none()
+            && !identity.explicit_thread_lineage
+            && identity.root_turn.is_none()
+            && identity.parent_turn.is_none()
+            && identity.request_kind == "turn"
+            && !object.contains_key("conversation");
         Ok(Self {
             role: crate::native_request_policy::Role::resolve(object, headers)
                 .map_err(|_| Error::InvalidRequest)?,
@@ -239,6 +251,7 @@ impl Evidence {
             turn,
             previous,
             declared_format,
+            allow_id_association,
             input,
         })
     }

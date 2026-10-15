@@ -211,6 +211,13 @@ impl ResponseStateContext {
                 self.store
                     .contexts
                     .learn_response_metadata(&operation, &translated)?;
+                if terminal.is_some()
+                    || crate::subscription_routing::metadata_token(&translated).is_some()
+                {
+                    self.store
+                        .persist_turn_state(&self.state_namespace, &operation, false)
+                        .await?;
+                }
                 self.store
                     .contexts
                     .observe(&operation, &translated, terminal)?;

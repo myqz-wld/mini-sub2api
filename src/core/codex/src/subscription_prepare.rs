@@ -20,12 +20,18 @@ pub(crate) use lineage::HistoryLineage;
 #[path = "subscription_history_selection.rs"]
 mod history_selection;
 
+#[path = "subscription_alias_association.rs"]
+mod alias_association;
+
 #[path = "subscription_input_metadata.rs"]
 mod input_metadata;
 
 #[path = "subscription_history_import.rs"]
 mod history_import;
 pub(crate) use history_import::HistoryImport;
+
+#[path = "subscription_turn.rs"]
+mod turn_selection;
 
 #[path = "subscription_classifier_history.rs"]
 mod classifier_history;
@@ -36,9 +42,12 @@ pub(crate) struct ContextPlan {
     pub(crate) input_metadata_charge: usize,
     pub(crate) session: Option<String>,
     pub(crate) turn: Option<String>,
+    pub(crate) starts_new_turn: bool,
+    pub(crate) new_turn_input: bool,
     // Local history/reference evidence; upstream WS reuse has its own request/socket baseline.
     pub(crate) baseline: Option<Record>,
     pub(crate) checkpoint: Option<CheckpointAssociation>,
+    pub(crate) association: Option<CheckpointAssociation>,
     pub(crate) branch: Option<String>,
     pub(crate) caller_format: Format,
     pub(crate) admission: Operation,
@@ -129,6 +138,22 @@ impl ContextStore {
         if let Some(source) = &checkpoint {
             session = Some(source.identity.session_id.clone());
         }
+        let association = if baseline.is_none()
+            && session.is_none()
+            && evidence.previous.is_none()
+            && evidence.turn.is_none()
+            && evidence.allow_id_association
+        {
+            scope
+                .map(|scope| scope.alias_association(&evidence.input))
+                .transpose()?
+                .flatten()
+        } else {
+            None
+        };
+        if let Some(source) = &association {
+            session = Some(source.identity.session_id.clone());
+        }
 
         let caller_format = evidence
             .declared_format
@@ -176,7 +201,12 @@ impl ContextStore {
         };
         let awaiting_tools = dependencies.awaiting_tools();
         dependencies.append(suffix)?;
-        let new_turn_input = suffix.iter().any(crate::agent_message::starts_turn);
+        let new_turn_input = if baseline.is_some() {
+            suffix.iter().any(crate::agent_message::starts_turn)
+        } else {
+            turn_selection::has_new_task(suffix)
+        };
+        let starts_new_turn = new_turn_input && !awaiting_tools;
         let turn = evidence.turn.clone().or_else(|| {
             if !new_turn_input || awaiting_tools {
                 baseline
@@ -218,6 +248,7 @@ impl ContextStore {
                 .as_ref()
                 .map(|r| r.branch.clone())
                 .or_else(|| checkpoint.as_ref().map(|source| source.branch.clone()))
+                .or_else(|| association.as_ref().map(|source| source.branch.clone()))
         };
         let session = session.or_else(|| Some(Uuid::now_v7().to_string()));
         let mut restorations = Vec::new();
@@ -344,8 +375,11 @@ impl ContextStore {
             input_metadata_charge: 0,
             session,
             turn,
+            starts_new_turn,
+            new_turn_input,
             baseline,
             checkpoint,
+            association,
             branch,
             caller_format,
             admission,

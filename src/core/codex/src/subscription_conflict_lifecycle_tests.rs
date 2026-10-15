@@ -124,12 +124,24 @@ async fn independent_connections_and_transports_can_fork_the_same_turn() {
         assert_eq!(original.identity.thread_id, fork.identity.thread_id);
         assert_eq!(original.identity.turn_id, fork.identity.turn_id);
         assert_ne!(original.branch, fork.branch);
-        assert!(
+        assert_eq!(
             store
                 .contexts
                 .turn_token(second.operation.as_ref().unwrap())
-                .is_none()
+                .as_deref(),
+            Some("synthetic-first-route")
         );
+        assert_eq!(
+            second.headers["x-codex-turn-state"],
+            "synthetic-first-route"
+        );
+        if second_ws {
+            let wire: Value = serde_json::from_slice(&second.body).unwrap();
+            assert_eq!(
+                wire["client_metadata"]["x-codex-turn-state"],
+                "synthetic-first-route"
+            );
+        }
         complete(
             &store,
             second,

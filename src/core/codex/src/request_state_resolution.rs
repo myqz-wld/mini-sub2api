@@ -109,6 +109,13 @@ pub(crate) fn resolve_and_project(
     // scoped projection below and must never be bound to the empty prewarm turn.
     let current_turn_raw = if evidence.is_prewarm() {
         None
+    } else if let Some(import) = &history_import {
+        import.current_turn(
+            editor,
+            evidence,
+            &thread_id,
+            forked_from_thread_id.as_deref(),
+        )?
     } else {
         evidence
             .turn

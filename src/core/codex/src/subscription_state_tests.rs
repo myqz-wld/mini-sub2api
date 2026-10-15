@@ -19,6 +19,12 @@ mod content_id_tests;
 #[path = "subscription_conflict_tests.rs"]
 mod conflict_tests;
 
+#[path = "subscription_alignment_tests.rs"]
+mod alignment_tests;
+
+#[path = "subscription_alias_association_tests.rs"]
+mod alias_association_tests;
+
 #[path = "subscription_repair_tests.rs"]
 mod repair_tests;
 

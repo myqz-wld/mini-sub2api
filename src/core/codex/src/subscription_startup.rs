@@ -23,6 +23,12 @@ impl StartupRouting {
             + self.turn.as_ref().map_or(0, String::len)
             + self.token.as_ref().map_or(0, String::len)
     }
+
+    pub(crate) fn routing_target(&self, operation: &str) -> Option<&str> {
+        (self.operation == operation)
+            .then_some(self.turn.as_deref())
+            .flatten()
+    }
 }
 
 impl Scope {

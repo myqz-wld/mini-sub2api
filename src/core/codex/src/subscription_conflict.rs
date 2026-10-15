@@ -37,7 +37,8 @@ impl Inner {
         let mut lane = lane_for(&branch);
         if occupied(&lane) {
             // The caller holds the admission mutex through insertion. Branches use the same
-            // format as equivalent anonymous histories and never inherit another branch's token.
+            // format as equivalent anonymous histories. Admission carries this turn's already
+            // learned routing value into a conflict fork without sharing execution ownership.
             branch = uuid::Uuid::now_v7().to_string();
             lane = lane_for(&branch);
             if occupied(&lane) {

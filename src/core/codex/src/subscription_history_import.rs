@@ -26,6 +26,7 @@ impl ContextPlan {
             && self.evidence.previous.is_none()
             && self.baseline.is_none()
             && self.checkpoint.is_none()
+            && self.association.is_none()
             && self.restored_input.is_none()
             && !self.external_context
             && replay
@@ -108,20 +109,29 @@ impl HistoryImport<'_> {
         source: &TurnAssignment,
         target: &ResolvedRequestIdentity,
     ) -> anyhow::Result<Option<String>> {
+        self.resolve_turn_for_thread(
+            editor,
+            source,
+            &target.thread_id,
+            target.forked_from_thread_id.as_deref(),
+        )
+    }
+
+    pub(super) fn resolve_turn_for_thread(
+        &self,
+        editor: &mut RequestStateEditor<'_>,
+        source: &TurnAssignment,
+        thread: &str,
+        forked: Option<&str>,
+    ) -> anyhow::Result<Option<String>> {
         let key = editor.derived_lookup(
             "imported-history-turn",
-            &[target.thread_id.as_bytes(), source.id.as_bytes()],
+            &[thread.as_bytes(), source.id.as_bytes()],
         );
         // An imported copy is part of its target's ordinary history. Its descendants and
         // declared forks may reuse it under the same ancestry policy as other historical turns.
         let mut visited = std::collections::BTreeSet::new();
-        for root in [
-            Some(target.thread_id.as_str()),
-            target.forked_from_thread_id.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        for root in [Some(thread), forked].into_iter().flatten() {
             let mut thread = root.to_string();
             while visited.insert(thread.clone()) {
                 let candidate = editor.derived_lookup(
@@ -171,7 +181,7 @@ impl HistoryImport<'_> {
             return Ok(None);
         }
         drop(inner);
-        let imported = editor.turn_with_id(&key, &target.thread_id, None, None, None)?;
+        let imported = editor.turn_with_id(&key, thread, None, None, None)?;
         editor.preserve_inventory_origin(&key, source)?;
         editor.wire_from_upstream(WireIdDomain::Turn, &imported.id)?;
         Ok(Some(imported.id))

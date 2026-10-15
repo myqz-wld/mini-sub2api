@@ -89,7 +89,7 @@ pub(super) async fn prepare_websocket(
 }
 
 #[tokio::test]
-async fn anonymous_http_overlaps_fork_without_merging_content_or_routing_tokens() {
+async fn anonymous_http_overlaps_fork_with_independent_content_and_inherited_routing() {
     for model in ["gpt-5.4", "gpt-6-astra"] {
         for case in ["identical", "steering", "partial", "parallel"] {
             let (_temp, store) = store();
@@ -128,12 +128,16 @@ async fn anonymous_http_overlaps_fork_without_merging_content_or_routing_tokens(
             let second_record = active(&store, &second);
             assert_ne!(first_record.branch, second_record.branch, "{model} {case}");
             assert_eq!(first_record.identity, second_record.identity);
-            assert!(second.headers.get("x-codex-turn-state").is_none());
-            assert!(
+            assert_eq!(
+                second.headers["x-codex-turn-state"],
+                "synthetic-original-token"
+            );
+            assert_eq!(
                 store
                     .contexts
                     .turn_token(second.operation.as_ref().unwrap())
-                    .is_none()
+                    .as_deref(),
+                Some("synthetic-original-token")
             );
             store
                 .contexts
@@ -143,6 +147,13 @@ async fn anonymous_http_overlaps_fork_without_merging_content_or_routing_tokens(
                 store
                     .contexts
                     .turn_token(first.operation.as_ref().unwrap())
+                    .as_deref(),
+                Some("synthetic-original-token")
+            );
+            assert_eq!(
+                store
+                    .contexts
+                    .turn_token(second.operation.as_ref().unwrap())
                     .as_deref(),
                 Some("synthetic-original-token")
             );

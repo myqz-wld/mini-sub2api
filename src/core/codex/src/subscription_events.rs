@@ -319,6 +319,16 @@ impl ContextStore {
             active.record.identity.window_number = compaction.target_window;
         }
         active.record.completed = true;
+        active.record.emitted_aliases = output
+            .iter()
+            .flat_map(|item| {
+                ["id", "call_id"].into_iter().filter_map(move |field| {
+                    item.get(field)
+                        .and_then(Value::as_str)
+                        .map(|id| (field.to_string(), id.to_string()))
+                })
+            })
+            .collect();
         active.record.last_used = Instant::now();
         let session = active.record.identity.session_id.clone();
         let replaces_history = active.record.identity.request_kind == "compaction"
@@ -402,6 +412,12 @@ impl ContextStore {
         }
         if let Some(session) = scope.sessions.get_mut(&session) {
             session.last_business = Instant::now();
+        }
+        if let Some((_, seen)) = scope
+            .thread_activity
+            .get_mut(&active.record.identity.thread_id)
+        {
+            *seen = Instant::now();
         }
         let scope_key = active.scope.clone();
         scope.records.insert(id.clone(), active.record);

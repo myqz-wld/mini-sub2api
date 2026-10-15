@@ -312,6 +312,9 @@ mod deferred_oauth_tests;
 #[path = "responses_websocket_policy_tests.rs"]
 mod policy_tests;
 
+#[path = "responses_websocket_cadence_tests.rs"]
+mod cadence_tests;
+
 #[path = "responses_websocket_size_tests.rs"]
 mod size_tests;
 

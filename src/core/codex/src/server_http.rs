@@ -238,8 +238,8 @@ pub(super) async fn responses_inner(
             state
                 .vault
                 .request_state()
-                .contexts
-                .learn_turn(operation, token)
+                .learn_turn_state(&state_namespace, operation, token)
+                .await
                 .map_err(|_| CoreFailure::StateUnavailable)?;
         }
         let response_state = profile.uses_identity_state().then(|| {

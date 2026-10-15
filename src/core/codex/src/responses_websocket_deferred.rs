@@ -156,11 +156,23 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         }
     };
     let mut handshake_headers = upstream_headers.clone();
-    let hidden = match continuation.plan_hidden_setup_with_synthesized_ids(
-        &value,
-        prewarm_mode(&value),
-        &synthesized_item_ids,
-    ) {
+    let hidden_plan = if operation.as_ref().is_none_or(|operation| {
+        context
+            .state
+            .vault
+            .request_state()
+            .contexts
+            .allow_hidden_prewarm(operation)
+    }) {
+        continuation.plan_hidden_setup_with_synthesized_ids(
+            &value,
+            prewarm_mode(&value),
+            &synthesized_item_ids,
+        )
+    } else {
+        None
+    };
+    let hidden = match hidden_plan {
         Some(mut hidden) => {
             let prepared = hidden.frame.as_object_mut().is_some_and(|frame| {
                 apply_synthetic_prewarm(frame, &mut handshake_headers).is_ok()
@@ -313,8 +325,8 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
                 .state
                 .vault
                 .request_state()
-                .contexts
-                .learn_turn(operation, token)
+                .learn_turn_state(&context.state_namespace, operation, token)
+                .await
                 .is_err()
             {
                 let _ = internal.send(internal_close(1011)).await;
@@ -384,8 +396,8 @@ pub(crate) async fn run(mut internal: WebSocket, mut context: DeferredCodexConte
         .state
         .vault
         .request_state()
-        .contexts
-        .learn_turn(operation, token)
+        .learn_turn_state(&context.state_namespace, operation, token)
+        .await
         .is_err()
     {
         let _ = internal.send(internal_close(1011)).await;

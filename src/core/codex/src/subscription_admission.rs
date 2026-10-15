@@ -13,14 +13,39 @@ impl ContextStore {
         let now = Instant::now();
         inner.expire(now);
         let session = &identity.session_id;
+        let allow_hidden_prewarm = inner
+            .scopes
+            .get(&plan.scope)
+            .is_none_or(|scope| !scope.thread_activity.contains_key(&identity.thread_id));
         let (branch, lane) = inner.execution_branch(&plan, identity)?;
+        let source_branch = plan.branch.as_deref().unwrap_or(&identity.thread_id);
+        let pending_routing = (branch != source_branch)
+            .then(|| {
+                let turn = identity
+                    .turn_id
+                    .as_deref()
+                    .filter(|turn| !turn.is_empty())?;
+                let token = inner
+                    .scopes
+                    .get(&plan.scope)?
+                    .routing
+                    .get(&format!("{source_branch}:{turn}"))?
+                    .clone();
+                Some((format!("{branch}:{turn}"), token))
+            })
+            .flatten();
+        let routing_charge = pending_routing
+            .as_ref()
+            .map_or(0, |(key, token)| 1024 + key.len() + token.len());
         let reserved = inner
             .reservations
             .remove(&plan.admission.0.id)
             .ok_or(Error::StateUnavailable)?
             .reserved
             .saturating_add(plan.input_metadata_charge)
-            .saturating_add(lineage.cost);
+            .saturating_add(lineage.cost)
+            .saturating_add(1024 + identity.thread_id.len() + session.len())
+            .saturating_add(routing_charge);
         if !inner.make_room(&self.limits, &plan.scope, session, reserved) {
             return Err(Error::StateUnavailable);
         }
@@ -95,6 +120,7 @@ impl ContextStore {
         let record = Record {
             identity: identity.clone(),
             branch,
+            emitted_aliases: Default::default(),
             caller_format: plan.caller_format,
             upstream_format,
             setup_hash,
@@ -118,6 +144,8 @@ impl ContextStore {
                 scope: plan.scope,
                 record,
                 publication: Some(publication),
+                pending_routing,
+                allow_hidden_prewarm,
                 lane,
                 reserved,
                 output: BTreeMap::new(),
@@ -146,6 +174,7 @@ impl ContextStore {
         let Some(publication) = active.publication.take() else {
             return Ok(());
         };
+        let pending_routing = active.pending_routing.take();
         let (key, identity, socket, branch) = (
             active.scope.clone(),
             active.record.identity.clone(),
@@ -173,7 +202,27 @@ impl ContextStore {
             return Err(Error::StateUnavailable);
         }
         let now = Instant::now();
+        inner
+            .operations
+            .get_mut(&operation.0.id)
+            .expect("active admission")
+            .reserved -= 1024 + identity.thread_id.len() + session.len();
+        if let Some((key, token)) = &pending_routing {
+            inner
+                .operations
+                .get_mut(&operation.0.id)
+                .expect("active admission")
+                .reserved -= 1024 + key.len() + token.len();
+        }
         let scope = inner.scopes.entry(key).or_default();
+        if let Some((key, token)) = pending_routing {
+            scope.routing.entry(key).or_insert(token);
+        }
+        if identity.request_kind != "prewarm" {
+            scope
+                .thread_activity
+                .insert(identity.thread_id.clone(), (session.clone(), now));
+        }
         let explicit = publication.raw_session.is_some();
         for raw in [
             publication.raw_session,
