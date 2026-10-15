@@ -16,6 +16,9 @@ use serde_json::{Value, json};
 #[path = "subscription_content_id_tests.rs"]
 mod content_id_tests;
 
+#[path = "subscription_conflict_tests.rs"]
+mod conflict_tests;
+
 #[path = "subscription_repair_tests.rs"]
 mod repair_tests;
 
@@ -174,16 +177,17 @@ async fn publish(
 }
 
 #[tokio::test]
-async fn active_turn_is_exclusive_and_abandoned_admission_releases_capacity() {
+async fn active_websocket_turn_is_exclusive_and_abandoned_admission_releases_capacity() {
+    use conflict_tests::prepare_websocket;
     let (_temp, store) = store();
     let mut body = request(json!([input("hello")]));
     body["client_metadata"] = json!({"session_id":"session","turn_id":"turn"});
-    let first = prepare(&store, body.clone()).await.unwrap();
+    let first = prepare_websocket(&store, body.clone()).await.unwrap();
     let ledger = std::fs::read(store.state_path_for_test(NAMESPACE)).unwrap();
     let mut conflicting = body.clone();
     conflicting["input"] = json!([input("different while busy")]);
     assert!(matches!(
-        prepare(&store, conflicting).await,
+        prepare_websocket(&store, conflicting).await,
         Err(StatefulPrepareError::StateUnavailable)
     ));
     assert!(
@@ -194,7 +198,7 @@ async fn active_turn_is_exclusive_and_abandoned_admission_releases_capacity() {
     assert_eq!(store.contexts.inner.lock().unwrap().operations.len(), 1);
     drop(first);
     assert!(store.contexts.inner.lock().unwrap().operations.is_empty());
-    assert!(prepare(&store, body).await.is_ok());
+    assert!(prepare_websocket(&store, body).await.is_ok());
 }
 
 #[tokio::test]

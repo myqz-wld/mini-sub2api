@@ -362,6 +362,9 @@ impl ContextStore {
 #[path = "subscription_admission.rs"]
 mod admission;
 
+#[path = "subscription_conflict.rs"]
+mod conflict;
+
 fn local_dependencies(record: &Record) -> Dependencies {
     let mut dependencies = record.dependencies.clone();
     // A content-matched caller may omit non-reference IDs; the verified saved items still supply

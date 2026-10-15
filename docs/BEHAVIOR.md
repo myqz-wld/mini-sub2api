@@ -93,7 +93,7 @@ Each branch/turn and physical WS permits one inference. Equivalent contexts may 
 content, never execution owners/tool consumption. Current-thread, ancestor or declared-fork history
 still requires the same session, including remote-only continuation.
 
-Retain the first upstream turn token across same-turn retries/reconnects. HTTP learns it from
+Within each branch, retain the first upstream turn token across same-turn retries/reconnects. HTTP learns it from
 response headers and replays it only in headers; ordinary WS learns `response.metadata` tokens,
 ignores the upgrade handshake token, and
 carries the selected token in `response.create` metadata, preserving a native carrier's key order.
@@ -114,6 +114,26 @@ History-bearing `generate:false` prewarm keeps an empty request turn and preserv
 historical item's scoped turn. It neither creates an active turn from history nor rewrites
 historical provenance as startup metadata. The next valid same-socket request can reference
 the completed prewarm; reconnect/full-context and unrelated-thread checks still apply.
+
+## Request concurrency
+
+After existing identity, history, reference and dependency validation, an occupied execution lane
+causes the new Subscription request to receive an independent branch in the same account/Key,
+session, thread and logical turn. Branch selection and insertion share the admission mutex;
+each lane still has only one active operation. Idle lanes keep their existing branch.
+
+This is the default, with no feature switch. It applies to anonymous and explicit contexts,
+previous-response continuations, and valid Guardian, memory, compaction and prewarm requests.
+HTTP requests and independent WebSocket connections may branch. A second active `response.create`
+on the same physical WebSocket remains rejected; this does not add socket multiplexing.
+API-key credential passthrough keeps its existing behavior.
+
+Even identical request bodies remain independent calls. Forking does not wait for, replay,
+deduplicate, retry or cancel another request. The client owns retries and cancellation. Each
+branch retains its own response history and routing token; a new branch does not inherit the
+busy branch's token. Compaction keeps the existing window commit rules and each response's own
+checkpoint; prewarm routing transfers only on its owning socket. Existing resource budgets,
+alias ownership, invalid-reference rejection and cancellation cleanup still apply.
 
 ## Instructions and Lite
 

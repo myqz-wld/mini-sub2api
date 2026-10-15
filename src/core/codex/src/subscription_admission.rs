@@ -13,27 +13,7 @@ impl ContextStore {
         let now = Instant::now();
         inner.expire(now);
         let session = &identity.session_id;
-        let branch = plan
-            .branch
-            .clone()
-            .unwrap_or_else(|| identity.thread_id.clone());
-        let lane = format!(
-            "{}:{}:{}:{}",
-            session,
-            identity.thread_id,
-            identity.turn_id.as_deref().unwrap_or(""),
-            branch
-        );
-        if inner.operations.values().any(|operation| {
-            operation.scope == plan.scope
-                && (operation.lane == lane
-                    || plan
-                        .socket
-                        .as_ref()
-                        .is_some_and(|socket| operation.record.socket.as_ref() == Some(socket)))
-        }) {
-            return Err(Error::StateUnavailable);
-        }
+        let (branch, lane) = inner.execution_branch(&plan, identity)?;
         let reserved = inner
             .reservations
             .remove(&plan.admission.0.id)
